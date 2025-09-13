@@ -22,7 +22,6 @@
 *.sim/
 *.runs/
 *.gen/
-*.srcs/
 *.xgui/
 *.vivado/
 
