@@ -1,0 +1,60 @@
+# Vivado project files
+*.xpr
+*.xpr~
+*.jou
+*.log
+*.str
+*.backup
+*.webtalk
+*.xml
+*.html
+*.db
+*.pb
+*.wcfg
+*.wdb
+*.lock
+*.tmp
+
+# Vivado-generated directories
+*.cache/
+*.hw/
+*.ip_user_files/
+*.sim/
+*.runs/
+*.gen/
+*.srcs/
+*.xgui/
+*.vivado/
+
+# Vivado IP and block design files
+*.bd
+*.bd.bak
+*.bd.tcl
+*.xci
+*.xsa
+*.xsc
+*.xdc~  # backup constraint files
+
+# Simulation output
+*.vcd
+*.vvp
+*.fst
+*.saif
+
+# Misc
+*.bak
+*.orig
+*.swp
+*~
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Optional: ignore bitstreams and programming files
+*.bit
+*.bin
+*.mcs
+*.elf
+*.mem
+*.coe
