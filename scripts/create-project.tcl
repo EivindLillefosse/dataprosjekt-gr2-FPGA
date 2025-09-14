@@ -20,5 +20,11 @@ foreach xdc_file [glob -nocomplain "$constraints_dir/*.xdc"] {
     add_files -fileset constrs_1 $xdc_file
 }
 
+# Add testbench files from tb directory
+set tb_dir "./tb"
+foreach tb_file [glob -nocomplain "$tb_dir/*.vhd"] {
+    add_files -fileset sim_1 $tb_file
+}
+
 # Set top module (replace with your actual top-level entity name)
 set_property top top [current_fileset]

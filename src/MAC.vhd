@@ -1,0 +1,100 @@
+----------------------------------------------------------------------------------
+-- Company: NTNU
+-- Engineer: Eivind Lillefosse
+-- 
+-- Create Date: 14.09.2025 15:20:31
+-- Design Name: Multiplier
+-- Module Name: top - Behavioral
+-- Project Name: CNN Accelerator
+-- Target Devices: Xilinx FPGA
+-- Tool Versions: 
+-- Description: 
+-- 
+-- Dependencies: 
+-- 
+-- Revision:
+-- Revision 0.01 - File Created
+-- Additional Comments:
+-- 
+----------------------------------------------------------------------------------
+
+
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+
+Library UNISIM;
+use UNISIM.vcomponents.all;
+
+Library UNIMACRO;
+use UNIMACRO.vcomponents.all;
+
+-- Uncomment the following library declaration if using
+-- arithmetic functions with Signed or Unsigned values
+--use IEEE.NUMERIC_STD.ALL;
+
+-- Uncomment the following library declaration if instantiating
+-- any Xilinx leaf cells in this code.
+--library UNISIM;
+--use UNISIM.VComponents.all;
+
+entity MAC is
+   generic (
+      WIDTH_A : integer := 8;
+      WIDTH_B : integer := 8;
+      WIDTH_P : integer := 16
+   );
+   Port (
+       clk     : in  STD_LOGIC;
+       rst     : in  STD_LOGIC;
+       pixels  : in  STD_LOGIC_VECTOR (WIDTH_A-1 downto 0);
+       weights : in  STD_LOGIC_VECTOR (WIDTH_B-1 downto 0);
+       valid  : in  STD_LOGIC;
+       result  : out STD_LOGIC_VECTOR (WIDTH_P-1 downto 0)
+   );
+
+end MAC;
+
+architecture Behavioral of MAC is
+   signal macc_p : std_logic_vector(WIDTH_P-1 downto 0);
+   signal addsb, carryin, ce : std_logic := '0';
+   signal load_data : std_logic_vector(WIDTH_P-1 downto 0) := (others => '0');   
+   signal valid_d : std_logic := '0';
+   -- MACC_MACRO: Multiple Accumulate Function implemented in a DSP48E
+   --             Artix-7
+   -- Xilinx HDL Language Template, version 2024.1
+begin
+   addsb <= '1';
+
+   process(clk)
+   begin
+      if rising_edge(clk) then
+         valid_d <= valid;
+      end if;
+   end process;
+
+   ce <= valid or valid_d;
+
+   MACC_MACRO_inst : MACC_MACRO
+   generic map (
+      DEVICE => "7SERIES",  -- Target Device: "VIRTEX5", "7SERIES", "SPARTAN6" 
+      LATENCY => 1,         -- Desired clock cycle latency, 1-4
+      WIDTH_A => WIDTH_A,        -- Multiplier A-input bus width, 1-25
+      WIDTH_B => WIDTH_B,        -- Multiplier B-input bus width, 1-18     
+      WIDTH_P => WIDTH_P)        -- Accumulator output bus width, 1-48
+   port map (
+      P => macc_p,     -- MACC ouput bus, width determined by WIDTH_P generic 
+      A => pixels,     -- MACC input A bus, width determined by WIDTH_A generic 
+      ADDSUB => addsb, -- 1-bit add/sub input, high selects add, low selects subtract
+      B => weights,           -- MACC input B bus, width determined by WIDTH_B generic 
+      CARRYIN => carryin, -- 1-bit carry-in input to accumulator
+      CE => ce,      -- 1-bit active high input clock enable
+      CLK => clk,    -- 1-bit positive edge clock input
+      LOAD => valid, -- 1-bit active high input load accumulator enable
+      LOAD_DATA => load_data, -- Load accumulator input data, 
+                              -- width determined by WIDTH_P generic
+      RST => rst    -- 1-bit input active high reset
+   );
+   result <= macc_p;
+   load_data <= macc_p;
+
+end Behavioral;

@@ -24,6 +24,8 @@
 *.gen/
 *.xgui/
 *.vivado/
+*.srcs/
+*.Xil/
 
 # Vivado IP and block design files
 *.bd
