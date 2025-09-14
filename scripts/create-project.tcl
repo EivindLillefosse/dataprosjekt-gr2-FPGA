@@ -3,7 +3,7 @@ set project_name "CNN"
 set project_dir "./vivado_project"
 
 # Create the project
-create_project $project_name $project_dir -part xc7z020clg400-1 -force
+create_project $project_name $project_dir -part XC7A35TICSG324-1L -force
 
 # Start GUI
 start_gui
