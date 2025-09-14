@@ -15,22 +15,6 @@ architecture Behavioral of test_MAC_tb is
 
     constant clk_period : time := 10 ns;
 
-    component MAC is
-    generic (
-        WIDTH_A : integer := 8;
-        WIDTH_B : integer := 8;
-        WIDTH_P : integer := 16
-    );
-    Port (
-         clk     : in  STD_LOGIC;
-         rst     : in  STD_LOGIC;
-         pixels  : in  STD_LOGIC_VECTOR (WIDTH_A-1 downto 0);
-         weights : in  STD_LOGIC_VECTOR (WIDTH_B-1 downto 0);
-         valid  : in  STD_LOGIC;
-         result  : out STD_LOGIC_VECTOR (WIDTH_P-1 downto 0)
-    );
-    end component;
-
     -- Test vectors
     type int_array is array (0 to 8) of integer;
     constant pixel_vec  : int_array := (1, 2, 3, 4, 5, 6, 7, 8, 9);
@@ -39,15 +23,20 @@ architecture Behavioral of test_MAC_tb is
     -- For checking result
     signal expected_result : integer := 0;
 begin
-    DUT: MAC
-    port map (
-         clk     => clk,
-         rst     => rst,
-         pixels  => pixels,
-         weights => weights,
-         valid  => valid,
-         result  => result
-    );
+    DUT: entity work.MAC
+        generic map (
+            width_a => 8,
+            width_b => 8,
+            width_p => 16
+        )
+        port map (
+            clk     => clk,
+            rst     => rst,
+            pixels  => pixels,
+            weights => weights,
+            valid   => valid,
+            result  => result
+        );
 
     clk <= not clk after clk_period / 2;
 

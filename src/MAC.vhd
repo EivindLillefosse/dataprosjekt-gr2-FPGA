@@ -39,25 +39,25 @@ use UNIMACRO.vcomponents.all;
 
 entity MAC is
    generic (
-      WIDTH_A : integer := 8;
-      WIDTH_B : integer := 8;
-      WIDTH_P : integer := 16
+      width_a : integer := 8;
+      width_b : integer := 8;
+      width_p : integer := 16
    );
    Port (
        clk     : in  STD_LOGIC;
        rst     : in  STD_LOGIC;
-       pixels  : in  STD_LOGIC_VECTOR (WIDTH_A-1 downto 0);
-       weights : in  STD_LOGIC_VECTOR (WIDTH_B-1 downto 0);
+       pixels  : in  STD_LOGIC_VECTOR (width_a-1 downto 0);
+       weights : in  STD_LOGIC_VECTOR (width_b-1 downto 0);
        valid  : in  STD_LOGIC;
-       result  : out STD_LOGIC_VECTOR (WIDTH_P-1 downto 0)
+       result  : out STD_LOGIC_VECTOR (width_p-1 downto 0)
    );
 
 end MAC;
 
 architecture Behavioral of MAC is
-   signal macc_p : std_logic_vector(WIDTH_P-1 downto 0);
+   signal macc_p : std_logic_vector(width_p-1 downto 0);
    signal addsb, carryin, ce : std_logic := '0';
-   signal load_data : std_logic_vector(WIDTH_P-1 downto 0) := (others => '0');   
+   signal load_data : std_logic_vector(width_p-1 downto 0) := (others => '0');   
    signal valid_d : std_logic := '0';
    -- MACC_MACRO: Multiple Accumulate Function implemented in a DSP48E
    --             Artix-7
@@ -78,9 +78,9 @@ begin
    generic map (
       DEVICE => "7SERIES",  -- Target Device: "VIRTEX5", "7SERIES", "SPARTAN6" 
       LATENCY => 1,         -- Desired clock cycle latency, 1-4
-      WIDTH_A => WIDTH_A,        -- Multiplier A-input bus width, 1-25
-      WIDTH_B => WIDTH_B,        -- Multiplier B-input bus width, 1-18     
-      WIDTH_P => WIDTH_P)        -- Accumulator output bus width, 1-48
+      WIDTH_A => width_a,        -- Multiplier A-input bus width, 1-25
+      WIDTH_B => width_b,        -- Multiplier B-input bus width, 1-18     
+      WIDTH_P => width_p)        -- Accumulator output bus width, 1-48
    port map (
       P => macc_p,     -- MACC ouput bus, width determined by WIDTH_P generic 
       A => pixels,     -- MACC input A bus, width determined by WIDTH_A generic 
