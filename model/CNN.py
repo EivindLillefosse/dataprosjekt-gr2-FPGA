@@ -148,9 +148,183 @@ import os
 model.export("saved_model")
 print("Model exported as SavedModel.")
 
+# ========== QUANTIZATION SECTION ==========
+print("\n=== Applying Post-Training Quantization ===")
+
+# Method 1: Post-Training Quantization (PTQ) - Simple approach
+converter = tf.lite.TFLiteConverter.from_saved_model("saved_model")
+converter.optimizations = [tf.lite.Optimize.DEFAULT]
+
+# For FPGA: Use integer-only quantization
+converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+converter.inference_input_type = tf.int8
+converter.inference_output_type = tf.int8
+
+# Representative dataset for calibration
+def representative_dataset():
+    for i in range(100):  # Use 100 samples for calibration
+        yield [x[i:i+1].astype(np.float32)]
+
+converter.representative_dataset = representative_dataset
+quantized_model = converter.convert()
+
+# Save quantized model
+with open('quantized_model.tflite', 'wb') as f:
+    f.write(quantized_model)
+
+print("✓ Post-training quantized model saved as 'quantized_model.tflite'")
+
+# Test quantized model accuracy
+interpreter = tf.lite.Interpreter(model_content=quantized_model)
+interpreter.allocate_tensors()
+
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+print(f"Quantized model input type: {input_details[0]['dtype']}")
+print(f"Quantized model output type: {output_details[0]['dtype']}")
+
+# Test on a few samples
+correct_predictions = 0
+test_samples = 50
+
+for i in range(test_samples):
+    # Convert input to int8 properly (range -128 to 127)
+    test_input = (x_test[i:i+1] * 255).astype(np.float32)  # Scale to 0-255
+    test_input = np.clip(test_input - 128, -128, 127).astype(np.int8)  # Shift and clip to int8 range
+    interpreter.set_tensor(input_details[0]['index'], test_input)
+    interpreter.invoke()
+    
+    quantized_output = interpreter.get_tensor(output_details[0]['index'])
+    predicted_class_quantized = np.argmax(quantized_output)
+    
+    if predicted_class_quantized == true_classes[i]:
+        correct_predictions += 1
+
+quantized_accuracy = correct_predictions / test_samples
+print(f"Quantized model accuracy on {test_samples} samples: {quantized_accuracy:.3f} ({quantized_accuracy*100:.1f}%)")
+
+# ========== QUANTIZATION-AWARE TRAINING (QAT) - Better accuracy ==========
+print("\n=== Quantization-Aware Training (QAT) ===")
+
+try:
+    import tensorflow_model_optimization as tfmot
+    
+    # Apply quantization-aware training
+    quantize_model = tfmot.quantization.keras.quantize_model
+    q_aware_model = quantize_model(model)
+    
+    # Compile QAT model
+    q_aware_model.compile(optimizer='adam',
+                         loss='categorical_crossentropy',
+                         metrics=['accuracy'])
+    
+    print("✓ QAT model created")
+    
+    # Fine-tune with quantization simulation (use smaller subset for speed)
+    subset_size = 1000
+    x_subset = x[:subset_size]
+    y_subset = y[:subset_size]
+    
+    print("Fine-tuning with quantization simulation...")
+    q_aware_model.fit(x_subset, y_subset, epochs=2, batch_size=128, verbose=1)
+    
+    # Convert QAT model to quantized TFLite
+    converter_qat = tf.lite.TFLiteConverter.from_keras_model(q_aware_model)
+    converter_qat.optimizations = [tf.lite.Optimize.DEFAULT]
+    quantized_qat_model = converter_qat.convert()
+    
+    # Save QAT quantized model
+    with open('quantized_qat_model.tflite', 'wb') as f:
+        f.write(quantized_qat_model)
+    
+    print("✓ QAT quantized model saved as 'quantized_qat_model.tflite'")
+    
+except ImportError:
+    print("❌ tensorflow_model_optimization not available due to installation issues.")
+    print("🔧 Using alternative quantization approach...")
+    
+    # Alternative: Manual quantization simulation
+    print("Applying manual quantization simulation...")
+    
+    # Create a copy of the model for manual quantization
+    import copy
+    manual_quant_model = tf.keras.models.clone_model(model)
+    manual_quant_model.set_weights(model.get_weights())
+    
+    # Simulate quantization by adding noise to weights
+    quantized_weights = []
+    for layer_weights in manual_quant_model.get_weights():
+        # Simulate 8-bit quantization noise
+        weight_max = np.max(np.abs(layer_weights))
+        scale = weight_max / 127  # 8-bit signed range
+        quantized = np.round(layer_weights / scale) * scale
+        quantized_weights.append(quantized)
+    
+    manual_quant_model.set_weights(quantized_weights)
+    
+    # Test manual quantized model
+    manual_predictions = manual_quant_model.predict(x_test[:50])
+    manual_accuracy = np.mean(np.argmax(manual_predictions, axis=1) == true_classes[:50])
+    print(f"✓ Manual quantization simulation accuracy: {manual_accuracy:.3f}")
+    
+    # Convert manual quantized model
+    converter_manual = tf.lite.TFLiteConverter.from_keras_model(manual_quant_model)
+    converter_manual.optimizations = [tf.lite.Optimize.DEFAULT]
+    quantized_manual_model = converter_manual.convert()
+    
+    with open('quantized_manual_model.tflite', 'wb') as f:
+        f.write(quantized_manual_model)
+    
+    print("✓ Manual quantized model saved as 'quantized_manual_model.tflite'")
+
+# ========== FPGA-FRIENDLY WEIGHT EXTRACTION ==========
+print("\n=== FPGA Weight Extraction ===")
+
+# Extract quantized weights for FPGA implementation
+if 'quantized_model' in locals():
+    # Get quantized model details
+    interpreter = tf.lite.Interpreter(model_content=quantized_model)
+    interpreter.allocate_tensors()
+    
+    # Extract weights from quantized model
+    tensor_details = interpreter.get_tensor_details()
+    
+    print("Quantized model layers and weights:")
+    weights_info = []
+    
+    for detail in tensor_details:
+        if detail['name'].endswith('weights') or 'kernel' in detail['name'].lower():
+            tensor = interpreter.get_tensor(detail['index'])
+            weights_info.append({
+                'name': detail['name'],
+                'shape': tensor.shape,
+                'dtype': tensor.dtype,
+                'quantization': detail['quantization_parameters']
+            })
+            print(f"- {detail['name']}: shape={tensor.shape}, dtype={tensor.dtype}")
+            
+            # Save weights as binary file for FPGA
+            filename = f"weights_{detail['name'].replace('/', '_')}.bin"
+            tensor.tofile(filename)
+            print(f"  → Saved to {filename}")
+
+print("\n=== Summary ===")
+print("Generated files for FPGA implementation:")
+print("- quantized_model.tflite (8-bit post-training quantized)")
+if 'quantized_qat_model' in locals():
+    print("- quantized_qat_model.tflite (QAT quantized model)")
+elif 'quantized_manual_model' in locals():
+    print("- quantized_manual_model.tflite (manual quantized model)")
+print("- weights_*.bin (individual weight files)")
+print("- All weights are quantized to 8-bit integers")
+print("- Ready for FPGA implementation with 8-bit arithmetic")
+print("\n💡 Note: Post-training quantization works well for most FPGA applications!")
+print("   The PTQ model should provide good accuracy for your CNN inference.")
+
 # Convert SavedModel to ONNX using command line interface
 try:
-    python_path = "/home/eivind/Skule/CNN/venv/bin/python"
+    python_path = "C:/Users/eivin/AppData/Local/Microsoft/WindowsApps/python3.13.exe"
     result = subprocess.run([
         python_path, "-m", "tf2onnx.convert", 
         "--saved-model", "saved_model", 
@@ -163,3 +337,6 @@ except subprocess.CalledProcessError as e:
     print(f"Error output: {e.stderr}")
     print("To convert manually, run:")
     print("python -m tf2onnx.convert --saved-model saved_model --output quickdraw_model.onnx")
+except FileNotFoundError:
+    print("tf2onnx not installed. Install with: pip install tf2onnx")
+    print("ONNX conversion skipped - TFLite models are sufficient for FPGA!")

@@ -46,6 +46,8 @@
 *.bak
 *.orig
 *.swp
+.vscode
+*.npy
 *~
 
 # OS-specific
