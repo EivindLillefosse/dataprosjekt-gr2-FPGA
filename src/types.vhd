@@ -17,6 +17,6 @@ package types_pkg is
     type LINE_BUFFER is array (0 to KERNEL_SIZE_1-2) of WORD;
     
     -- Unconstrained array type
-    type OUTPUT_ARRAY is array (natural range <>, natural range <>) of WORD;
+    type OUTPUT_ARRAY is array (natural range <>, natural range <>,natural range <>) of WORD;
 
 end package types_pkg;
