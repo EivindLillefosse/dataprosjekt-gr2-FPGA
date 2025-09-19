@@ -3,6 +3,9 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 
 entity spi_slave_mode0 is
+    generic (
+        DATA_LENGTH : integer := 8
+    );
     port (
         clk      : in  std_logic;  -- FPGA system clock
         rst_n    : in  std_logic;  -- Active low reset
@@ -10,10 +13,10 @@ entity spi_slave_mode0 is
         mosi     : in  std_logic;  -- Master Out Slave In
         miso     : out std_logic;  -- Master In Slave Out
         ss_n     : in  std_logic;  -- Slave Select (active low)
-        data_in  : in  std_logic_vector(7 downto 0); -- Data to send
-        data_out : out std_logic_vector(7 downto 0); -- Data received
-        data_valid : out std_logic;                  -- Pulses high for 1 clk after 8 bits
-        ack      : out std_logic                     -- Pulses high for 1 clk after 8 bits
+        data_in  : in  std_logic_vector(DATA_LENGTH-1 downto 0); -- Data to send
+        data_out : out std_logic_vector(DATA_LENGTH-1 downto 0); -- Data received
+        data_valid : out std_logic;                  -- Pulses high for 1 clk after DATA_LENGTH bits
+        ack      : out std_logic                     -- Pulses high for 1 clk after DATA_LENGTH bits
     );
 end spi_slave_mode0;
 
@@ -23,9 +26,9 @@ architecture Behavioral of spi_slave_mode0 is
     signal sclk_rising    : std_logic := '0';
     signal sclk_falling   : std_logic := '0';
     signal ss_active      : std_logic := '0';
-    signal bit_cnt        : integer range 0 to 7 := 0;
-    signal rx_shift       : std_logic_vector(7 downto 0) := (others => '0');
-    signal tx_shift       : std_logic_vector(7 downto 0) := (others => '0');
+    signal bit_cnt        : integer range 0 to DATA_LENGTH-1 := 0;
+    signal rx_shift       : std_logic_vector(DATA_LENGTH-1 downto 0) := (others => '0');
+    signal tx_shift       : std_logic_vector(DATA_LENGTH-1 downto 0) := (others => '0');
     signal miso_reg       : std_logic := '0';
     signal data_valid_i   : std_logic := '0';
     signal ack_i          : std_logic := '0';
@@ -71,9 +74,9 @@ begin
             else
                 -- SPI Mode 0: sample MOSI on SCLK rising, update MISO on SCLK falling
                 if sclk_rising = '1' then
-                    rx_shift <= rx_shift(6 downto 0) & mosi;
-                    if bit_cnt = 7 then
-                        data_out <= rx_shift(6 downto 0) & mosi;
+                    rx_shift <= rx_shift(DATA_LENGTH-2 downto 0) & mosi;
+                    if bit_cnt = DATA_LENGTH-1 then
+                        data_out <= rx_shift(DATA_LENGTH-2 downto 0) & mosi;
                         data_valid_i <= '1';
                         ack_i <= '1';
                         bit_cnt <= 0;
@@ -83,7 +86,7 @@ begin
                     end if;
                 end if;
                 if sclk_falling = '1' then
-                    miso_reg <= tx_shift(7 - bit_cnt);
+                    miso_reg <= tx_shift(DATA_LENGTH-1 - bit_cnt);
                 end if;
             end if;
         end if;
