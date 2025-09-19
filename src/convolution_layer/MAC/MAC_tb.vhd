@@ -8,7 +8,7 @@ end test_MAC_tb;
 architecture Behavioral of test_MAC_tb is
     signal clk     : std_logic := '0';
     signal rst     : std_logic := '0';
-    signal pixels  : std_logic_vector(7 downto 0) := (others => '0');
+    signal pixel_in  : std_logic_vector(7 downto 0) := (others => '0');
     signal weights : std_logic_vector(7 downto 0) := (others => '0');
     signal valid  : std_logic := '0';
     signal result  : std_logic_vector(15 downto 0);
@@ -17,7 +17,7 @@ architecture Behavioral of test_MAC_tb is
 
     -- Test vectors
     type int_array is array (0 to 8) of integer;
-    constant pixel_vec  : int_array := (1, 2, 3, 4, 5, 6, 7, 8, 9);
+    constant WORD_vec  : int_array := (1, 2, 3, 4, 5, 6, 7, 8, 9);
     constant weight_vec : int_array := (1, 0, -1, 1, 0, -1, 1, 0, -1);
 
     -- For checking result
@@ -32,7 +32,7 @@ begin
         port map (
             clk     => clk,
             rst     => rst,
-            pixels  => pixels,
+            pixel_in  => pixel_in,
             weights => weights,
             valid   => valid,
             result  => result
@@ -52,7 +52,7 @@ begin
 
         -- Apply 9 test vectors
         for i in 0 to 8 loop
-            pixels  <= std_logic_vector(to_signed(pixel_vec(i), 8));
+            pixel_in  <= std_logic_vector(to_signed(WORD_vec(i), 8));
             weights <= std_logic_vector(to_signed(weight_vec(i), 8));
             valid  <= '1';
             wait for clk_period;
@@ -60,7 +60,7 @@ begin
             wait for clk_period;
 
             -- Accumulate expected result
-            acc := acc + pixel_vec(i) * weight_vec(i);
+            acc := acc + WORD_vec(i) * weight_vec(i);
         end loop;
 
         wait for clk_period * 2;

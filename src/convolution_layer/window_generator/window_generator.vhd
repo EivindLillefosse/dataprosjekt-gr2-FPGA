@@ -29,7 +29,7 @@ entity window_gen is
         clk : in STD_LOGIC;
         rst : in STD_LOGIC;
         enable : in STD_LOGIC;
-        input_data : in PIXEL;
+        input_data : in WORD;
         output_data : out IMAGE_VECTOR;
         done : out STD_LOGIC
     );
@@ -48,7 +48,7 @@ begin
             done <= '0';
         elsif rising_edge(clk) then
             if enable = '1' then
-                -- Add new pixel to window
+                -- Add new WORD to window
                 if (row_ptr < KERNEL_SIZE) then
                     window(row_ptr, column_ptr) := input_data;
                     

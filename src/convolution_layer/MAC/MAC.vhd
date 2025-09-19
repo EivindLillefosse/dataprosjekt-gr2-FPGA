@@ -46,7 +46,7 @@ entity MAC is
    Port (
        clk     : in  STD_LOGIC;
        rst     : in  STD_LOGIC;
-       pixels  : in  STD_LOGIC_VECTOR (width_a-1 downto 0);
+       pixel_in  : in  STD_LOGIC_VECTOR (width_a-1 downto 0);
        weights : in  STD_LOGIC_VECTOR (width_b-1 downto 0);
        valid  : in  STD_LOGIC;
        result  : out STD_LOGIC_VECTOR (width_p-1 downto 0)
@@ -83,7 +83,7 @@ begin
       WIDTH_P => width_p)        -- Accumulator output bus width, 1-48
    port map (
       P => macc_p,     -- MACC ouput bus, width determined by WIDTH_P generic 
-      A => pixels,     -- MACC input A bus, width determined by WIDTH_A generic 
+      A => pixel_in,     -- MACC input A bus, width determined by WIDTH_A generic 
       ADDSUB => addsb, -- 1-bit add/sub input, high selects add, low selects subtract
       B => weights,           -- MACC input B bus, width determined by WIDTH_B generic 
       CARRYIN => carryin, -- 1-bit carry-in input to accumulator

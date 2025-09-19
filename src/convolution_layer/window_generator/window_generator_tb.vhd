@@ -11,16 +11,16 @@ architecture Behavioral of window_generator_tb is
     signal clk : std_logic := '0';
     signal rst : std_logic := '0';
     signal enable : std_logic := '0';
-    signal input_data : PIXEL := (others => '0');
+    signal input_data : WORD := (others => '0');
     signal output_data : IMAGE_VECTOR;
     signal done : std_logic;
 
     constant clk_period : time := 10 ns;
 
     -- Test data
-    type pixel_array is array (0 to 17) of integer;
-    constant test_pixels : pixel_array := (10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180);
-    signal pixel_index : integer := 0;
+    type WORD_array is array (0 to 17) of integer;
+    constant test_WORDs : WORD_array := (10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180);
+    signal WORD_index : integer := 0;
     signal expected_output : IMAGE_VECTOR := (others => (others => (others => '0')));
     signal expected_done : std_logic := '0';
     signal test_passed : boolean := true;
@@ -48,11 +48,11 @@ begin
         rst <= '0';
         wait for clk_period * 2;
 
-        -- Start feeding pixels
+        -- Start feeding WORDs
         enable <= '1';
         for i in 0 to 17 loop
-            input_data <= std_logic_vector(to_unsigned(test_pixels(i), 8));
-            pixel_index <= i;
+            input_data <= std_logic_vector(to_unsigned(test_WORDs(i), 8));
+            WORD_index <= i;
             wait for clk_period;
 
             -- Check output when done is high
@@ -61,14 +61,14 @@ begin
                 -- Construct expected output window
                 for r in 0 to KERNEL_SIZE-1 loop
                     for c in 0 to KERNEL_SIZE-1 loop
-                        expected_output(r, c) <= std_logic_vector(to_unsigned(test_pixels(i - (KERNEL_SIZE - 1 - r) * KERNEL_SIZE - (KERNEL_SIZE - 1 - c)), 8));
+                        expected_output(r, c) <= std_logic_vector(to_unsigned(test_WORDs(i - (KERNEL_SIZE - 1 - r) * KERNEL_SIZE - (KERNEL_SIZE - 1 - c)), 8));
                     end loop;
                 end loop;
 
                 -- Compare output_data with expected_output
                 if output_data /= expected_output then
                     test_passed <= false;
-                    report "Test failed at pixel index " & integer'image(i) severity error;
+                    report "Test failed at WORD index " & integer'image(i) severity error;
                 end if;
             else
                 expected_done <= '0';
