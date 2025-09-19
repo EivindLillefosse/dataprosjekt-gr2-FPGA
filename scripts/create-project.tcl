@@ -1,64 +1,92 @@
-# Set project name and directory
+# Create project with optional command-line parameters
+# Usage: vivado -mode batch -source create-project.tcl -tclargs [part_number] [top_module] [project_name]
+# Example: vivado -mode batch -source create-project.tcl -tclargs XC7A100TCSG324-1 my_top MyProject
+
+# Set default values
 set project_name "CNN"
 set project_dir "./vivado_project"
+set part_number "XC7A35TICSG324-1L"
+set top_module "top"
+
+# Override with command-line arguments if provided
+if {$argc > 0} {
+    set part_arg [lindex $argv 0]
+    if {$part_arg == "35"} {
+        set part_number "XC7A35TICSG324-1L"
+    } elseif {$part_arg == "100"} {
+        set part_number "XC7A100TCSG324-1"
+    } else {
+        set part_number $part_arg
+    }
+    puts "Using part number: $part_number"
+}
+if {$argc > 1} {
+    set top_module [lindex $argv 1]
+    puts "Using top module: $top_module"
+}
+if {$argc > 2} {
+    set project_name [lindex $argv 2]
+    puts "Using project name: $project_name"
+}
+
+# Parameters with defaults (for backward compatibility)
+if {![info exists part_number]} {
+    set part_number "XC7A35TICSG324-1L"
+}
+if {![info exists top_module]} {
+    set top_module "top"
+}
+
+# print out the final configuration
+puts "Final Configuration:"
+puts "Project Name: $project_name"
+puts "Project Directory: $project_dir"
+puts "Part Number: $part_number"
+puts "Top Module: $top_module"
 
 # Create the project
-create_project $project_name $project_dir -part XC7A35TICSG324-1L -force
+create_project $project_name $project_dir -part $part_number -force
 
 # Start GUI
 start_gui
 
-# Add VHDL source files from src directory (recursively)
-set src_dir "./src"
-# First add non-testbench files directly in src directory
-foreach file [glob -nocomplain "$src_dir/*.vhd"] {
-    if {![string match "*_tb.vhd" $file]} {
-        add_files $file
+# Recursive procedure to collect files matching a pattern
+proc get_files_recursive {dir pattern} {
+    set files [glob -nocomplain "$dir/$pattern"]
+    foreach subdir [glob -nocomplain -type d "$dir/*"] {
+        set files [concat $files [get_files_recursive $subdir $pattern]]
     }
+    return $files
 }
-# Then add non-testbench files in subdirectories (level 1)
-foreach subdir [glob -nocomplain -type d "$src_dir/*"] {
-    foreach file [glob -nocomplain "$subdir/*.vhd"] {
+
+# Add VHDL source files (excluding *_tb.vhd)
+set src_dir "./src"
+if {[file isdirectory $src_dir]} {
+    foreach file [get_files_recursive $src_dir "*.vhd"] {
         if {![string match "*_tb.vhd" $file]} {
+            puts "Adding source: $file"
             add_files $file
         }
     }
-}
-# Then add non-testbench files in subdirectories (level 2)
-foreach subdir [glob -nocomplain -type d "$src_dir/*"] {
-    foreach subsubdir [glob -nocomplain -type d "$subdir/*"] {
-        foreach file [glob -nocomplain "$subsubdir/*.vhd"] {
-            if {![string match "*_tb.vhd" $file]} {
-                add_files $file
-            }
-        }
-    }
-}
-
-# Add testbench files from src directory to simulation fileset
-foreach file [glob -nocomplain "$src_dir/*_tb.vhd"] {
-    add_files -fileset sim_1 $file
-}
-# Add testbench files from subdirectories to simulation fileset (level 1)
-foreach subdir [glob -nocomplain -type d "$src_dir/*"] {
-    foreach file [glob -nocomplain "$subdir/*_tb.vhd"] {
+    # Add testbench files to simulation fileset
+    foreach file [get_files_recursive $src_dir "*_tb.vhd"] {
+        puts "Adding testbench: $file"
         add_files -fileset sim_1 $file
     }
-}
-# Add testbench files from subdirectories to simulation fileset (level 2)
-foreach subdir [glob -nocomplain -type d "$src_dir/*"] {
-    foreach subsubdir [glob -nocomplain -type d "$subdir/*"] {
-        foreach file [glob -nocomplain "$subsubdir/*_tb.vhd"] {
-            add_files -fileset sim_1 $file
-        }
-    }
+} else {
+    puts "Warning: Source directory '$src_dir' does not exist."
 }
 
 # Add constraint files from constraints directory
 set constraints_dir "./constraints"
-foreach xdc_file [glob -nocomplain "$constraints_dir/*.xdc"] {
-    add_files -fileset constrs_1 $xdc_file
+if {[file isdirectory $constraints_dir]} {
+    foreach xdc_file [glob -nocomplain "$constraints_dir/*.xdc"] {
+        puts "Adding constraint: $xdc_file"
+        add_files -fileset constrs_1 $xdc_file
+    }
+} else {
+    puts "Warning: Constraints directory '$constraints_dir' does not exist."
 }
 
-# Set top module (replace with your actual top-level entity name)
-set_property top top [current_fileset]
+# Set top module
+set_property top $top_module [current_fileset]
