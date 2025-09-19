@@ -13,10 +13,10 @@ package types_pkg is
     -- Type definitions
     subtype WORD is STD_LOGIC_VECTOR(7 downto 0);
 
-    type IMAGE_VECTOR is array (0 to KERNEL_SIZE_1-1, 0 to KERNEL_SIZE_1-1) of PIXEL;
-    type LINE_BUFFER is array (0 to KERNEL_SIZE_1-2) of PIXEL;
+    type IMAGE_VECTOR is array (0 to KERNEL_SIZE_1-1, 0 to KERNEL_SIZE_1-1) of WORD;
+    type LINE_BUFFER is array (0 to KERNEL_SIZE_1-2) of WORD;
     
     -- Unconstrained array type
-    type OUTPUT_ARRAY is array (natural range <>, natural range <>, natural range <>) of PIXEL;
+    type OUTPUT_ARRAY is array (natural range <>, natural range <>) of WORD;
 
 end package types_pkg;
