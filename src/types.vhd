@@ -7,10 +7,12 @@ package types_pkg is
     constant KERNEL_NUM_1 : integer := 8;
     constant STRIDE_1       : integer := 1;
     constant IMAGE_SIZE  : integer := 28;
+    constant WORD_SIZE  : integer := 8;
 
 
     -- Type definitions
-    subtype PIXEL is STD_LOGIC_VECTOR(7 downto 0);
+    subtype WORD is STD_LOGIC_VECTOR(7 downto 0);
+
     type IMAGE_VECTOR is array (0 to KERNEL_SIZE_1-1, 0 to KERNEL_SIZE_1-1) of PIXEL;
     type LINE_BUFFER is array (0 to KERNEL_SIZE_1-2) of PIXEL;
     
