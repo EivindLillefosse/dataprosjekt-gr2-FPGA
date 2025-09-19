@@ -15,12 +15,13 @@ architecture sim of spi_slave_mode0_tb is
     signal mosi     : std_logic := '0';
     signal miso     : std_logic;
     signal ss_n     : std_logic := '1';
-    signal data_in  : std_logic_vector(7 downto 0) := (others => '0');
-    signal data_out : std_logic_vector(7 downto 0);
+    constant DATA_LENGTH : integer := 8;
+    signal data_in  : std_logic_vector(DATA_LENGTH-1 downto 0) := (others => '0');
+    signal data_out : std_logic_vector(DATA_LENGTH-1 downto 0);
     signal data_valid : std_logic;
     signal ack     : std_logic;
 
-    type data_array is array (natural range <>) of std_logic_vector(7 downto 0);
+    type data_array is array (natural range <>) of std_logic_vector(DATA_LENGTH-1 downto 0);
     constant TX_DATA : data_array := (
         x"A5", x"5A", x"FF", x"00", x"3C"
     );
@@ -40,6 +41,9 @@ begin
 
     -- DUT instantiation
     dut: entity work.spi_slave_mode0
+        generic map (
+            DATA_LENGTH => DATA_LENGTH
+        )
         port map (
             clk      => clk,
             rst_n    => rst_n,
@@ -64,7 +68,7 @@ begin
         for i in TX_DATA'range loop
             data_in <= RX_DATA(i); -- what slave will send back
             ss_n <= '0';
-            for bit in 7 downto 0 loop
+            for bit in DATA_LENGTH-1 downto 0 loop
                 mosi <= TX_DATA(i)(bit);
                 wait for SPI_PERIOD/4;
                 sclk <= '1';

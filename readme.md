@@ -89,3 +89,23 @@ vivado -mode batch -source ./scripts/create-project.tcl -tclargs 100   # XC7A100
 Below is the high-level block diagram for the project:
 
 ![Block Diagram](model/Block-diagram.svg)
+
+## SPI Design Choices
+
+The SPI slave module in this project is designed for flexibility and reliability in FPGA-to-MCU communication. Key choices and features:
+
+- **SPI Mode 0 (CPOL=0, CPHA=0):**
+  - Data is sampled on the rising edge of SCLK and shifted out on the falling edge.
+  - SCLK idles low; slave select (SS_N) is active low.
+- **Generic Data Length:**
+  - The module uses a `DATA_LENGTH` generic, allowing you to set the SPI word size (default is 8 bits, but any length is supported).
+  - All internal logic and testbenches adapt automatically to the chosen data length.
+- **Synchronized SPI Signals:**
+  - All SPI signals are synchronized to the FPGA system clock for safe and robust operation.
+  - Edge detection is performed in the clock domain to avoid metastability.
+- **Acknowledge and Data Valid:**
+  - The module provides `ack` and `data_valid` outputs, which pulse high for one clock after each complete word transfer.
+- **Minimal, Portable Testbench:**
+  - The testbench is simple, parameterized, and sends/receives multiple words to verify correct operation for any data length.
+
+This approach ensures the SPI interface is both easy to use and adaptable to a wide range of applications and word sizes.
