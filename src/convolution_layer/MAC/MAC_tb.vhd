@@ -12,6 +12,7 @@ architecture Behavioral of test_MAC_tb is
     signal weights : std_logic_vector(7 downto 0) := (others => '0');
     signal valid  : std_logic := '0';
     signal result  : std_logic_vector(15 downto 0);
+    signal done    : std_logic;
 
     constant clk_period : time := 10 ns;
 
@@ -35,7 +36,8 @@ begin
             pixel_in  => pixel_in,
             weights => weights,
             valid   => valid,
-            result  => result
+            result  => result,
+            done    => done
         );
 
     clk <= not clk after clk_period / 2;

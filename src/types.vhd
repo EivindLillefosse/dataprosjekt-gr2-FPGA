@@ -18,5 +18,5 @@ package types_pkg is
     
     -- Unconstrained array type
     type OUTPUT_ARRAY is array (natural range <>, natural range <>) of WORD;
-
+    type OUTPUT_ARRAY_VECTOR is array (natural range <>, natural range <>, natural range <>) of WORD;
 end package types_pkg;

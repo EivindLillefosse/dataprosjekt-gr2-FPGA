@@ -49,7 +49,8 @@ entity MAC is
        pixel_in  : in  STD_LOGIC_VECTOR (width_a-1 downto 0);
        weights : in  STD_LOGIC_VECTOR (width_b-1 downto 0);
        valid  : in  STD_LOGIC;
-       result  : out STD_LOGIC_VECTOR (width_p-1 downto 0)
+       result  : out STD_LOGIC_VECTOR (width_p-1 downto 0);
+       done    : out STD_LOGIC  -- Added done signal
    );
 
 end MAC;
@@ -68,7 +69,19 @@ begin
    process(clk)
    begin
       if rising_edge(clk) then
-         valid_d <= valid;
+         if rst = '1' then
+            valid_d <= '0';
+            done <= '0';
+         else
+            valid_d <= valid;
+
+            -- Set done high one clock cycle after valid is asserted
+            if valid_d = '1' then
+               done <= '1';
+            else
+               done <= '0';
+            end if;
+         end if;
       end if;
    end process;
 
@@ -96,5 +109,8 @@ begin
    );
    result <= macc_p;
    load_data <= macc_p;
+
+   -- Signal done when valid_d is high
+   done <= valid_d;
 
 end Behavioral;
