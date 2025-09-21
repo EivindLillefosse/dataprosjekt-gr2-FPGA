@@ -44,43 +44,35 @@ entity MAC is
       width_p : integer := 16
    );
    Port (
-       clk     : in  STD_LOGIC;
-       rst     : in  STD_LOGIC;
-       pixel_in  : in  STD_LOGIC_VECTOR (width_a-1 downto 0);
-       weights : in  STD_LOGIC_VECTOR (width_b-1 downto 0);
-       valid  : in  STD_LOGIC;
-       result  : out STD_LOGIC_VECTOR (width_p-1 downto 0);
-       done    : out STD_LOGIC  -- Added done signal
+       clk      : in  STD_LOGIC;
+       rst      : in  STD_LOGIC;
+       pixel_in : in  STD_LOGIC_VECTOR (width_a-1 downto 0);
+       weights  : in  STD_LOGIC_VECTOR (width_b-1 downto 0);
+       valid    : in  STD_LOGIC;
+       result   : out STD_LOGIC_VECTOR (width_p-1 downto 0);
+       done     : out STD_LOGIC  -- Added done signal
    );
 
 end MAC;
 
 architecture Behavioral of MAC is
-   signal macc_p : std_logic_vector(width_p-1 downto 0);
+   signal macc_p             : std_logic_vector(width_p-1 downto 0);
    signal addsb, carryin, ce : std_logic := '0';
-   signal load_data : std_logic_vector(width_p-1 downto 0) := (others => '0');   
-   signal valid_d : std_logic := '0';
+   signal load_data          : std_logic_vector(width_p-1 downto 0) := (others => '0');   
+   signal valid_d            : std_logic := '0';
    -- MACC_MACRO: Multiple Accumulate Function implemented in a DSP48E
    --             Artix-7
    -- Xilinx HDL Language Template, version 2024.1
 begin
    addsb <= '1';
-
    process(clk)
    begin
       if rising_edge(clk) then
          if rst = '1' then
             valid_d <= '0';
-            done <= '0';
          else
             valid_d <= valid;
-
-            -- Set done high one clock cycle after valid is asserted
-            if valid_d = '1' then
-               done <= '1';
-            else
-               done <= '0';
-            end if;
+            done <= valid_d;
          end if;
       end if;
    end process;
@@ -95,22 +87,19 @@ begin
       WIDTH_B => width_b,        -- Multiplier B-input bus width, 1-18     
       WIDTH_P => width_p)        -- Accumulator output bus width, 1-48
    port map (
-      P => macc_p,     -- MACC ouput bus, width determined by WIDTH_P generic 
-      A => pixel_in,     -- MACC input A bus, width determined by WIDTH_A generic 
-      ADDSUB => addsb, -- 1-bit add/sub input, high selects add, low selects subtract
-      B => weights,           -- MACC input B bus, width determined by WIDTH_B generic 
-      CARRYIN => carryin, -- 1-bit carry-in input to accumulator
-      CE => ce,      -- 1-bit active high input clock enable
-      CLK => clk,    -- 1-bit positive edge clock input
-      LOAD => valid, -- 1-bit active high input load accumulator enable
+      P         => macc_p,     -- MACC ouput bus, width determined by WIDTH_P generic 
+      A         => pixel_in,     -- MACC input A bus, width determined by WIDTH_A generic 
+      ADDSUB    => addsb, -- 1-bit add/sub input, high selects add, low selects subtract
+      B         => weights,           -- MACC input B bus, width determined by WIDTH_B generic 
+      CARRYIN   => carryin, -- 1-bit carry-in input to accumulator
+      CE        => ce,      -- 1-bit active high input clock enable
+      CLK       => clk,    -- 1-bit positive edge clock input
+      LOAD      => valid, -- 1-bit active high input load accumulator enable
       LOAD_DATA => load_data, -- Load accumulator input data, 
                               -- width determined by WIDTH_P generic
-      RST => rst    -- 1-bit input active high reset
+      RST       => rst    -- 1-bit input active high reset
    );
-   result <= macc_p;
+   result    <= macc_p;
    load_data <= macc_p;
-
-   -- Signal done when valid_d is high
-   done <= valid_d;
 
 end Behavioral;

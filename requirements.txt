@@ -1,0 +1,7 @@
+tensorflow==2.13.0
+matplotlib==3.8.0
+seaborn==0.12.2
+scikit-learn==1.3.0
+tf2onnx 
+numpy==1.23.5
+tensorflow-model-optimization==0.7.0  # Optional, for QAT

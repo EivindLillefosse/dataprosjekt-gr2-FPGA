@@ -21,8 +21,7 @@ architecture Behavioral of test_MAC_tb is
     constant WORD_vec  : int_array := (1, 2, 3, 4, 5, 6, 7, 8, 9);
     constant weight_vec : int_array := (1, 0, -1, 1, 0, -1, 1, 0, -1);
 
-    -- For checking result
-    signal expected_result : integer := 0;
+
 begin
     DUT: entity work.MAC
         generic map (
@@ -42,8 +41,8 @@ begin
 
     clk <= not clk after clk_period / 2;
 
-    process
-        variable acc : integer := 0;
+    -- Stimulus process: drives inputs and accumulates expected result
+    stimulus_proc: process
     begin
         -- Reset
         rst <= '1';
@@ -55,29 +54,28 @@ begin
         -- Apply 9 test vectors
         for i in 0 to 8 loop
             pixel_in  <= std_logic_vector(to_signed(WORD_vec(i), 8));
-            weights <= std_logic_vector(to_signed(weight_vec(i), 8));
-            valid  <= '1';
+            weights   <= std_logic_vector(to_signed(weight_vec(i), 8));
+            valid     <= '1';
             wait for clk_period;
-            valid  <= '0';
+            valid     <= '0';
             wait for clk_period;
-
-            -- Accumulate expected result
-            acc := acc + WORD_vec(i) * weight_vec(i);
         end loop;
-
-        wait for clk_period * 2;
-        expected_result <= acc;
-
-        -- Wait for result to settle
-        wait for clk_period * 2;
-
-        -- Check result
-        assert to_integer(signed(result)) = expected_result
-        report "MAC result mismatch: got " & integer'image(to_integer(signed(result))) &
-               ", expected " & integer'image(expected_result)
-        severity error;
-
         wait;
-    end process;
+    end process stimulus_proc;
+
+    -- Checking process: waits for done and checks result
+    check_proc: process
+        variable acc : integer := 0;
+        variable i   : integer := 0;
+    begin
+        for i in 0 to 8 loop
+            acc := acc + WORD_vec(i) * weight_vec(i);
+            wait until done = '1';
+            assert to_integer(signed(result)) = acc
+                report "MAC result mismatch at input " & integer'image(i) & ": got " & integer'image(to_integer(signed(result))) & ", expected " & integer'image(acc)
+                severity ERROR;
+        end loop;
+        wait;
+    end process check_proc;
 
 end Behavioral;
