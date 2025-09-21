@@ -49,6 +49,7 @@ entity MAC is
        pixel_in : in  STD_LOGIC_VECTOR (width_a-1 downto 0);
        weights  : in  STD_LOGIC_VECTOR (width_b-1 downto 0);
        valid    : in  STD_LOGIC;
+       clear    : in  STD_LOGIC;
        result   : out STD_LOGIC_VECTOR (width_p-1 downto 0);
        done     : out STD_LOGIC  -- Added done signal
    );
@@ -58,7 +59,8 @@ end MAC;
 architecture Behavioral of MAC is
    signal macc_p             : std_logic_vector(width_p-1 downto 0);
    signal addsb, carryin, ce : std_logic := '0';
-   signal load_data          : std_logic_vector(width_p-1 downto 0) := (others => '0');   
+   signal load_data          : std_logic_vector(width_p-1 downto 0) := (others => '0'); 
+   signal load               : std_logic := '0';  
    signal valid_d            : std_logic := '0';
    -- MACC_MACRO: Multiple Accumulate Function implemented in a DSP48E
    --             Artix-7
@@ -72,12 +74,14 @@ begin
             valid_d <= '0';
          else
             valid_d <= valid;
+            load_data <= macc_p;
             done <= valid_d;
          end if;
       end if;
    end process;
 
    ce <= valid or valid_d;
+   load <= valid and not valid_d;
 
    MACC_MACRO_inst : MACC_MACRO
    generic map (
@@ -92,14 +96,14 @@ begin
       ADDSUB    => addsb, -- 1-bit add/sub input, high selects add, low selects subtract
       B         => weights,           -- MACC input B bus, width determined by WIDTH_B generic 
       CARRYIN   => carryin, -- 1-bit carry-in input to accumulator
-      CE        => ce,      -- 1-bit active high input clock enable
+      CE        => '1',      -- 1-bit active high input clock enable
       CLK       => clk,    -- 1-bit positive edge clock input
-      LOAD      => valid, -- 1-bit active high input load accumulator enable
+      LOAD      => '1', -- 1-bit active high input load accumulator enable
       LOAD_DATA => load_data, -- Load accumulator input data, 
                               -- width determined by WIDTH_P generic
-      RST       => rst    -- 1-bit input active high reset
+      RST       => clear or rst    -- 1-bit input active high reset
+
    );
    result    <= macc_p;
-   load_data <= macc_p;
 
 end Behavioral;

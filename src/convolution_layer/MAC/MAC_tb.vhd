@@ -8,6 +8,7 @@ end test_MAC_tb;
 architecture Behavioral of test_MAC_tb is
     signal clk     : std_logic := '0';
     signal rst     : std_logic := '0';
+    signal clear   : std_logic := '0';
     signal pixel_in  : std_logic_vector(7 downto 0) := (others => '0');
     signal weights : std_logic_vector(7 downto 0) := (others => '0');
     signal valid  : std_logic := '0';
@@ -35,6 +36,7 @@ begin
             pixel_in  => pixel_in,
             weights => weights,
             valid   => valid,
+            clear   => clear,
             result  => result,
             done    => done
         );
@@ -47,6 +49,7 @@ begin
         -- Reset
         rst <= '1';
         valid <= '0';
+        clear <= '0';
         wait for clk_period * 2;
         rst <= '0';
         wait for clk_period * 2;
@@ -60,6 +63,21 @@ begin
             valid     <= '0';
             wait for clk_period;
         end loop;
+
+        clear <= '1';
+        wait for clk_period;
+        clear <= '0';
+
+         -- Apply 9 test vectors again to see if accumulator resets correctly 
+        for i in 0 to 8 loop
+            pixel_in  <= std_logic_vector(to_signed(WORD_vec(i), 8));
+            weights   <= std_logic_vector(to_signed(weight_vec(i), 8));
+            valid     <= '1';
+            wait for clk_period;
+            valid     <= '0';
+            wait for clk_period;
+        end loop;
+
         wait;
     end process stimulus_proc;
 
