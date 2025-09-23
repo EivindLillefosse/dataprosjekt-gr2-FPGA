@@ -7,6 +7,7 @@ set project_name "CNN"
 set project_dir "./vivado_project"
 set part_number "XC7A35TICSG324-1L"
 set top_module "top"
+set_param general.maxThreads 8
 
 # Override with command-line arguments if provided
 if {$argc > 0} {
