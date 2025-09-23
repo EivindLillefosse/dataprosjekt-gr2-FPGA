@@ -51,37 +51,54 @@ entity MAC is
        valid    : in  STD_LOGIC;
        clear    : in  STD_LOGIC;
        result   : out STD_LOGIC_VECTOR (width_p-1 downto 0);
-       done     : out STD_LOGIC  -- Added done signal
-   );
-
+       done     : out STD_LOGIC  
+       );
 end MAC;
 
 architecture Behavioral of MAC is
-   signal macc_p             : std_logic_vector(width_p-1 downto 0);
-   signal addsb, carryin, ce : std_logic := '0';
+   signal carryin, ce        : std_logic := '0';
+   signal addsb              : std_logic := '1';
    signal load_data          : std_logic_vector(width_p-1 downto 0) := (others => '0'); 
    signal load               : std_logic := '0';  
-   signal valid_d            : std_logic := '0';
-   -- MACC_MACRO: Multiple Accumulate Function implemented in a DSP48E
-   --             Artix-7
-   -- Xilinx HDL Language Template, version 2024.1
+   signal rst_combined       : std_logic; -- Intermediate signal for combined reset
+   signal macc_result        : std_logic_vector(width_p-1 downto 0); -- Intermediate signal for MACC_MACRO output
+   signal changed_pulse_internal : std_logic; -- Intermediate signal for changed_pulse
+   signal calc_done         : std_logic; -- Intermediate signal for done logic
+
 begin
-   addsb <= '1';
    process(clk)
    begin
       if rising_edge(clk) then
          if rst = '1' then
-            valid_d <= '0';
+            calc_done <= '0';
          else
-            valid_d <= valid;
-            load_data <= macc_p;
-            done <= valid_d;
+            if valid = '1' and (pixel_in = (width_a-1 downto 0 => '0') or weights = (width_b-1 downto 0 => '0')) then
+               calc_done <= '1';
+            else
+               calc_done <= '0';
+            end if;
          end if;
       end if;
    end process;
 
-   ce <= valid or valid_d;
-   load <= valid and not valid_d;
+   load <= valid and not (calc_done or changed_pulse_internal);
+
+   -- Combine clear and rst signals
+   rst_combined <= clear or rst;
+
+   WORD_change_inst : entity work.change_detect_bus
+     generic map (
+       W => width_p -- Corrected generic name
+     )
+     port map (
+       clk => clk,
+       rst => rst,
+       word_in => macc_result,
+       changed_pulse => changed_pulse_internal -- Use intermediate signal
+     );
+
+   -- Assign intermediate signal to done
+   done <= calc_done or changed_pulse_internal;
 
    MACC_MACRO_inst : MACC_MACRO
    generic map (
@@ -91,19 +108,21 @@ begin
       WIDTH_B => width_b,        -- Multiplier B-input bus width, 1-18     
       WIDTH_P => width_p)        -- Accumulator output bus width, 1-48
    port map (
-      P         => macc_p,     -- MACC ouput bus, width determined by WIDTH_P generic 
+      P         => macc_result,     -- Connect intermediate signal
       A         => pixel_in,     -- MACC input A bus, width determined by WIDTH_A generic 
       ADDSUB    => addsb, -- 1-bit add/sub input, high selects add, low selects subtract
       B         => weights,           -- MACC input B bus, width determined by WIDTH_B generic 
       CARRYIN   => carryin, -- 1-bit carry-in input to accumulator
-      CE        => '1',      -- 1-bit active high input clock enable
+      CE        => load,      -- 1-bit active high input clock enable
       CLK       => clk,    -- 1-bit positive edge clock input
-      LOAD      => '1', -- 1-bit active high input load accumulator enable
+      LOAD      => '0', -- 1-bit active high input load accumulator enable
       LOAD_DATA => load_data, -- Load accumulator input data, 
                               -- width determined by WIDTH_P generic
-      RST       => clear or rst    -- 1-bit input active high reset
+      RST       => rst_combined    -- 1-bit input active high reset
 
    );
-   result    <= macc_p;
+
+   -- Assign intermediate signal to result
+   result <= macc_result;
 
 end Behavioral;

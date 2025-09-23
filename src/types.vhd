@@ -20,5 +20,12 @@ package types_pkg is
     type OUTPUT_ARRAY is array (natural range <>, natural range <>) of WORD;
     type OUTPUT_ARRAY_VECTOR is array (natural range <>, natural range <>, natural range <>) of WORD;
 
+    -- 16-bit output type for MAC results
+    subtype OUTPUT_WORD is STD_LOGIC_VECTOR(15 downto 0);
+    type OUTPUT_ARRAY_16 is array (natural range <>, natural range <>) of OUTPUT_WORD;
+    type OUTPUT_ARRAY_VECTOR_16 is array (natural range <>, natural range <>, natural range <>) of OUTPUT_WORD;
+
+
     type WORD_ARRAY is array (natural range <>) of WORD;
+    type WORD_ARRAY_16 is array (natural range <>) of OUTPUT_WORD;
 end package types_pkg;

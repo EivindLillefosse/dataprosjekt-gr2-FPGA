@@ -59,7 +59,7 @@ begin
             pixel_in  <= std_logic_vector(to_signed(WORD_vec(i), 8));
             weights   <= std_logic_vector(to_signed(weight_vec(i), 8));
             valid     <= '1';
-            wait for clk_period;
+            wait until done = '1';
             valid     <= '0';
             wait for clk_period;
         end loop;

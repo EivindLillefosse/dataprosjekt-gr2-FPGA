@@ -11,7 +11,7 @@ architecture Behavioral of test_conv_layer_tb is
     signal rst       : std_logic := '0';
     signal enable    : std_logic := '0';
     signal input_data : OUTPUT_ARRAY_VECTOR(0 to 0, 0 to 27, 0 to 27); -- 1 channel, 28x28 input
-    signal output_data : OUTPUT_ARRAY_VECTOR(0 to 7, 0 to 26, 0 to 26); -- 8 filters, 27x27 output
+    signal output_data : OUTPUT_ARRAY_VECTOR_16(0 to 7, 0 to 26, 0 to 26); -- 8 filters, 27x27 output
     signal layer_done : std_logic;
 
     constant clk_period : time := 10 ns;

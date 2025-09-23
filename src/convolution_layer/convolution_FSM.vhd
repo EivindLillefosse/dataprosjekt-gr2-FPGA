@@ -37,19 +37,25 @@ entity conv_layer is
         clk : in STD_LOGIC;
         rst : in STD_LOGIC;
         enable : in STD_LOGIC;
-        input_data : in OUTPUT_ARRAY_VECTOR(0 to INPUT_CHANNELS-1,
-                                              0 to IMAGE_SIZE-1, 
-                                              0 to IMAGE_SIZE-1);
-        output_data : out OUTPUT_ARRAY_VECTOR(0 to NUM_FILTERS-1,
-                                              0 to ((IMAGE_SIZE-KERNEL_SIZE)/STRIDE)+1, 
-                                              0 to ((IMAGE_SIZE-KERNEL_SIZE)/STRIDE)+1);
+
+        input_valid : in std_logic;  -- High when input_pixel is valid
+        input_pixel : in WORD; -- 8-bit pixel input
+        input_row : inout integer; -- Current row of the input pixel
+        input_col : inout integer; -- Current column of the input pixel
+        input_ready : out std_logic; -- High when ready for the next input
+
+        output_valid : out std_logic; -- High when output_pixel is valid
+        output_pixel : out std_logic_vector(15 downto 0); -- 16-bit output pixel
+        output_row : out integer; -- Current row of the output pixel
+        output_col : out integer; -- Current column of the output pixel
+        output_ready : out std_logic; -- High when module is ready for next input
+
         layer_done : out STD_LOGIC
     );
 end conv_layer;
 
 architecture Behavioral of conv_layer is
     -- Declare signals
-    signal input_pixel  : WORD := (others => '0');
     signal weight_array : OUTPUT_ARRAY_VECTOR(0 to NUM_FILTERS-1,
                                             0 to KERNEL_SIZE-1,
                                             0 to KERNEL_SIZE-1) := (
@@ -105,14 +111,14 @@ architecture Behavioral of conv_layer is
     signal weights : WORD_ARRAY(0 to NUM_FILTERS-1) := (others => (others => '0'));    
     signal valid  : std_logic := '0';
     signal done : STD_LOGIC_VECTOR(NUM_FILTERS-1 downto 0) := (others => '0');    
-    signal result_array  : OUTPUT_ARRAY_VECTOR(0 to NUM_FILTERS-1, 
+    signal result_array  : OUTPUT_ARRAY_VECTOR_16(0 to NUM_FILTERS-1, 
                                          0 to ((IMAGE_SIZE-KERNEL_SIZE)/STRIDE)+1, 
                                          0 to ((IMAGE_SIZE-KERNEL_SIZE)/STRIDE)+1);
-    signal result : WORD_ARRAY(0 to NUM_FILTERS-1) := (others => (others => '0')); 
+    signal result : WORD_ARRAY_16(0 to NUM_FILTERS-1) := (others => (others => '0')); 
 
     --- FSM signals
     type state_type is (IDLE, LOAD, COMPUTE, FINISH);
-    signal current_state, next_state : state_type := IDLE;
+    signal current_state : state_type := IDLE;
 
     --- Current position in the input image
     signal row, col, c : integer := 0;
@@ -129,7 +135,7 @@ begin
             generic map (
                 width_a => 8,
                 width_b => 8,
-                width_p => 8
+                width_p => 16
             )
             port map (
                 clk      => clk,
@@ -148,74 +154,84 @@ begin
         if rst = '1' then
             current_state <= IDLE;
             valid <= '0';
-            output_data <= (others => (others => (others => (others => '0')))); 
+            clear <= '0';
+            row <= 0;
+            col <= 0;
+            c <= 0;
+            region_row <= 0;
+            region_col <= 0;
+            region_done <= '0';
+            layer_done <= '0';
         elsif rising_edge(clk) then
-            current_state <= next_state;
             case current_state is
                 when IDLE =>
                     clear <= '0';
                     layer_done <= '0';
                     if enable = '1' then
-                        next_state <= LOAD;
-                    else
-                        next_state <= IDLE;
+                        input_ready <= '1';
+                        current_state <= LOAD;
                     end if;
                 when LOAD =>
+                    clear <= '0';
                     for filter in 0 to NUM_FILTERS-1 loop
-                        weights(filter) <= weight_array(filter, row, col);
+                        
+                        weights(filter) <= weight_array(filter, region_row, region_col);
                     end loop;
-                    input_pixel <= input_data(c, row + region_row, col + region_col);
-                    valid <= '1';
-                    -- TIL NÅR VI LAGRER VEKTAR I RAM
-                    -- if valid = '1' then
-                    --     next_state <= COMPUTE;
-                    -- else
-                    --     next_state <= LOAD;
-                    -- end if;
-                    
-                    next_state <= COMPUTE;
+
+                    input_row <= row + region_row;
+                    input_col <= col + region_col;
+
+                    if input_valid = '1' then
+                        valid <= '1';
+                        input_ready <= '0';
+                        current_state <= COMPUTE;
+                    end if;
                 when COMPUTE =>
-                    valid <= '0';
                     if done = (done'range => '1') then 
-                        next_state <= FINISH;
-                    else
-                        next_state <= COMPUTE;
+                        valid <= '0';
+                        current_state <= FINISH;
                     end if;
                 when FINISH =>
-
                     if region_done = '1' then
-                        clear <= '0';
+                        -- Clear MAC accumulators and reset region tracking
+                        clear <= '1';
                         region_done <= '0';
+                        region_row <= 0;
+                        region_col <= 0;
+                        -- Store results before moving to next position
+                        for filter in 0 to NUM_FILTERS-1 loop
+                            result_array(filter, row, col) <= result(filter);
+                        end loop;
+                        
                         if col < (IMAGE_SIZE - KERNEL_SIZE)/STRIDE then
                             col <= col + 1;
-                            next_state <= LOAD;
                         elsif row < (IMAGE_SIZE - KERNEL_SIZE)/STRIDE then
                             row <= row + 1;
                             col <= 0;
-                            next_state <= LOAD;
                         else
+                            -- All convolution complete
+                            output_data <= result_array;
                             layer_done <= '1';
-                            next_state <= IDLE;
+                            row <= 0;
+                            col <= 0;
                         end if;
+                        current_state <= IDLE;
                     else 
+                        clear <= '0';
                         if region_col < KERNEL_SIZE - 1 then
                             region_col <= region_col + 1;
-                            next_state <= LOAD;
+                            current_state <= LOAD;
                         elsif region_row < KERNEL_SIZE - 1 then
                             region_row <= region_row + 1;
                             region_col <= 0;
-                            next_state <= LOAD;
+                            current_state <= LOAD;
                         else
                             region_done <= '1';
-                            region_row <= 0;
-                            region_col <= 0;
-                            for filter in 0 to NUM_FILTERS-1 loop
-                                result_array(filter, row, col) <= result(filter);
-                            end loop;
-                            clear <= '1';
-                            next_state <= FINISH;
+                            current_state <= FINISH;
                         end if;
                     end if;
+                when others =>
+                    current_state <= IDLE;
             end case;
         end if;
     end process;
