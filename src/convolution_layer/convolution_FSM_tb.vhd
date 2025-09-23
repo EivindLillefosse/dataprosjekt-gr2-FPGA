@@ -1,114 +1,224 @@
+----------------------------------------------------------------------------------
+-- Company: NTNU
+-- Engineer: Eivind Lillefosse
+-- 
+-- Create Date: 14.09.2025 15:20:31
+-- Design Name: Convolution Layer Testbench
+-- Module Name: conv_layer_tb - Behavioral
+-- Project Name: CNN Accelerator
+-- Target Devices: Xilinx FPGA
+-- Tool Versions: 
+-- Description: Testbench for convolution layer FSM
+-- 
+-- Dependencies: 
+-- 
+-- Revision:
+-- Revision 0.01 - File Created
+-- Additional Comments:
+-- 
+----------------------------------------------------------------------------------
+
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 use work.types_pkg.all;
 
-entity test_conv_layer_tb is
-end test_conv_layer_tb;
+entity conv_layer_tb is
+end conv_layer_tb;
 
-architecture Behavioral of test_conv_layer_tb is
-    signal clk       : std_logic := '0';
-    signal rst       : std_logic := '0';
-    signal enable    : std_logic := '0';
-    signal input_data : OUTPUT_ARRAY_VECTOR(0 to 0, 0 to 27, 0 to 27); -- 1 channel, 28x28 input
-    signal output_data : OUTPUT_ARRAY_VECTOR_16(0 to 7, 0 to 26, 0 to 26); -- 8 filters, 27x27 output
-    signal layer_done : std_logic;
-
-    constant clk_period : time := 10 ns;
-    
-    -- Test image size parameters
-    constant IMAGE_SIZE : integer := 28;
+architecture Behavioral of conv_layer_tb is
+    -- Test parameters
+    constant IMAGE_SIZE : integer := 28;  -- Smaller image for testing
     constant KERNEL_SIZE : integer := 3;
     constant INPUT_CHANNELS : integer := 1;
-    constant NUM_FILTERS : integer := 8;
+    constant NUM_FILTERS : integer := 8;  -- Fewer filters for easier testing
     constant STRIDE : integer := 1;
-    constant OUTPUT_SIZE : integer := ((IMAGE_SIZE-KERNEL_SIZE)/STRIDE)+1; -- 26
+    constant BLOCK_SIZE : integer := 2;
+    
+    -- Clock period
+    constant CLK_PERIOD : time := 10 ns;
+    
+    -- UUT signals
+    signal clk : STD_LOGIC := '0';
+    signal rst : STD_LOGIC := '0';
+    signal enable : STD_LOGIC := '0';
+    
+    signal input_valid : std_logic := '0';
+    signal input_pixel : WORD := (others => '0');
+    signal input_row : integer := 0;
+    signal input_col : integer := 0;
+    signal input_ready : std_logic;
+    
+    signal output_valid : std_logic;
+    signal output_pixel : WORD_ARRAY_16(0 to NUM_FILTERS-1);
+    signal output_row : integer;
+    signal output_col : integer;
+    signal output_ready : std_logic := '1';
+    
+    signal layer_done : STD_LOGIC;
+    
+    -- Test image data (28x28 image)
+    type test_image_type is array (0 to IMAGE_SIZE-1, 0 to IMAGE_SIZE-1) of integer;
+    
+    -- Function to generate 28x28 test image
+    function generate_test_image return test_image_type is
+        variable temp_image : test_image_type;
+    begin
+        for row in 0 to IMAGE_SIZE-1 loop
+            for col in 0 to IMAGE_SIZE-1 loop
+                -- Create a simple pattern: row + col + 1 (mod 256)
+                -- This creates a diagonal gradient pattern
+                temp_image(row, col) := (row + col + 1) mod 256;
+            end loop;
+        end loop;
+        return temp_image;
+    end function;
+    
+    constant test_image : test_image_type := generate_test_image;
+    
+    -- Test control signals
+    signal test_done : boolean := false;
+    signal pixel_request_row : integer := 0;
+    signal pixel_request_col : integer := 0;
 
 begin
-    DUT: entity work.conv_layer
+    -- Unit Under Test (UUT)
+    uut: entity work.conv_layer
         generic map (
             IMAGE_SIZE => IMAGE_SIZE,
             KERNEL_SIZE => KERNEL_SIZE,
             INPUT_CHANNELS => INPUT_CHANNELS,
             NUM_FILTERS => NUM_FILTERS,
-            STRIDE => STRIDE
+            STRIDE => STRIDE,
+            BLOCK_SIZE => BLOCK_SIZE
         )
         port map (
             clk => clk,
             rst => rst,
             enable => enable,
-            input_data => input_data,
-            output_data => output_data,
+            input_valid => input_valid,
+            input_pixel => input_pixel,
+            input_row => input_row,
+            input_col => input_col,
+            input_ready => input_ready,
+            output_valid => output_valid,
+            output_pixel => output_pixel,
+            output_row => output_row,
+            output_col => output_col,
+            output_ready => output_ready,
             layer_done => layer_done
         );
 
-    clk <= not clk after clk_period / 2;
-
-    -- Stimulus process: drives inputs
-    stimulus_proc: process
+    -- Clock process
+    clk_process: process
     begin
-        -- Initialize input data with test pattern
-        for c in 0 to INPUT_CHANNELS-1 loop
-            for row in 0 to IMAGE_SIZE-1 loop
-                for col in 0 to IMAGE_SIZE-1 loop
-                    input_data(c, row, col) <= std_logic_vector(to_signed((row + col + 1), 8));
-                end loop;
-            end loop;
+        while not test_done loop
+            clk <= '0';
+            wait for CLK_PERIOD/2;
+            clk <= '1';
+            wait for CLK_PERIOD/2;
         end loop;
+        wait;
+    end process;
 
-        -- Reset
+    -- Input pixel provider process
+    input_provider: process(clk, rst)
+    begin
+        if rst = '1' then
+            input_valid <= '0';
+            input_pixel <= (others => '0');
+        elsif rising_edge(clk) then
+            if input_ready = '1' then
+                -- Check if the requested coordinates are valid
+                if input_row >= 0 and input_row < IMAGE_SIZE and 
+                   input_col >= 0 and input_col < IMAGE_SIZE then
+                    input_pixel <= std_logic_vector(to_unsigned(test_image(input_row, input_col), 8));
+                    input_valid <= '1';
+                    report "Providing pixel [" & integer'image(input_row) & "," & integer'image(input_col) & 
+                           "] = " & integer'image(test_image(input_row, input_col));
+                else
+                    -- Provide zero for out-of-bounds pixels (padding)
+                    input_pixel <= (others => '0');
+                    input_valid <= '1';
+                    report "Providing padding pixel [" & integer'image(input_row) & "," & integer'image(input_col) & "] = 0";
+                end if;
+            else
+                input_valid <= '0';
+            end if;
+        end if;
+    end process;
+
+    -- Output monitor process
+    output_monitor: process(clk)
+    begin
+        if rising_edge(clk) then
+            if output_valid = '1' and output_ready = '1' then
+                report "Output at position [" & integer'image(output_row) & "," & integer'image(output_col) & "]";
+                for i in 0 to NUM_FILTERS-1 loop
+                    report "  Filter " & integer'image(i) & ": " & 
+                           integer'image(to_integer(unsigned(output_pixel(i))));
+                end loop;
+            end if;
+        end if;
+    end process;
+
+    -- Main test process
+    test_process: process
+    begin
+        -- Initialize
         rst <= '1';
         enable <= '0';
-        wait for clk_period * 2;
+        output_ready <= '1';
+        
+        wait for CLK_PERIOD * 2;
         rst <= '0';
-        wait for clk_period * 2;
-
-        -- Start convolution
+        
+        wait for CLK_PERIOD * 2;
+        
+        report "Starting convolution layer test...";
+        
+        -- Start the convolution
         enable <= '1';
-
-        -- Wait for completion
-        wait until layer_done = '1';
-        enable <= '0';
-        wait for clk_period * 5;
-
-        -- Test second convolution
-        enable <= '1';
-        wait for clk_period;
-        enable <= '0';
-
-        wait until layer_done = '1';
-        wait for clk_period * 5;
-
-        wait;
-    end process stimulus_proc;
-
-    -- Checking process: monitors layer_done and validates basic functionality
-    check_proc: process
-    begin
-        -- Wait for first convolution to complete
+        
+        -- Wait for layer to complete
         wait until layer_done = '1';
         
-        -- Basic check: ensure output is not all zeros
-        for f in 0 to NUM_FILTERS-1 loop
-            for row in 0 to OUTPUT_SIZE-1 loop
-                for col in 0 to OUTPUT_SIZE-1 loop
-                    -- This is a basic sanity check - in a real testbench you'd check against expected values
-                    if output_data(f, row, col) /= (output_data(f, row, col)'range => '0') then
-                        report "Output filter " & integer'image(f) & " at (" & integer'image(row) & "," & integer'image(col) & ") has non-zero value"
-                            severity NOTE;
-                        exit; -- Exit inner loops after finding first non-zero
-                    end if;
-                end loop;
-            end loop;
-        end loop;
-
-        report "First convolution completed successfully" severity NOTE;
-
-        -- Wait for second convolution
+        report "Convolution layer completed successfully!";
+        
+        -- Wait a few more cycles
+        wait for CLK_PERIOD * 10;
+        
+        -- Test reset functionality
+        report "Testing reset functionality...";
+        rst <= '1';
+        wait for CLK_PERIOD * 2;
+        rst <= '0';
+        
+        wait for CLK_PERIOD * 5;
+        
+        -- Test multiple runs
+        report "Testing second convolution run...";
+        enable <= '1';
+        
         wait until layer_done = '1';
-        report "Second convolution completed successfully" severity NOTE;
-
+        
+        report "Second convolution completed!";
+        
+        wait for CLK_PERIOD * 10;
+        
+        test_done <= true;
+        report "All tests completed successfully!";
         wait;
-    end process check_proc;
+    end process;
+
+    -- Timeout watchdog
+    timeout_watchdog: process
+    begin
+        wait for 10 ms;  -- Timeout after 10ms
+        if not test_done then
+            report "TEST TIMEOUT - Test did not complete within expected time" severity failure;
+        end if;
+        wait;
+    end process;
 
 end Behavioral;

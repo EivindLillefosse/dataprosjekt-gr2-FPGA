@@ -31,7 +31,8 @@ entity conv_layer is
         KERNEL_SIZE : integer := 3;
         INPUT_CHANNELS : integer := 1;
         NUM_FILTERS : integer := 8;
-        STRIDE : integer := 1
+        STRIDE : integer := 1;
+        BLOCK_SIZE : integer := 2  -- Size of processing blocks (2x2, 3x3, etc.)
     );
     Port ( 
         clk : in STD_LOGIC;
@@ -45,10 +46,10 @@ entity conv_layer is
         input_ready : out std_logic; -- High when ready for the next input
 
         output_valid : out std_logic; -- High when output_pixel is valid
-        output_pixel : out std_logic_vector(15 downto 0); -- 16-bit output pixel
+        output_pixel : out WORD_ARRAY_16(0 to NUM_FILTERS-1); -- 16-bit output pixel
         output_row : out integer; -- Current row of the output pixel
         output_col : out integer; -- Current column of the output pixel
-        output_ready : out std_logic; -- High when module is ready for next input
+        output_ready : in std_logic; -- High when ready for the next output
 
         layer_done : out STD_LOGIC
     );
@@ -110,21 +111,12 @@ architecture Behavioral of conv_layer is
     );
     signal weights : WORD_ARRAY(0 to NUM_FILTERS-1) := (others => (others => '0'));    
     signal valid  : std_logic := '0';
-    signal done : STD_LOGIC_VECTOR(NUM_FILTERS-1 downto 0) := (others => '0');    
-    signal result_array  : OUTPUT_ARRAY_VECTOR_16(0 to NUM_FILTERS-1, 
-                                         0 to ((IMAGE_SIZE-KERNEL_SIZE)/STRIDE)+1, 
-                                         0 to ((IMAGE_SIZE-KERNEL_SIZE)/STRIDE)+1);
-    signal result : WORD_ARRAY_16(0 to NUM_FILTERS-1) := (others => (others => '0')); 
+    signal done : STD_LOGIC_VECTOR(NUM_FILTERS-1 downto 0) := (others => '0'); 
+    signal result : WORD_ARRAY_16(0 to NUM_FILTERS-1) := (others => (others => '0')); -- MAC results
 
     --- FSM signals
     type state_type is (IDLE, LOAD, COMPUTE, FINISH);
     signal current_state : state_type := IDLE;
-
-    --- Current position in the input image
-    signal row, col, c : integer := 0;
-
-    --- What part of the input region we are in
-    signal region_row, region_col : integer := 0;
     signal region_done : std_logic := '0';
     signal clear : std_logic := '0';
 
@@ -150,16 +142,28 @@ begin
     end generate;
 
     FSM_process: process(clk, rst)
+        --- Current position variables 
+        variable position_counter : integer := 0;
+        variable row, col : integer := 0;
+        variable block_row, block_col : integer := 0;
+        variable within_row, within_col : integer := 0;
+        variable block_index : integer := 0;
+        variable region_row, region_col : integer := 0;
     begin
         if rst = '1' then
             current_state <= IDLE;
             valid <= '0';
             clear <= '0';
-            row <= 0;
-            col <= 0;
-            c <= 0;
-            region_row <= 0;
-            region_col <= 0;
+            position_counter := 0;
+            row := 0;
+            col := 0;
+            block_row := 0;
+            block_col := 0;
+            within_row := 0;
+            within_col := 0;
+            block_index := 0;
+            region_row := 0;
+            region_col := 0;
             region_done <= '0';
             layer_done <= '0';
         elsif rising_edge(clk) then
@@ -167,19 +171,20 @@ begin
                 when IDLE =>
                     clear <= '0';
                     layer_done <= '0';
+                    output_valid <= '0';
                     if enable = '1' then
-                        input_ready <= '1';
                         current_state <= LOAD;
                     end if;
                 when LOAD =>
                     clear <= '0';
                     for filter in 0 to NUM_FILTERS-1 loop
-                        
+                    --- TEMP Should be loaded from memory or registers 
                         weights(filter) <= weight_array(filter, region_row, region_col);
                     end loop;
 
                     input_row <= row + region_row;
                     input_col <= col + region_col;
+                    input_ready <= '1';
 
                     if input_valid = '1' then
                         valid <= '1';
@@ -193,39 +198,60 @@ begin
                     end if;
                 when FINISH =>
                     if region_done = '1' then
-                        -- Clear MAC accumulators and reset region tracking
-                        clear <= '1';
-                        region_done <= '0';
-                        region_row <= 0;
-                        region_col <= 0;
-                        -- Store results before moving to next position
-                        for filter in 0 to NUM_FILTERS-1 loop
-                            result_array(filter, row, col) <= result(filter);
-                        end loop;
-                        
-                        if col < (IMAGE_SIZE - KERNEL_SIZE)/STRIDE then
-                            col <= col + 1;
-                        elsif row < (IMAGE_SIZE - KERNEL_SIZE)/STRIDE then
-                            row <= row + 1;
-                            col <= 0;
-                        else
-                            -- All convolution complete
-                            output_data <= result_array;
-                            layer_done <= '1';
-                            row <= 0;
-                            col <= 0;
+                        if output_ready = '1' then
+                            -- Clear MAC accumulators and reset region tracking
+                            region_done <= '0';
+                            region_row := 0;
+                            region_col := 0;
+                            clear <= '1';
+                            
+                            -- Store results from frame before moving to next position
+                            for filter in 0 to NUM_FILTERS-1 loop
+                                output_pixel(filter) <= result(filter);
+                            end loop;
+                            output_row <= row;
+                            output_col <= col;
+                            output_valid <= '1';
+                            
+                            -- FIXME check if this is correct
+                            -- Generic block pattern calculation
+                            -- Works for any BLOCK_SIZE (2x2, 3x3, 4x4, etc.)
+                            position_counter := position_counter + 1;
+                            
+                            -- Calculate block coordinates and within-block position
+                            block_index := (position_counter - 1) / (BLOCK_SIZE * BLOCK_SIZE);
+                            within_row := ((position_counter - 1) mod (BLOCK_SIZE * BLOCK_SIZE)) / BLOCK_SIZE;
+                            within_col := (position_counter - 1) mod BLOCK_SIZE;
+                            
+                            block_row := block_index / (IMAGE_SIZE / BLOCK_SIZE);
+                            block_col := block_index mod (IMAGE_SIZE / BLOCK_SIZE);
+                            
+                            row := block_row * BLOCK_SIZE + within_row;
+                            col := block_col * BLOCK_SIZE + within_col;
+                            
+                            -- Check if we've processed all positions
+                            if position_counter >= (IMAGE_SIZE * IMAGE_SIZE) then
+                                layer_done <= '1';
+                                position_counter := 0;
+                                row := 0;
+                                col := 0;
+                            end if;
+                            current_state <= IDLE;
+                        else 
+                            output_valid <= '0'; -- Wait until output is ready
+                            current_state <= FINISH;
                         end if;
-                        current_state <= IDLE;
                     else 
                         clear <= '0';
                         if region_col < KERNEL_SIZE - 1 then
-                            region_col <= region_col + 1;
+                            region_col := region_col + 1;
                             current_state <= LOAD;
                         elsif region_row < KERNEL_SIZE - 1 then
-                            region_row <= region_row + 1;
-                            region_col <= 0;
+                            region_row := region_row + 1;
+                            region_col := 0;
                             current_state <= LOAD;
                         else
+                            -- Region done
                             region_done <= '1';
                             current_state <= FINISH;
                         end if;
