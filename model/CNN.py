@@ -22,7 +22,7 @@ TRAINING_DATA_FOLDER = "model/training_data"
 EPOCHS = 5
 BATCH_SIZE = 128
 SAMPLES_PER_CLASS = 1000
-TEST_ENABLED = False  # Set to True to enable visualization and detailed testing
+TEST_ENABLED = True  # Set to True to enable visualization and detailed testing
 
 def load_data():
     """Load and preprocess data from training folder."""
@@ -75,12 +75,104 @@ def train_model(model, x, y):
     print('Model trained successfully.')
     return model
 
+def capture_intermediate_values(model, x_sample, categories):
+    """Capture intermediate values from each layer for debugging."""
+    print("\n=== Capturing Intermediate Values ===")
+    
+    # Create the same 28x28 test pattern as used in VHDL testbench
+    def create_test_image_28x28():
+        test_image = np.zeros((28, 28), dtype=np.float32)
+        for i in range(28):
+            for j in range(28):
+                test_image[i, j] = (i * 28 + j) % 10  # Same pattern as VHDL
+        return test_image
+    
+    # Use the same test pattern as VHDL instead of training data
+    test_image = create_test_image_28x28()
+    test_image_normalized = test_image / 255.0  # Normalize to [0,1] range
+    sample_input = np.expand_dims(np.expand_dims(test_image_normalized, 0), -1)  # Add batch and channel dims
+    
+    print(f"Using VHDL-compatible test pattern (28x28)")
+    print(f"Test pattern raw values (first 5x5 region):")
+    for i in range(5):
+        row_str = ""
+        for j in range(5):
+            row_str += f"{test_image[i,j]:3.0f} "
+        print(f"  {row_str}")
+    
+    # Create a model that outputs intermediate values
+    layer_outputs = [layer.output for layer in model.layers]
+    intermediate_model = tf.keras.Model(inputs=model.input, outputs=layer_outputs)
+    intermediate_outputs = intermediate_model.predict(sample_input)
+    
+    print(f"Input shape: {sample_input.shape}")
+    print(f"Input pixel values (first 5x5 region):")
+    input_2d = sample_input[0, :, :, 0]
+    for i in range(min(5, input_2d.shape[0])):
+        row_str = ""
+        for j in range(min(5, input_2d.shape[1])):
+            row_str += f"{input_2d[i,j]:6.3f} "
+        print(f"  {row_str}")
+    
+    # Save intermediate values
+    intermediate_data = {}
+    
+    for i, (layer, output) in enumerate(zip(model.layers, intermediate_outputs)):
+        print(f"\nLayer {i}: {layer.name} ({layer.__class__.__name__})")
+        print(f"  Output shape: {output.shape}")
+        
+        if isinstance(layer, tf.keras.layers.Conv2D):
+            print(f"  Conv2D filters: {layer.filters}, kernel_size: {layer.kernel_size}")
+            # Save first few filter outputs
+            for filter_idx in range(min(3, output.shape[-1])):
+                filter_output = output[0, :, :, filter_idx]
+                print(f"  Filter {filter_idx} output (5x5 region):")
+                for row in range(min(5, filter_output.shape[0])):
+                    row_str = ""
+                    for col in range(min(5, filter_output.shape[1])):
+                        row_str += f"{filter_output[row,col]:8.3f} "
+                    print(f"    {row_str}")
+                
+                # Save complete filter output
+                intermediate_data[f"layer_{i}_filter_{filter_idx}"] = filter_output
+        
+        elif isinstance(layer, tf.keras.layers.MaxPooling2D):
+            print(f"  MaxPooling2D pool_size: {layer.pool_size}")
+            # Show first filter after pooling
+            pooled_output = output[0, :, :, 0]
+            print(f"  Pooled output (first filter, 5x5 region):")
+            for row in range(min(5, pooled_output.shape[0])):
+                row_str = ""
+                for col in range(min(5, pooled_output.shape[1])):
+                    row_str += f"{pooled_output[row,col]:8.3f} "
+                print(f"    {row_str}")
+        
+        elif isinstance(layer, tf.keras.layers.Flatten):
+            print(f"  Flattened to: {output.shape[1]} values")
+            print(f"  First 10 values: {output[0, :10]}")
+        
+        elif isinstance(layer, tf.keras.layers.Dense):
+            print(f"  Dense units: {layer.units}")
+            print(f"  Output values: {output[0, :min(10, output.shape[1])]}")
+        
+        # Store output for comparison
+        intermediate_data[f"layer_{i}_output"] = output[0]
+    
+    # Save intermediate data to files
+    np.savez('model/intermediate_values.npz', **intermediate_data)
+    print(f"\n✓ Intermediate values saved to 'model/intermediate_values.npz'")
+    
+    return intermediate_data
+
 def evaluate_model(model, x, y, categories):
     """Evaluate model with visualizations and metrics."""
     if not TEST_ENABLED:
         return
         
     print("Evaluating model...")
+    
+    # Capture intermediate values for debugging
+    capture_intermediate_values(model, x, categories)
     
     # Import visualization libraries only when needed
     import matplotlib.pyplot as plt
@@ -115,7 +207,7 @@ def evaluate_model(model, x, y, categories):
         plt.axis('off')
     plt.suptitle('Sample Predictions (Green=Correct, Red=Wrong)', fontsize=14)
     plt.tight_layout()
-    plt.savefig('sample_predictions.png', dpi=150, bbox_inches='tight')
+    plt.savefig('model/sample_predictions.png', dpi=150, bbox_inches='tight')
     plt.show()
     
     # Confusion matrix
@@ -129,7 +221,7 @@ def evaluate_model(model, x, y, categories):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig('confusion_matrix.png', dpi=150, bbox_inches='tight')
+    plt.savefig('model/confusion_matrix.png', dpi=150, bbox_inches='tight')
     plt.show()
     
     # Misclassified examples
@@ -149,7 +241,7 @@ def evaluate_model(model, x, y, categories):
             plt.axis('off')
         plt.suptitle('Misclassified Examples', fontsize=14)
         plt.tight_layout()
-        plt.savefig('misclassified_examples.png', dpi=150, bbox_inches='tight')
+        plt.savefig('model/misclassified_examples.png', dpi=150, bbox_inches='tight')
         plt.show()
     
     # Print metrics
@@ -160,14 +252,14 @@ def evaluate_model(model, x, y, categories):
     print(f"\nTest Accuracy: {accuracy:.3f} ({accuracy*100:.1f}%)")
     
     print("\nVisualization files saved:")
-    print("- sample_predictions.png")
-    print("- confusion_matrix.png") 
-    print("- misclassified_examples.png")
+    print("- model/sample_predictions.png")
+    print("- model/confusion_matrix.png") 
+    print("- model/misclassified_examples.png")
 
 def export_model(model):
     """Export model to SavedModel format."""
     print("Exporting model...")
-    model.export("saved_model")
+    model.export("model/saved_model")
     print("✓ Model exported as SavedModel.")
 
 def create_test_dataset_for_quantization(x, categories):
@@ -190,7 +282,7 @@ def quantize_model_post_training(x):
     print("\n=== Applying Post-Training Quantization ===")
     
     # Create converter
-    converter = tf.lite.TFLiteConverter.from_saved_model("saved_model")
+    converter = tf.lite.TFLiteConverter.from_saved_model("model/saved_model")
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
     
     # For FPGA: Use integer-only quantization
@@ -207,10 +299,10 @@ def quantize_model_post_training(x):
     quantized_model = converter.convert()
     
     # Save quantized model
-    with open('quantized_model.tflite', 'wb') as f:
+    with open('model/quantized_model.tflite', 'wb') as f:
         f.write(quantized_model)
     
-    print("✓ Post-training quantized model saved as 'quantized_model.tflite'")
+    print("✓ Post-training quantized model saved as 'model/quantized_model.tflite'")
     return quantized_model
 
 def test_quantized_model(quantized_model, x_test_quant, y_test_quant):
@@ -272,10 +364,10 @@ def apply_manual_quantization(model, x_test_quant, y_test_quant):
         converter_qat.optimizations = [tf.lite.Optimize.DEFAULT]
         quantized_qat_model = converter_qat.convert()
         
-        with open('quantized_qat_model.tflite', 'wb') as f:
+        with open('model/quantized_qat_model.tflite', 'wb') as f:
             f.write(quantized_qat_model)
         
-        print("✓ QAT quantized model saved as 'quantized_qat_model.tflite'")
+        print("✓ QAT quantized model saved as 'model/quantized_qat_model.tflite'")
         
     except (ImportError, AttributeError) as e:
         print(f"❌ tensorflow_model_optimization compatibility issue: {e}")
@@ -307,10 +399,10 @@ def apply_manual_quantization(model, x_test_quant, y_test_quant):
         converter_manual.optimizations = [tf.lite.Optimize.DEFAULT]
         quantized_manual_model = converter_manual.convert()
         
-        with open('quantized_manual_model.tflite', 'wb') as f:
+        with open('model/quantized_manual_model.tflite', 'wb') as f:
             f.write(quantized_manual_model)
         
-        print("✓ Manual quantized model saved as 'quantized_manual_model.tflite'")
+        print("✓ Manual quantized model saved as 'model/quantized_manual_model.tflite'")
 
 def extract_weights_for_vhdl(model, filetype="vhd"):
     """Extract weights formatted for VHDL implementation or as .bin/.txt files.
@@ -347,7 +439,7 @@ def extract_weights_for_vhdl(model, filetype="vhd"):
     
     if filetype == "vhd":
         # Generate VHDL weight array initialization
-        with open('conv_weights.vhd', 'w') as f:
+        with open('model/conv_weights.vhd', 'w') as f:
             f.write("-- Auto-generated convolution weights for VHDL\n")
             f.write("-- Weight array initialization for conv_layer\n\n")
             
@@ -389,13 +481,13 @@ def extract_weights_for_vhdl(model, filetype="vhd"):
                 else:
                     f.write(f'    {i} => x"{bias & 0xFF:02X}"\n')
             f.write(");\n")
-        print("✓ VHDL weight file generated: conv_weights.vhd")
+        print("✓ VHDL weight file generated: model/conv_weights.vhd")
     
     if filetype == "txt":
         # Save individual filter weights as separate files
         for filter_idx in range(quantized_weights.shape[3]):
             filter_weights = quantized_weights[:, :, :, filter_idx]  # 3x3x1
-            filename = f"filter_{filter_idx}_weights.txt"
+            filename = f"model/filter_{filter_idx}_weights.txt"
             
             with open(filename, 'w') as f:
                 f.write(f"-- Filter {filter_idx} weights (3x3 kernel)\n")
@@ -408,9 +500,9 @@ def extract_weights_for_vhdl(model, filetype="vhd"):
     
     if filetype == "bin":
         # Save weights and biases as binary files
-        quantized_weights.tofile('conv_weights.bin')
-        quantized_biases.tofile('conv_biases.bin')
-        print("✓ Binary weight files generated: conv_weights.bin, conv_biases.bin")
+        quantized_weights.tofile('model/conv_weights.bin')
+        quantized_biases.tofile('model/conv_biases.bin')
+        print("✓ Binary weight files generated: model/conv_weights.bin, model/conv_biases.bin")
 
 def extract_weights_for_fpga(quantized_model):
     """Extract quantized weights for FPGA implementation."""
@@ -446,7 +538,7 @@ def extract_weights_for_fpga(quantized_model):
                 print(f"Extracted tensor: {detail['name']}, Shape: {tensor.shape}, Dtype: {tensor.dtype}")
                 
                 # Save weights as binary file for FPGA
-                filename = f"weights_{detail['name'].replace('/', '_')}.bin"
+                filename = f"model/weights_{detail['name'].replace('/', '_')}.bin"
                 tensor.tofile(filename)
                 print(f"  → Saved to {filename}")
         except Exception as e:
@@ -462,10 +554,10 @@ def convert_to_onnx():
     try:
         result = subprocess.run([
             python_path, "-m", "tf2onnx.convert",
-            "--saved-model", "saved_model",
-            "--output", "quickdraw_model.onnx"
+            "--saved-model", "model/saved_model",
+            "--output", "model/quickdraw_model.onnx"
         ], capture_output=True, text=True, check=True)
-        print("✓ Model successfully converted to ONNX format: quickdraw_model.onnx")
+        print("✓ Model successfully converted to ONNX format: model/quickdraw_model.onnx")
         print(result.stdout)
     except subprocess.CalledProcessError as e:
         print(f"❌ ONNX conversion failed: {e}")
@@ -478,9 +570,11 @@ def print_summary():
     """Print summary of generated files."""
     print("\n=== Summary ===")
     print("Generated files for FPGA implementation:")
-    print("- quantized_model.tflite (8-bit post-training quantized)")
-    print("- quantized_manual_model.tflite (manual quantized model)")
-    print("- weights_*.bin (individual weight files)")
+    print("- model/quantized_model.tflite (8-bit post-training quantized)")
+    print("- model/quantized_manual_model.tflite (manual quantized model)")
+    print("- model/weights_*.bin (individual weight files)")
+    print("- model/conv_weights.vhd (VHDL weight declarations)")
+    print("- model/saved_model/ (TensorFlow SavedModel format)")
     print("- All weights are quantized to 8-bit integers")
     print("- Ready for FPGA implementation with 8-bit arithmetic")
     print("\n💡 Note: Post-training quantization works well for most FPGA applications!")

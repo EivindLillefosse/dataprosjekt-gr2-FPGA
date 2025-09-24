@@ -23,6 +23,10 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 use work.types_pkg.all;
 
+-- Required for file I/O operations
+use STD.TEXTIO.ALL;
+use IEEE.STD_LOGIC_TEXTIO.ALL;
+
 entity conv_layer_tb is
 end conv_layer_tb;
 
@@ -80,6 +84,9 @@ architecture Behavioral of conv_layer_tb is
     signal test_done : boolean := false;
     signal pixel_request_row : integer := 0;
     signal pixel_request_col : integer := 0;
+    
+    -- Debug signal for MAC intermediate values
+    signal debug_mac_results : WORD_ARRAY_16(0 to NUM_FILTERS-1);
 
 begin
     -- Unit Under Test (UUT)
@@ -148,15 +155,53 @@ begin
         end if;
     end process;
 
-    -- Output monitor process
+    -- Output monitor process with intermediate value capture
     output_monitor: process(clk)
+        file debug_file : text open write_mode is "intermediate_debug.txt";
+        variable debug_line : line;
     begin
         if rising_edge(clk) then
+            -- Monitor input requests
+            if input_ready = '1' then
+                write(debug_line, string'("INPUT_REQUEST: ["));
+                write(debug_line, input_row);
+                write(debug_line, string'(","));
+                write(debug_line, input_col);
+                write(debug_line, string'("]"));
+                writeline(debug_file, debug_line);
+            end if;
+            
+            -- Monitor input provision
+            if input_valid = '1' then
+                write(debug_line, string'("INPUT_PROVIDED: ["));
+                write(debug_line, input_row);
+                write(debug_line, string'(","));
+                write(debug_line, input_col);
+                write(debug_line, string'("] = "));
+                write(debug_line, to_integer(unsigned(input_pixel)));
+                writeline(debug_file, debug_line);
+            end if;
+            
+            -- Monitor final outputs
             if output_valid = '1' and output_ready = '1' then
                 report "Output at position [" & integer'image(output_row) & "," & integer'image(output_col) & "]";
+                
+                write(debug_line, string'("OUTPUT: ["));
+                write(debug_line, output_row);
+                write(debug_line, string'(","));
+                write(debug_line, output_col);
+                write(debug_line, string'("]"));
+                writeline(debug_file, debug_line);
+                
                 for i in 0 to NUM_FILTERS-1 loop
                     report "  Filter " & integer'image(i) & ": " & 
                            integer'image(to_integer(unsigned(output_pixel(i))));
+                    
+                    write(debug_line, string'("Filter_"));
+                    write(debug_line, i);
+                    write(debug_line, string'(": "));
+                    write(debug_line, to_integer(unsigned(output_pixel(i))));
+                    writeline(debug_file, debug_line);
                 end loop;
             end if;
         end if;
