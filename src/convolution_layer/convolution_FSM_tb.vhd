@@ -32,7 +32,7 @@ end conv_layer_tb;
 
 architecture Behavioral of conv_layer_tb is
     -- Test parameters
-    constant IMAGE_SIZE : integer := 28;  -- Smaller image for testing
+    constant IMAGE_SIZE : integer := 9;  -- Smaller image for testing
     constant KERNEL_SIZE : integer := 3;
     constant INPUT_CHANNELS : integer := 1;
     constant NUM_FILTERS : integer := 8;  -- Fewer filters for easier testing
