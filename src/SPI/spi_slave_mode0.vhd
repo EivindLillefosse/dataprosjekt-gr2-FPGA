@@ -4,7 +4,7 @@ use IEEE.NUMERIC_STD.ALL;
 
 entity spi_slave_mode0 is
     generic (
-        DATA_LENGTH : integer := 8
+        DATA_WIDTH : integer := 8
     );
     port (
         clk      : in  std_logic;  -- FPGA system clock
@@ -13,86 +13,103 @@ entity spi_slave_mode0 is
         mosi     : in  std_logic;  -- Master Out Slave In
         miso     : out std_logic;  -- Master In Slave Out
         ss_n     : in  std_logic;  -- Slave Select (active low)
-        data_in  : in  std_logic_vector(DATA_LENGTH-1 downto 0); -- Data to send
-        data_out : out std_logic_vector(DATA_LENGTH-1 downto 0); -- Data received
-        data_valid : out std_logic;                  -- Pulses high for 1 clk after DATA_LENGTH bits
-        ack      : out std_logic                     -- Pulses high for 1 clk after DATA_LENGTH bits
+        data_in  : in  std_logic_vector(DATA_WIDTH-1 downto 0); -- Data to send
+        data_out : out std_logic_vector(DATA_WIDTH-1 downto 0); -- Data received
+        data_valid : out std_logic;  -- Pulses high for 1 clk after DATA_WIDTH bits
+        ack      : out std_logic     -- Pulses high for 1 clk after DATA_WIDTH bits
     );
 end spi_slave_mode0;
 
 architecture Behavioral of spi_slave_mode0 is
-    signal sclk_sync      : std_logic_vector(2 downto 0) := (others => '0');
-    signal ss_n_sync      : std_logic_vector(2 downto 0) := (others => '1');
-    signal sclk_rising    : std_logic := '0';
-    signal sclk_falling   : std_logic := '0';
-    signal ss_active      : std_logic := '0';
-    signal bit_cnt        : integer range 0 to DATA_LENGTH-1 := 0;
-    signal rx_shift       : std_logic_vector(DATA_LENGTH-1 downto 0) := (others => '0');
-    signal tx_shift       : std_logic_vector(DATA_LENGTH-1 downto 0) := (others => '0');
+    -- Reduced synchronizer depth for LUT optimization
+    signal sclk_sync      : std_logic_vector(1 downto 0) := (others => '0');
+    signal ss_n_sync      : std_logic_vector(1 downto 0) := (others => '1');
+    
+    -- Use binary counter instead of integer for better synthesis
+    signal bit_cnt        : unsigned(3 downto 0) := (others => '0'); 
+    
+    -- Shift registers
+    signal rx_shift       : std_logic_vector(DATA_WIDTH-1 downto 0) := (others => '0');
+    signal tx_shift       : std_logic_vector(DATA_WIDTH-1 downto 0) := (others => '0');
+    
+    -- Output registers
     signal miso_reg       : std_logic := '0';
-    signal data_valid_i   : std_logic := '0';
-    signal ack_i          : std_logic := '0';
+    signal data_valid_reg : std_logic := '0';
+    signal ack_reg        : std_logic := '0';
+    
+    -- Optimized edge detection
+    signal sclk_prev      : std_logic := '0';
+    signal ss_active      : std_logic := '0';
+    
 begin
-    -- Synchronize SCLK and SS_N to clk domain
+    -- Main SPI process - optimized for fewer LUTs
     process(clk)
     begin
         if rising_edge(clk) then
-            sclk_sync <= sclk_sync(1 downto 0) & sclk;
-            ss_n_sync <= ss_n_sync(1 downto 0) & ss_n;
-        end if;
-    end process;
-
-    -- Edge detection and SPI logic
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            -- Default outputs
-            data_valid_i <= '0';
-            ack_i <= '0';
-
-            -- Edge detection
-            sclk_rising  <= '0';
-            sclk_falling <= '0';
-            if sclk_sync(2 downto 1) = "01" then
-                sclk_rising <= '1';
-            elsif sclk_sync(2 downto 1) = "10" then
-                sclk_falling <= '1';
-            end if;
-
-            -- Slave select active
-            if ss_n_sync(2) = '0' then
-                ss_active <= '1';
-            else
-                ss_active <= '0';
-            end if;
-
-            if ss_active = '0' then
-                bit_cnt <= 0;
+            if rst_n = '0' then
+                -- Reset all registers
+                sclk_sync <= (others => '0');
+                ss_n_sync <= (others => '1');
+                sclk_prev <= '0';
+                bit_cnt <= (others => '0');
                 rx_shift <= (others => '0');
-                tx_shift <= data_in;
+                tx_shift <= (others => '0');
                 miso_reg <= '0';
+                data_valid_reg <= '0';
+                ack_reg <= '0';
+                ss_active <= '0';
             else
-                -- SPI Mode 0: sample MOSI on SCLK rising, update MISO on SCLK falling
-                if sclk_rising = '1' then
-                    rx_shift <= rx_shift(DATA_LENGTH-2 downto 0) & mosi;
-                    if bit_cnt = DATA_LENGTH-1 then
-                        data_out <= rx_shift(DATA_LENGTH-2 downto 0) & mosi;
-                        data_valid_i <= '1';
-                        ack_i <= '1';
-                        bit_cnt <= 0;
-                        tx_shift <= data_in;
-                    else
-                        bit_cnt <= bit_cnt + 1;
+                -- Synchronize inputs (2-stage for metastability)
+                sclk_sync <= sclk_sync(0) & sclk;
+                ss_n_sync <= ss_n_sync(0) & ss_n;
+                sclk_prev <= sclk_sync(1);
+                
+                -- Default pulse outputs
+                data_valid_reg <= '0';
+                ack_reg <= '0';
+                
+                -- Slave select detection
+                ss_active <= not ss_n_sync(1);
+                
+                if ss_n_sync(1) = '1' then
+                    -- Slave not selected - reset state
+                    bit_cnt <= (others => '0');
+                    rx_shift <= (others => '0');
+                    tx_shift <= data_in;
+                    miso_reg <= data_in(DATA_WIDTH-1); -- Output MSB immediately
+                else
+                    -- Slave selected - SPI Mode 0 operation
+                    
+                    -- SCLK rising edge: sample MOSI
+                    if sclk_sync(1) = '1' and sclk_prev = '0' then
+                        rx_shift <= rx_shift(DATA_WIDTH-2 downto 0) & mosi;
+                        
+                        if bit_cnt = to_unsigned(DATA_WIDTH-1, 4) then
+                            -- Complete byte received
+                            data_out <= rx_shift(DATA_WIDTH-2 downto 0) & mosi;
+                            data_valid_reg <= '1';
+                            ack_reg <= '1';
+                            bit_cnt <= (others => '0');
+                            tx_shift <= data_in; -- Load next byte
+                            miso_reg <= data_in(DATA_WIDTH-1);
+                        else
+                            bit_cnt <= bit_cnt + 1;
+                        end if;
+                    end if;
+                    
+                    -- SCLK falling edge: update MISO (shift out next bit)
+                    if sclk_sync(1) = '0' and sclk_prev = '1' then
+                        -- Shift tx_shift left and update MISO with the MSB
+                        tx_shift <= tx_shift(DATA_WIDTH-2 downto 0) & '0';
+                        miso_reg <= tx_shift(DATA_WIDTH-2);
                     end if;
                 end if;
-                if sclk_falling = '1' then
-                    miso_reg <= tx_shift(DATA_LENGTH-1 - bit_cnt);
-                end if;
             end if;
         end if;
     end process;
 
+    -- Output assignments
     miso       <= miso_reg;
-    data_valid <= data_valid_i;
-    ack        <= ack_i;
+    data_valid <= data_valid_reg;
+    ack        <= ack_reg;
 end Behavioral;

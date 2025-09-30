@@ -170,7 +170,7 @@ begin
             current_state <= IDLE;
             valid <= '0';
             clear <= '0';
-            position_counter := 0;
+            position_counter := 1;
             row := 0;
             col := 0;
             block_row := 0;
@@ -221,9 +221,13 @@ begin
                             region_col := 0;
                             clear <= '1';
                             
-                            -- Store results from frame before moving to next position
+                            -- Store results from frame before moving to next position (ReLU activation)
                             for filter in 0 to NUM_FILTERS-1 loop
-                                output_pixel(filter) <= std_logic_vector(unsigned(result(filter)) + resize(unsigned(bias_array(filter)), result(filter)'length));
+                                if result(filter)(15) = '0' then  -- Check if MSB is 0 (positive number)
+                                    output_pixel(filter) <= result(filter);
+                                else 
+                                    output_pixel(filter) <= (others => '0');  -- Output zero for negative numbers
+                                end if;
                             end loop;
                             output_row <= row;
                             output_col <= col;
