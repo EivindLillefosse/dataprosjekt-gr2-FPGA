@@ -1,0 +1,19 @@
+Q-Format Comparison Results
+==================================================
+
+Analysis Date: 2025-09-29
+Number of simulation runs: 5
+Average original accuracy: 0.820 ± 0.038
+
+Detailed Results:
+------------------------------
+Format   Avg Acc  ±Std    Avg Loss  ±Std    Agreement 
+----------------------------------------------------------------------
+Q7.8     0.821    ±0.036   -0.001     ±0.007   0.988
+Q3.4     0.822    ±0.036   -0.002     ±0.009   0.922
+Q2.5     0.818    ±0.032   +0.002     ±0.007   0.966
+Q1.6     0.829    ±0.032   -0.009     ±0.011   0.982
+
+Recommendations:
+Best Overall: Q1.6 (loss: -0.009)
+Best 8-bit: Q1.6 (loss: -0.009)

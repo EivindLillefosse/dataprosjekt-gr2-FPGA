@@ -1,0 +1,13 @@
+; Layer 0: conv2d weights (Q1.6 format)
+; Original shape: (3, 3, 1, 8)
+; Total elements: 72
+; Quantization: 6 fractional bits
+; Range: [-2.0, 1.984375]
+;
+memory_initialization_radix=16;
+memory_initialization_vector=
+FE,12,FD,ED,EA,F9,14,FB,07,F4,F7,F2,FE,F2,0E,FA,
+F2,F9,09,EF,F9,0F,18,0B,FF,10,F8,F5,F6,06,FF,F2,
+0D,17,EE,F5,0E,0E,11,12,EA,15,1A,13,00,10,F5,02,
+0E,03,F4,14,18,05,0A,0A,11,03,F2,18,06,FF,0C,17,
+0E,0A,18,FC,01,02,0D,15;

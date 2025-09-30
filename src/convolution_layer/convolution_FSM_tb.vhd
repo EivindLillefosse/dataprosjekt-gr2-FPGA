@@ -32,10 +32,10 @@ end conv_layer_tb;
 
 architecture Behavioral of conv_layer_tb is
     -- Test parameters
-    constant IMAGE_SIZE : integer := 28;  -- Smaller image for testing
+    constant IMAGE_SIZE : integer := 28;
     constant KERNEL_SIZE : integer := 3;
     constant INPUT_CHANNELS : integer := 1;
-    constant NUM_FILTERS : integer := 8;  -- Fewer filters for easier testing
+    constant NUM_FILTERS : integer := 8;
     constant STRIDE : integer := 1;
     constant BLOCK_SIZE : integer := 2;
     
@@ -64,21 +64,32 @@ architecture Behavioral of conv_layer_tb is
     -- Test image data (28x28 image)
     type test_image_type is array (0 to IMAGE_SIZE-1, 0 to IMAGE_SIZE-1) of integer;
     
-    -- Function to generate 28x28 test image
+    -- Function to generate 28x28 test image (same pattern as Python)
     function generate_test_image return test_image_type is
         variable temp_image : test_image_type;
     begin
+        -- Generate the same pattern as Python: (row + col + 1) mod 256
         for row in 0 to IMAGE_SIZE-1 loop
             for col in 0 to IMAGE_SIZE-1 loop
-                -- Create a simple pattern: row + col + 1 (mod 256)
-                -- This creates a diagonal gradient pattern
                 temp_image(row, col) := (row + col + 1) mod 256;
             end loop;
         end loop;
         return temp_image;
     end function;
     
+    -- Use generated function (guaranteed to match Python)
     constant test_image : test_image_type := generate_test_image;
+    
+    -- Alternative: To use the exact array from Python, uncomment the line below
+    -- and include the contents of model/test_image_array.vhd:
+    -- constant test_image : test_image_type := (
+    --     0 => (  1,   2,   3, ...), 
+    --     1 => (  2,   3,   4, ...),
+    --     ... copy from model/test_image_array.vhd
+    -- );
+    
+    -- Alternative: Use pre-generated array (uncomment if file I/O doesn't work)
+    -- Include the contents of model/test_image_array.vhd here if needed
     
     -- Test control signals
     signal test_done : boolean := false;
@@ -221,6 +232,11 @@ begin
         wait for CLK_PERIOD * 2;
         
         report "Starting convolution layer test...";
+        report "Test image ready - first pixel value: " & integer'image(test_image(0,0));
+        report "Test image pattern - corner values: [0,0]=" & integer'image(test_image(0,0)) & 
+               " [0,27]=" & integer'image(test_image(0,27)) & 
+               " [27,0]=" & integer'image(test_image(27,0)) & 
+               " [27,27]=" & integer'image(test_image(27,27));
         
         -- Start the convolution
         enable <= '1';

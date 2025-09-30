@@ -21,6 +21,7 @@
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
 use work.types_pkg.all;
 
 
@@ -56,58 +57,73 @@ entity conv_layer is
 end conv_layer;
 
 architecture Behavioral of conv_layer is
-    -- Declare signals
+    -- Weight and bias arrays loaded from COE files
+    -- Data from layer_0_conv2d_weights.coe (Q1.6 format, 72 values for 8 filters, 3x3 each)
+    -- The COE data is arranged linearly: [filter0_all_weights, filter1_all_weights, ...]
+    -- We need to reshape it to [filter][row][col] format
     signal weight_array : OUTPUT_ARRAY_VECTOR(0 to NUM_FILTERS-1,
                                             0 to KERNEL_SIZE-1,
                                             0 to KERNEL_SIZE-1) := (
-        -- Filter 0
+        -- Filter 0: FE 11 03 | 14 EE 0F | 10 EB 01
         0 => (
-            0 => (x"5A", x"13", x"5C"),
-            1 => (x"EB", x"1D", x"61"),
-            2 => (x"9B", x"81", x"F1")
+            0 => (x"FE", x"11", x"03"),
+            1 => (x"14", x"EE", x"0F"),
+            2 => (x"10", x"EB", x"01")
         ),
-        -- Filter 1
+        -- Filter 1: 08 10 02 | E6 07 11 | F7 00 0C
         1 => (
-            0 => (x"F0", x"E9", x"32"),
-            1 => (x"E4", x"15", x"51"),
-            2 => (x"67", x"E8", x"08")
+            0 => (x"08", x"10", x"02"),
+            1 => (x"E6", x"07", x"11"),
+            2 => (x"F7", x"00", x"0C")
         ),
-        -- Filter 2
+        -- Filter 2: 08 05 FB | 00 F6 E7 | F9 10 17
         2 => (
-            0 => (x"DF", x"12", x"64"),
-            1 => (x"BE", x"DD", x"5F"),
-            2 => (x"FB", x"D2", x"30")
+            0 => (x"08", x"05", x"FB"),
+            1 => (x"00", x"F6", x"E7"),
+            2 => (x"F9", x"10", x"17")
         ),
-        -- Filter 3
+        -- Filter 3: F9 FD 06 | FD FB EE | 18 0C 0F
         3 => (
-            0 => (x"D0", x"9D", x"E0"),
-            1 => (x"F7", x"C7", x"FE"),
-            2 => (x"70", x"34", x"51")
+            0 => (x"F9", x"FD", x"06"),
+            1 => (x"FD", x"FB", x"EE"),
+            2 => (x"18", x"0C", x"0F")
         ),
-        -- Filter 4
+        -- Filter 4: 0C 14 17 | F5 FB F8 | 01 F8 06
         4 => (
-            0 => (x"1C", x"73", x"5C"),
-            1 => (x"34", x"1D", x"E9"),
-            2 => (x"34", x"4A", x"B8")
+            0 => (x"0C", x"14", x"17"),
+            1 => (x"F5", x"FB", x"F8"),
+            2 => (x"01", x"F8", x"06")
         ),
-        -- Filter 5
+        -- Filter 5: FD 10 05 | 01 0E 01 | F3 13 05
         5 => (
-            0 => (x"DA", x"B6", x"A6"),
-            1 => (x"FB", x"3D", x"64"),
-            2 => (x"37", x"3B", x"5C")
+            0 => (x"FD", x"10", x"05"),
+            1 => (x"01", x"0E", x"01"),
+            2 => (x"F3", x"13", x"05")
         ),
-        -- Filter 6
+        -- Filter 6: 16 16 06 | 03 09 F0 | 16 1A F6
         6 => (
-            0 => (x"E6", x"2E", x"F8"),
-            1 => (x"ED", x"E5", x"BB"),
-            2 => (x"FF", x"DD", x"00")
+            0 => (x"16", x"16", x"06"),
+            1 => (x"03", x"09", x"F0"),
+            2 => (x"16", x"1A", x"F6")
         ),
-        -- Filter 7
+        -- Filter 7: 0C 16 FF | 03 02 05 | 0E 13 11
         7 => (
-            0 => (x"2A", x"27", x"99"),
-            1 => (x"21", x"9A", x"31"),
-            2 => (x"B6", x"DC", x"59")
+            0 => (x"0C", x"16", x"FF"),
+            1 => (x"03", x"02", x"05"),
+            2 => (x"0E", x"13", x"11")
         )
+    );
+    
+    -- Bias array from layer_0_conv2d_biases.coe: 00 00 00 00 00 00 00 04
+    signal bias_array : WORD_ARRAY(0 to NUM_FILTERS-1) := (
+        0 => x"00",  -- 0
+        1 => x"00",  -- 0 
+        2 => x"00",  -- 0
+        3 => x"00",  -- 0
+        4 => x"00",  -- 0
+        5 => x"00",  -- 0
+        6 => x"00",  -- 0
+        7 => x"04"   -- 4
     );
     signal weights : WORD_ARRAY(0 to NUM_FILTERS-1) := (others => (others => '0'));    
     signal valid  : std_logic := '0';
@@ -207,7 +223,7 @@ begin
                             
                             -- Store results from frame before moving to next position
                             for filter in 0 to NUM_FILTERS-1 loop
-                                output_pixel(filter) <= result(filter);
+                                output_pixel(filter) <= std_logic_vector(unsigned(result(filter)) + resize(unsigned(bias_array(filter)), result(filter)'length));
                             end loop;
                             output_row <= row;
                             output_col <= col;

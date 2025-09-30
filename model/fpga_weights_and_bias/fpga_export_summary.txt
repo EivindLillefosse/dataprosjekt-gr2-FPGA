@@ -1,0 +1,21 @@
+FPGA Weight Export Summary
+========================
+
+Quantization Format: Q1.6
+Fractional Bits: 6
+Scale Factor: 64
+Value Range: [-2.0, 1.984375]
+Step Size: 0.015625
+
+Total Layers Processed: 4
+Total Parameters: 27562
+
+Files Generated:
+  - layer_0_conv2d_weights.coe
+  - layer_0_conv2d_biases.coe
+  - layer_2_conv2d_1_weights.coe
+  - layer_2_conv2d_1_biases.coe
+  - layer_5_dense_weights.coe
+  - layer_5_dense_biases.coe
+  - layer_6_dense_1_weights.coe
+  - layer_6_dense_1_biases.coe

@@ -1,0 +1,12 @@
+; Layer 5: dense biases (Q1.6 format)
+; Shape: (64,)
+; Total elements: 64
+; Quantization: 6 fractional bits
+; Range: [-2.0, 1.984375]
+;
+memory_initialization_radix=16;
+memory_initialization_vector=
+FE,03,FD,07,01,FF,03,FE,05,FF,03,00,02,FE,03,00,
+01,FF,FF,03,01,FE,00,02,00,FF,01,FD,FF,00,01,FF,
+01,03,FC,00,02,00,06,03,FC,02,00,03,03,FD,01,FF,
+00,FF,05,FF,FF,FE,FF,FF,FD,02,02,FF,00,FC,FF,03;

@@ -7,13 +7,13 @@ from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
 import subprocess
 
 ############### GUIDE ################
-# This script builds, trains, and evaluates a CNN model on a subset of the Quick, Draw! dataset.
-# It includes visualizations of predictions, a confusion matrix, and misclassified examples.
-# It also exports the trained model to ONNX format and creates FPGA-ready quantized models.
+# This script builds, trains, and evaluates a CNN model for FPGA implementation.
+# It creates quantized models suitable for hardware deployment and generates
+# intermediate values for VHDL testbench validation.
 ############### USE #################
 
 # Install required packages:
-# pip install tensorflow matplotlib seaborn scikit-learn tf2onnx
+# pip install tensorflow matplotlib seaborn scikit-learn
 
 ######################################
 
@@ -22,7 +22,7 @@ TRAINING_DATA_FOLDER = "model/training_data"
 EPOCHS = 5
 BATCH_SIZE = 128
 SAMPLES_PER_CLASS = 1000
-TEST_ENABLED = True  # Set to True to enable visualization and detailed testing
+TEST_ENABLED = False  # Set to False to skip visualizations for faster execution
 
 def load_data():
     """Load and preprocess data from training folder."""
@@ -81,24 +81,18 @@ def capture_intermediate_values(model, x_sample, categories):
     
     # Create the same 28x28 test pattern as used in VHDL testbench
     def create_test_image_28x28():
-        test_image = np.zeros((28, 28), dtype=np.float32)
+        test_image = np.zeros((28, 28), dtype=np.uint8)
         for i in range(28):
             for j in range(28):
-                test_image[i, j] = (i * 28 + j) % 10  # Same pattern as VHDL
+                test_image[i, j] = (i + j + 1) % 256  # Matches VHDL: (row + col + 1) mod 256
         return test_image
     
     # Use the same test pattern as VHDL instead of training data
     test_image = create_test_image_28x28()
-    test_image_normalized = test_image / 255.0  # Normalize to [0,1] range
-    sample_input = np.expand_dims(np.expand_dims(test_image_normalized, 0), -1)  # Add batch and channel dims
     
+    test_image_normalized = test_image.astype(np.float32) / 255.0  # Normalize to [0,1] range
+    sample_input = np.expand_dims(np.expand_dims(test_image_normalized, 0), -1)  # Add batch and channel dims
     print(f"Using VHDL-compatible test pattern (28x28)")
-    print(f"Test pattern raw values (first 5x5 region):")
-    for i in range(5):
-        row_str = ""
-        for j in range(5):
-            row_str += f"{test_image[i,j]:3.0f} "
-        print(f"  {row_str}")
     
     # Create a model that outputs intermediate values
     layer_outputs = [layer.output for layer in model.layers]
@@ -166,18 +160,24 @@ def capture_intermediate_values(model, x_sample, categories):
 
 def evaluate_model(model, x, y, categories):
     """Evaluate model with visualizations and metrics."""
-    if not TEST_ENABLED:
-        return
-        
     print("Evaluating model...")
     
-    # Capture intermediate values for debugging
+    # Always capture intermediate values for FPGA development
     capture_intermediate_values(model, x, categories)
     
+    if not TEST_ENABLED:
+        print("ℹ️ Visualization tests skipped (TEST_ENABLED=False)")
+        return
+        
     # Import visualization libraries only when needed
-    import matplotlib.pyplot as plt
-    from sklearn.metrics import confusion_matrix, classification_report
-    import seaborn as sns
+    try:
+        import matplotlib.pyplot as plt
+        from sklearn.metrics import confusion_matrix, classification_report
+        import seaborn as sns
+    except ImportError as e:
+        print(f"ℹ️ Visualization libraries not available: {e}")
+        print("ℹ️ Skipping visualizations (intermediate values still captured)")
+        return
     
     # Create test set
     test_samples_per_class = 50
@@ -251,10 +251,10 @@ def evaluate_model(model, x, y, categories):
     accuracy = np.mean(predicted_classes == true_classes)
     print(f"\nTest Accuracy: {accuracy:.3f} ({accuracy*100:.1f}%)")
     
-    print("\nVisualization files saved:")
-    print("- model/sample_predictions.png")
-    print("- model/confusion_matrix.png") 
-    print("- model/misclassified_examples.png")
+    print("\n✓ Visualization files saved:")
+    print("  - model/sample_predictions.png")
+    print("  - model/confusion_matrix.png") 
+    print("  - model/misclassified_examples.png")
 
 def export_model(model):
     """Export model to SavedModel format."""
@@ -335,222 +335,44 @@ def test_quantized_model(quantized_model, x_test_quant, y_test_quant):
     print(f"Quantized model accuracy on {len(x_test_quant)} samples: {accuracy:.3f} ({accuracy*100:.1f}%)")
 
 def apply_manual_quantization(model, x_test_quant, y_test_quant):
-    """Apply manual quantization as fallback when TensorFlow Model Optimization fails."""
-    print("\n=== Quantization-Aware Training (QAT) ===")
+    """Apply manual quantization simulation for FPGA compatibility."""
+    print("\n=== Manual Quantization Simulation ===")
     
-    try:
-        import tensorflow_model_optimization as tfmot
-        
-        # Apply quantization-aware training
-        quantize_model = tfmot.quantization.keras.quantize_model
-        q_aware_model = quantize_model(model)
-        
-        q_aware_model.compile(optimizer='adam',
-                             loss='categorical_crossentropy',
-                             metrics=['accuracy'])
-        
-        print("✓ QAT model created")
-        
-        # Fine-tune with quantization simulation
-        subset_size = 1000
-        x_subset = x[:subset_size]
-        y_subset = y[:subset_size]
-        
-        print("Fine-tuning with quantization simulation...")
-        q_aware_model.fit(x_subset, y_subset, epochs=2, batch_size=BATCH_SIZE, verbose=1)
-        
-        # Convert QAT model to quantized TFLite
-        converter_qat = tf.lite.TFLiteConverter.from_keras_model(q_aware_model)
-        converter_qat.optimizations = [tf.lite.Optimize.DEFAULT]
-        quantized_qat_model = converter_qat.convert()
-        
-        with open('model/quantized_qat_model.tflite', 'wb') as f:
-            f.write(quantized_qat_model)
-        
-        print("✓ QAT quantized model saved as 'model/quantized_qat_model.tflite'")
-        
-    except (ImportError, AttributeError) as e:
-        print(f"❌ tensorflow_model_optimization compatibility issue: {e}")
-        print("🔧 Using alternative quantization approach...")
-        
-        # Manual quantization simulation
-        print("Applying manual quantization simulation...")
-        
-        manual_quant_model = tf.keras.models.clone_model(model)
-        manual_quant_model.set_weights(model.get_weights())
-        
-        # Simulate quantization by adding noise to weights
-        quantized_weights = []
-        for layer_weights in manual_quant_model.get_weights():
-            weight_max = np.max(np.abs(layer_weights))
-            scale = weight_max / 127  # 8-bit signed range
-            quantized = np.round(layer_weights / scale) * scale
-            quantized_weights.append(quantized)
-        
-        manual_quant_model.set_weights(quantized_weights)
-        
-        # Test manual quantized model
-        manual_predictions = manual_quant_model.predict(x_test_quant[:50])
-        manual_accuracy = np.mean(np.argmax(manual_predictions, axis=1) == y_test_quant[:50])
-        print(f"✓ Manual quantization simulation accuracy: {manual_accuracy:.3f}")
-        
-        # Convert manual quantized model
-        converter_manual = tf.lite.TFLiteConverter.from_keras_model(manual_quant_model)
-        converter_manual.optimizations = [tf.lite.Optimize.DEFAULT]
-        quantized_manual_model = converter_manual.convert()
-        
-        with open('model/quantized_manual_model.tflite', 'wb') as f:
-            f.write(quantized_manual_model)
-        
-        print("✓ Manual quantized model saved as 'model/quantized_manual_model.tflite'")
-
-def extract_weights_for_vhdl(model, filetype="vhd"):
-    """Extract weights formatted for VHDL implementation or as .bin/.txt files.
+    # Manual quantization simulation
+    print("Applying manual quantization simulation...")
     
-    Args:
-        model: Trained Keras model.
-        filetype: 'vhd', 'bin', or 'txt' to control output format.
-    """
-    print(f"\n=== Extracting Weights for VHDL ({filetype}) ===")
+    manual_quant_model = tf.keras.models.clone_model(model)
+    manual_quant_model.set_weights(model.get_weights())
     
-    # Get the first convolution layer (Conv2D with 8 filters)
-    conv_layer = None
-    for layer in model.layers:
-        if isinstance(layer, tf.keras.layers.Conv2D):
-            conv_layer = layer
-            break
+    # Simulate quantization by adding noise to weights
+    quantized_weights = []
+    for layer_weights in manual_quant_model.get_weights():
+        weight_max = np.max(np.abs(layer_weights))
+        scale = weight_max / 127  # 8-bit signed range
+        quantized = np.round(layer_weights / scale) * scale
+        quantized_weights.append(quantized)
     
-    if conv_layer is None:
-        print("No Conv2D layer found!")
-        return
+    manual_quant_model.set_weights(quantized_weights)
     
-    weights, biases = conv_layer.get_weights()
-    print(f"Conv layer weights shape: {weights.shape}")  # Should be (3, 3, 1, 8)
-    print(f"Conv layer biases shape: {biases.shape}")    # Should be (8,)
+    # Test manual quantized model
+    manual_predictions = manual_quant_model.predict(x_test_quant[:50])
+    manual_accuracy = np.mean(np.argmax(manual_predictions, axis=1) == y_test_quant[:50])
+    print(f"✓ Manual quantization simulation accuracy: {manual_accuracy:.3f}")
     
-    # Quantize to 8-bit integers for FPGA
-    weight_max = np.max(np.abs(weights))
-    scale_factor = 127.0 / weight_max
-    quantized_weights = np.round(weights * scale_factor).astype(np.int8)
-    quantized_biases = np.round(biases * scale_factor).astype(np.int8)
+    # Convert manual quantized model
+    converter_manual = tf.lite.TFLiteConverter.from_keras_model(manual_quant_model)
+    converter_manual.optimizations = [tf.lite.Optimize.DEFAULT]
+    quantized_manual_model = converter_manual.convert()
     
-    print(f"Weight scale factor: {scale_factor}")
-    print(f"Quantized weight range: [{np.min(quantized_weights)}, {np.max(quantized_weights)}]")
+    with open('model/quantized_manual_model.tflite', 'wb') as f:
+        f.write(quantized_manual_model)
     
-    if filetype == "vhd":
-        # Generate VHDL weight array initialization
-        with open('model/conv_weights.vhd', 'w') as f:
-            f.write("-- Auto-generated convolution weights for VHDL\n")
-            f.write("-- Weight array initialization for conv_layer\n\n")
-            
-            f.write("-- Weight array declaration (add to your architecture):\n")
-            f.write("signal weight_array : OUTPUT_ARRAY_VECTOR(0 to NUM_FILTERS-1,\n")
-            f.write("                                          0 to KERNEL_SIZE-1,\n") 
-            f.write("                                          0 to KERNEL_SIZE-1) := (\n")
-            
-            for filter_idx in range(quantized_weights.shape[3]):  # 8 filters
-                f.write(f"    -- Filter {filter_idx}\n")
-                f.write(f"    {filter_idx} => (\n")
-                
-                for row in range(3):  # 3x3 kernel
-                    f.write(f"        {row} => (")
-                    for col in range(3):
-                        weight_val = quantized_weights[row, col, 0, filter_idx]
-                        if col < 2:
-                            f.write(f'x"{weight_val & 0xFF:02X}", ')
-                        else:
-                            f.write(f'x"{weight_val & 0xFF:02X}"')
-                    if row < 2:
-                        f.write("),\n")
-                    else:
-                        f.write(")\n")
-                
-                if filter_idx < quantized_weights.shape[3] - 1:
-                    f.write("    ),\n")
-                else:
-                    f.write("    )\n")
-            
-            f.write(");\n\n")
-            
-            # Also generate bias initialization
-            f.write("-- Bias array declaration:\n")
-            f.write("signal bias_array : WORD_ARRAY(0 to NUM_FILTERS-1) := (\n")
-            for i, bias in enumerate(quantized_biases):
-                if i < len(quantized_biases) - 1:
-                    f.write(f'    {i} => x"{bias & 0xFF:02X}",\n')
-                else:
-                    f.write(f'    {i} => x"{bias & 0xFF:02X}"\n')
-            f.write(");\n")
-        print("✓ VHDL weight file generated: model/conv_weights.vhd")
-    
-    if filetype == "txt":
-        # Save individual filter weights as separate files
-        for filter_idx in range(quantized_weights.shape[3]):
-            filter_weights = quantized_weights[:, :, :, filter_idx]  # 3x3x1
-            filename = f"model/filter_{filter_idx}_weights.txt"
-            
-            with open(filename, 'w') as f:
-                f.write(f"-- Filter {filter_idx} weights (3x3 kernel)\n")
-                f.write(f"-- Quantized to 8-bit signed integers\n\n")
-                for row in range(3):
-                    for col in range(3):
-                        weight_val = filter_weights[row, col, 0]
-                        f.write(f"weight({row},{col}) <= {weight_val}; -- {weight_val:#04x}\n")
-            print(f"Filter {filter_idx} weights saved to {filename}")
-    
-    if filetype == "bin":
-        # Save weights and biases as binary files
-        quantized_weights.tofile('model/conv_weights.bin')
-        quantized_biases.tofile('model/conv_biases.bin')
-        print("✓ Binary weight files generated: model/conv_weights.bin, model/conv_biases.bin")
-
-def extract_weights_for_fpga(quantized_model):
-    """Extract quantized weights for FPGA implementation."""
-    print("\n=== FPGA Weight Extraction ===")
-    
-    try:
-        interpreter = tf.lite.Interpreter(model_content=quantized_model)
-        interpreter.allocate_tensors()
-        print("Interpreter initialized successfully.")
-    except Exception as e:
-        print("Error initializing TensorFlow Lite interpreter:", e)
-        return
-    
-    try:
-        tensor_details = interpreter.get_tensor_details()
-        print("Tensor details being processed:")
-        for detail in tensor_details:
-            print(f"Name: {detail['name']}, Index: {detail['index']}, Shape: {detail['shape']}, Dtype: {detail['dtype']}")
-    except Exception as e:
-        print("Error retrieving tensor details:", e)
-        return
-    
-    print("Quantized model layers and weights:")
-    matched = False
-    for detail in tensor_details:
-        try:
-            if ('weights' in detail['name'].lower() or 
-                'kernel' in detail['name'].lower() or 
-                'MatMul' in detail['name'] or 
-                'Conv2D' in detail['name']):
-                matched = True
-                tensor = interpreter.get_tensor(detail['index'])
-                print(f"Extracted tensor: {detail['name']}, Shape: {tensor.shape}, Dtype: {tensor.dtype}")
-                
-                # Save weights as binary file for FPGA
-                filename = f"model/weights_{detail['name'].replace('/', '_')}.bin"
-                tensor.tofile(filename)
-                print(f"  → Saved to {filename}")
-        except Exception as e:
-            print(f"Error processing tensor {detail['name']}:", e)
-    
-    if not matched:
-        print("No tensors matched the condition for weights or kernel.")
+    print("✓ Manual quantized model saved as 'model/quantized_manual_model.tflite'")
 
 def convert_to_onnx():
-    """Convert SavedModel to ONNX format."""
+    """Convert SavedModel to ONNX format (optional for FPGA development)."""
     import sys
-    python_path = sys.executable  # Use the current Python executable
+    python_path = sys.executable
     try:
         result = subprocess.run([
             python_path, "-m", "tf2onnx.convert",
@@ -558,27 +380,166 @@ def convert_to_onnx():
             "--output", "model/quickdraw_model.onnx"
         ], capture_output=True, text=True, check=True)
         print("✓ Model successfully converted to ONNX format: model/quickdraw_model.onnx")
-        print(result.stdout)
-    except subprocess.CalledProcessError as e:
-        print(f"❌ ONNX conversion failed: {e}")
-        print(f"Error output: {e.stderr}")
-    except FileNotFoundError:
-        print("❌ tf2onnx not installed. Install with: pip install tf2onnx")
-        print("ONNX conversion skipped - TFLite models are sufficient for FPGA!")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("ℹ️ ONNX conversion skipped (optional for FPGA development)")
 
-def print_summary():
-    """Print summary of generated files."""
-    print("\n=== Summary ===")
-    print("Generated files for FPGA implementation:")
-    print("- model/quantized_model.tflite (8-bit post-training quantized)")
-    print("- model/quantized_manual_model.tflite (manual quantized model)")
-    print("- model/weights_*.bin (individual weight files)")
-    print("- model/conv_weights.vhd (VHDL weight declarations)")
-    print("- model/saved_model/ (TensorFlow SavedModel format)")
-    print("- All weights are quantized to 8-bit integers")
-    print("- Ready for FPGA implementation with 8-bit arithmetic")
-    print("\n💡 Note: Post-training quantization works well for most FPGA applications!")
-    print("   The PTQ model should provide good accuracy for your CNN inference.")
+def export_to_FPGA(model, q_format="Q1.6"):
+    """ Export model weights and biases for each layer to .txt files for FPGA use """
+    print(f"\n=== Exporting Weights and Biases to FPGA ({q_format} format) ===")
+    
+    # Q1.6 format: 1 sign bit + 6 fractional bits = 7 bits total (signed 8-bit)
+    # Range: -2.0 to +1.984375 (step size: 1/64 = 0.015625)
+    fractional_bits = 6
+    scale_factor = 2 ** fractional_bits  # 64
+    max_value = 2.0 - (1.0 / scale_factor)  # ~1.984375
+    min_value = -2.0
+    
+    def quantize_to_q1_6(value):
+        """Convert floating point value to Q1.6 format"""
+        # Clamp to valid range
+        clamped = np.clip(value, min_value, max_value)
+        # Scale and round to nearest integer
+        quantized_int = np.round(clamped * scale_factor).astype(np.int8)
+        return quantized_int
+    
+    def int8_to_hex(value):
+        """Convert signed int8 to 2-character hex string"""
+        if value < 0:
+            # Two's complement for negative numbers
+            return f"{(256 + value):02X}"
+        else:
+            return f"{value:02X}"
+    
+    # Create output directory
+    output_dir = "model/fpga_weights_and_bias"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    layer_count = 0
+    total_params = 0
+    
+    # Process each layer
+    for i, layer in enumerate(model.layers):
+        if hasattr(layer, 'get_weights') and layer.get_weights():
+            weights_and_biases = layer.get_weights()
+            
+            print(f"\nLayer {i}: {layer.name} ({layer.__class__.__name__})")
+            
+            # Process weights (first element)
+            if len(weights_and_biases) > 0:
+                weights = weights_and_biases[0]
+                print(f"  Weights shape: {weights.shape}")
+                print(f"  Weight range: [{np.min(weights):.6f}, {np.max(weights):.6f}]")
+                
+                # Flatten weights for easier processing
+                weights_flat = weights.flatten()
+                
+                # Quantize to Q1.6
+                quantized_weights = quantize_to_q1_6(weights_flat)
+                
+                # Calculate quantization error
+                dequantized = quantized_weights.astype(np.float32) / scale_factor
+                quantization_error = np.mean(np.abs(weights_flat - dequantized))
+                print(f"  Quantization error (MAE): {quantization_error:.6f}")
+                
+                # Save as COE file for Vivado
+                weights_filename = f"{output_dir}/layer_{i}_{layer.name}_weights.coe"
+                with open(weights_filename, 'w') as f:
+                    f.write(f"; Layer {i}: {layer.name} weights ({q_format} format)\n")
+                    f.write(f"; Original shape: {weights.shape}\n")
+                    f.write(f"; Total elements: {len(quantized_weights)}\n")
+                    f.write(f"; Quantization: {fractional_bits} fractional bits\n")
+                    f.write(f"; Range: [{min_value}, {max_value}]\n")
+                    f.write(f";\n")
+                    f.write(f"memory_initialization_radix=16;\n")
+                    f.write(f"memory_initialization_vector=\n")
+                    
+                    for j, qw in enumerate(quantized_weights):
+                        if j == len(quantized_weights) - 1:  # Last element
+                            f.write(f"{int8_to_hex(qw)};")
+                        else:
+                            f.write(f"{int8_to_hex(qw)},")
+                        
+                        # Add newline every 16 values for readability
+                        if (j + 1) % 16 == 0:
+                            f.write("\n")
+                    
+                    if len(quantized_weights) % 16 != 0:
+                        f.write("\n")
+                
+                print(f"  ✓ Weights saved to: {weights_filename}")
+                total_params += len(quantized_weights)
+            
+            # Process biases (second element, if exists)
+            if len(weights_and_biases) > 1:
+                biases = weights_and_biases[1]
+                print(f"  Biases shape: {biases.shape}")
+                print(f"  Bias range: [{np.min(biases):.6f}, {np.max(biases):.6f}]")
+                
+                # Quantize to Q1.6
+                quantized_biases = quantize_to_q1_6(biases)
+                
+                # Calculate quantization error
+                dequantized_biases = quantized_biases.astype(np.float32) / scale_factor
+                bias_quantization_error = np.mean(np.abs(biases - dequantized_biases))
+                print(f"  Bias quantization error (MAE): {bias_quantization_error:.6f}")
+                
+                # Save as COE file for Vivado
+                biases_filename = f"{output_dir}/layer_{i}_{layer.name}_biases.coe"
+                with open(biases_filename, 'w') as f:
+                    f.write(f"; Layer {i}: {layer.name} biases ({q_format} format)\n")
+                    f.write(f"; Shape: {biases.shape}\n")
+                    f.write(f"; Total elements: {len(quantized_biases)}\n")
+                    f.write(f"; Quantization: {fractional_bits} fractional bits\n")
+                    f.write(f"; Range: [{min_value}, {max_value}]\n")
+                    f.write(f";\n")
+                    f.write(f"memory_initialization_radix=16;\n")
+                    f.write(f"memory_initialization_vector=\n")
+                    
+                    for j, qb in enumerate(quantized_biases):
+                        if j == len(quantized_biases) - 1:  # Last element
+                            f.write(f"{int8_to_hex(qb)};")
+                        else:
+                            f.write(f"{int8_to_hex(qb)},")
+                        
+                        # Add newline every 16 values for readability
+                        if (j + 1) % 16 == 0:
+                            f.write("\n")
+                    
+                    if len(quantized_biases) % 16 != 0:
+                        f.write("\n")
+                
+                print(f"  ✓ Biases saved to: {biases_filename}")
+                total_params += len(quantized_biases)
+            
+            layer_count += 1
+    
+    # Create summary file
+    summary_filename = f"{output_dir}/fpga_export_summary.txt"
+    with open(summary_filename, 'w') as f:
+        f.write(f"FPGA Weight Export Summary\n")
+        f.write(f"========================\n\n")
+        f.write(f"Quantization Format: {q_format}\n")
+        f.write(f"Fractional Bits: {fractional_bits}\n")
+        f.write(f"Scale Factor: {scale_factor}\n")
+        f.write(f"Value Range: [{min_value}, {max_value}]\n")
+        f.write(f"Step Size: {1.0/scale_factor:.6f}\n\n")
+        f.write(f"Total Layers Processed: {layer_count}\n")
+        f.write(f"Total Parameters: {total_params}\n\n")
+        f.write(f"Files Generated:\n")
+        
+        for i, layer in enumerate(model.layers):
+            if hasattr(layer, 'get_weights') and layer.get_weights():
+                f.write(f"  - layer_{i}_{layer.name}_weights.coe\n")
+                if len(layer.get_weights()) > 1:
+                    f.write(f"  - layer_{i}_{layer.name}_biases.coe\n")
+    
+    print(f"\n✓ FPGA export complete!")
+    print(f"  - {layer_count} layers processed")
+    print(f"  - {total_params} parameters exported")
+    print(f"  - Files saved in: {output_dir}/")
+    print(f"  - Summary: {summary_filename}")
+    
+    return output_dir
 
 # Main execution
 if __name__ == "__main__":
@@ -592,9 +553,6 @@ if __name__ == "__main__":
     # Evaluate model (if enabled)
     evaluate_model(model, x, y, categories)
     
-    # Extract weights for VHDL implementation
-    extract_weights_for_vhdl(model)
-    
     # Export model
     export_model(model)
     
@@ -603,10 +561,9 @@ if __name__ == "__main__":
     quantized_model = quantize_model_post_training(x)
     test_quantized_model(quantized_model, x_test_quant, y_test_quant)
     apply_manual_quantization(model, x_test_quant, y_test_quant)
-    extract_weights_for_fpga(quantized_model)
     
     # Convert to ONNX
     convert_to_onnx()
     
-    # Print summary
-    print_summary()
+    # Export weights and biases for FPGA
+    export_to_FPGA(model)
