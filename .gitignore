@@ -32,7 +32,6 @@ __pycache__/
 *.bd
 *.bd.bak
 *.bd.tcl
-*.xci
 *.xsa
 *.xsc
 *.xdc~  # backup constraint files
