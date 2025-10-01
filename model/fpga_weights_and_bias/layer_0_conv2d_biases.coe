@@ -4,6 +4,5 @@
 ; Quantization: 6 fractional bits
 ; Range: [-2.0, 1.984375]
 ;
-memory_initialization_radix=16;
-memory_initialization_vector=
-00,00,02,03,00,00,00,00;
+memory_initialization_radix=16; Hexadecimal format
+memory_initialization_vector=05,FF,00,05,01,FF,00,00;

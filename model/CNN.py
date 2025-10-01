@@ -441,26 +441,32 @@ def export_to_FPGA(model, q_format="Q1.6"):
                 quantization_error = np.mean(np.abs(weights_flat - dequantized))
                 print(f"  Quantization error (MAE): {quantization_error:.6f}")
                 
-                # Save as COE file for Vivado
+                # Save as COE file for Vivado (proper format)
                 weights_filename = f"{output_dir}/layer_{i}_{layer.name}_weights.coe"
                 with open(weights_filename, 'w') as f:
+                    # COE file header with proper format
                     f.write(f"; Layer {i}: {layer.name} weights ({q_format} format)\n")
                     f.write(f"; Original shape: {weights.shape}\n")
                     f.write(f"; Total elements: {len(quantized_weights)}\n")
                     f.write(f"; Quantization: {fractional_bits} fractional bits\n")
                     f.write(f"; Range: [{min_value}, {max_value}]\n")
                     f.write(f";\n")
-                    f.write(f"memory_initialization_radix=16;\n")
-                    f.write(f"memory_initialization_vector=\n")
                     
+                    # Proper COE format keywords
+                    f.write(f"memory_initialization_radix=16; Hexadecimal format\n")
+                    f.write(f"memory_initialization_vector=")
+                    
+                    # Write data values
                     for j, qw in enumerate(quantized_weights):
-                        if j == len(quantized_weights) - 1:  # Last element
-                            f.write(f"{int8_to_hex(qw)};")
+                        if j == 0:
+                            f.write(f"{int8_to_hex(qw)}")
+                        elif j == len(quantized_weights) - 1:  # Last element
+                            f.write(f",{int8_to_hex(qw)};")
                         else:
-                            f.write(f"{int8_to_hex(qw)},")
+                            f.write(f",{int8_to_hex(qw)}")
                         
                         # Add newline every 16 values for readability
-                        if (j + 1) % 16 == 0:
+                        if (j + 1) % 16 == 0 and j != len(quantized_weights) - 1:
                             f.write("\n")
                     
                     if len(quantized_weights) % 16 != 0:
@@ -483,26 +489,32 @@ def export_to_FPGA(model, q_format="Q1.6"):
                 bias_quantization_error = np.mean(np.abs(biases - dequantized_biases))
                 print(f"  Bias quantization error (MAE): {bias_quantization_error:.6f}")
                 
-                # Save as COE file for Vivado
+                # Save as COE file for Vivado (proper format)
                 biases_filename = f"{output_dir}/layer_{i}_{layer.name}_biases.coe"
                 with open(biases_filename, 'w') as f:
+                    # COE file header with proper format
                     f.write(f"; Layer {i}: {layer.name} biases ({q_format} format)\n")
                     f.write(f"; Shape: {biases.shape}\n")
                     f.write(f"; Total elements: {len(quantized_biases)}\n")
                     f.write(f"; Quantization: {fractional_bits} fractional bits\n")
                     f.write(f"; Range: [{min_value}, {max_value}]\n")
                     f.write(f";\n")
-                    f.write(f"memory_initialization_radix=16;\n")
-                    f.write(f"memory_initialization_vector=\n")
                     
+                    # Proper COE format keywords
+                    f.write(f"memory_initialization_radix=16; Hexadecimal format\n")
+                    f.write(f"memory_initialization_vector=")
+                    
+                    # Write data values
                     for j, qb in enumerate(quantized_biases):
-                        if j == len(quantized_biases) - 1:  # Last element
-                            f.write(f"{int8_to_hex(qb)};")
+                        if j == 0:
+                            f.write(f"{int8_to_hex(qb)}")
+                        elif j == len(quantized_biases) - 1:  # Last element
+                            f.write(f",{int8_to_hex(qb)};")
                         else:
-                            f.write(f"{int8_to_hex(qb)},")
+                            f.write(f",{int8_to_hex(qb)}")
                         
                         # Add newline every 16 values for readability
-                        if (j + 1) % 16 == 0:
+                        if (j + 1) % 16 == 0 and j != len(quantized_biases) - 1:
                             f.write("\n")
                     
                     if len(quantized_biases) % 16 != 0:
