@@ -93,38 +93,85 @@ if {[file isdirectory $constraints_dir]} {
 puts "\n=== Adding IP Cores ==="
 set memory_dir "./src/memory"
 if {[file isdirectory $memory_dir]} {
-    # Add weight memory IP
-    set weight_ip_file "$memory_dir/conv0_mem_weights.xci"
-    if {[file exists $weight_ip_file]} {
-        puts "Adding IP: $weight_ip_file"
-        if {[catch {add_files $weight_ip_file} result]} {
-            puts "Warning: Failed to add weight IP: $result"
-        } else {
-            puts "Successfully added weight IP"
+    # Find all .xci files in the memory directory
+    set ip_files [glob -nocomplain "$memory_dir/*.xci"]
+    
+    if {[llength $ip_files] > 0} {
+        puts "Found [llength $ip_files] IP core(s) in $memory_dir"
+        
+        foreach ip_file $ip_files {
+            set ip_name [file tail [file rootname $ip_file]]
+            puts "Adding IP: $ip_name ($ip_file)"
+            
+            if {[catch {add_files $ip_file} result]} {
+                puts "Warning: Failed to add IP $ip_name: $result"
+            } else {
+                puts "Successfully added IP: $ip_name"
+            }
         }
     } else {
-        puts "Warning: Weight memory IP not found: $weight_ip_file"
+        puts "No IP cores (.xci files) found in $memory_dir"
     }
     
-    # Add bias memory IP
-    set bias_ip_file "$memory_dir/conv0_mem_bias.xci"
-    if {[file exists $bias_ip_file]} {
-        puts "Adding IP: $bias_ip_file"
-        if {[catch {add_files $bias_ip_file} result]} {
-            puts "Warning: Failed to add bias IP: $result"
-        } else {
-            puts "Successfully added bias IP"
+    # Also check for any subdirectories that might contain IP cores
+    foreach subdir [glob -nocomplain -type d "$memory_dir/*"] {
+        set sub_ip_files [glob -nocomplain "$subdir/*.xci"]
+        if {[llength $sub_ip_files] > 0} {
+            puts "Found [llength $sub_ip_files] IP core(s) in [file tail $subdir]"
+            
+            foreach ip_file $sub_ip_files {
+                set ip_name [file tail [file rootname $ip_file]]
+                puts "Adding IP: $ip_name ($ip_file)"
+                
+                if {[catch {add_files $ip_file} result]} {
+                    puts "Warning: Failed to add IP $ip_name: $result"
+                } else {
+                    puts "Successfully added IP: $ip_name"
+                }
+            }
         }
-    } else {
-        puts "Warning: Bias memory IP not found: $bias_ip_file"
     }
 } else {
     puts "Warning: Memory directory '$memory_dir' does not exist."
 }
 
+# Fix COE file paths before IP generation
+puts "\n=== Fixing COE File Paths ==="
+set all_ips [get_ips]
+if {[llength $all_ips] > 0} {
+    foreach ip $all_ips {
+        # Get current COE file path
+        if {[catch {set current_coe [get_property CONFIG.Coe_File [get_ips $ip]]} result]} {
+            puts "IP $ip does not use COE files"
+            continue
+        }
+        
+        if {$current_coe != ""} {
+            puts "Updating COE path for IP: $ip"
+            puts "Current path: $current_coe"
+            
+            # Convert to absolute path
+            if {[string match "*weights*" $ip]} {
+                set abs_coe_path [file normalize "./model/fpga_weights_and_bias/layer_0_conv2d_weights.coe"]
+            } elseif {[string match "*bias*" $ip]} {
+                set abs_coe_path [file normalize "./model/fpga_weights_and_bias/layer_0_conv2d_biases.coe"]
+            } else {
+                puts "Warning: Unknown IP type for $ip, skipping COE update"
+                continue
+            }
+            
+            if {[file exists $abs_coe_path]} {
+                puts "Setting absolute COE path: $abs_coe_path"
+                set_property CONFIG.Coe_File $abs_coe_path [get_ips $ip]
+            } else {
+                puts "Warning: COE file not found: $abs_coe_path"
+            }
+        }
+    }
+}
+
 # Generate IP output products
 puts "\n=== Generating IP Output Products ==="
-set all_ips [get_ips]
 if {[llength $all_ips] > 0} {
     puts "Found IPs: $all_ips"
     foreach ip $all_ips {

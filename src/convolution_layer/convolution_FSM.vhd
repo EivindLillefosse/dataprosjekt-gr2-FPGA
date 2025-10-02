@@ -62,9 +62,7 @@ architecture Behavioral of conv_layer is
     PORT (
         clka : IN STD_LOGIC;
         ena : IN STD_LOGIC;
-        wea : IN STD_LOGIC_VECTOR(0 DOWNTO 0);
         addra : IN STD_LOGIC_VECTOR(6 DOWNTO 0);
-        dina : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
         douta : OUT STD_LOGIC_VECTOR(7 DOWNTO 0) 
     );
     END COMPONENT;
@@ -73,9 +71,7 @@ architecture Behavioral of conv_layer is
     PORT (
         clka : IN STD_LOGIC;
         ena : IN STD_LOGIC;
-        wea : IN STD_LOGIC_VECTOR(0 DOWNTO 0);
         addra : IN STD_LOGIC_VECTOR(2 DOWNTO 0);
-        dina : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
         douta : OUT STD_LOGIC_VECTOR(7 DOWNTO 0) 
     );
     END COMPONENT;
@@ -110,9 +106,7 @@ begin
     PORT MAP (
         clka => clk,
         ena => weight_en,
-        wea => "0",  -- Read-only, no write enable
         addra => weight_addr,
-        dina => (others => '0'),  -- Not writing, tie to zero
         douta => weight_data
     );
 
@@ -120,9 +114,7 @@ begin
     PORT MAP (
         clka => clk,
         ena => bias_en,
-        wea => "0",  -- Read-only, no write enable
         addra => bias_addr,
-        dina => (others => '0'),  -- Not writing, tie to zero
         douta => bias_data
     );
 
@@ -154,6 +146,8 @@ begin
         variable within_row, within_col : integer := 0;
         variable block_index : integer := 0;
         variable region_row, region_col : integer := 0;
+        -- BRAM read latency counter
+        variable wait_cycles : integer := 0;
     begin
         if rst = '1' then
             current_state <= IDLE;
@@ -169,6 +163,7 @@ begin
             block_index := 0;
             region_row := 0;
             region_col := 0;
+            wait_cycles := 0;
             region_done <= '0';
             layer_done <= '0';
             weight_addr <= (others => '0');
@@ -191,11 +186,16 @@ begin
                         current_filter * (KERNEL_SIZE * KERNEL_SIZE) + 
                         (region_row * KERNEL_SIZE + region_col), 7));
                     weight_en <= '1';
+                    wait_cycles := 0;  -- Reset wait counter
                     current_state <= WAIT_WEIGHTS;
 
                 when WAIT_WEIGHTS =>
-                    -- Wait one cycle for BRAM read latency
-                    current_state <= LOAD_DATA;
+                    -- Simple counter-based wait for BRAM read latency
+                    wait_cycles := wait_cycles + 1;
+                    if wait_cycles >= 2 then  -- Wait 2 cycles for registered BRAM output
+                        weight_en <= '0';
+                        current_state <= LOAD_DATA;
+                    end if;
 
                 when LOAD_DATA =>
                     weight_en <= '0';
@@ -207,13 +207,13 @@ begin
                         current_state <= LOAD_WEIGHTS;
                     else
                         -- All weights loaded for this position
-                        current_filter <= 0;
                         
                         input_row <= row + region_row;
                         input_col <= col + region_col;
                         input_ready <= '1';
 
                         if input_valid = '1' then
+                            current_filter <= 0;
                             valid <= '1';
                             input_ready <= '0';
                             current_state <= COMPUTE;
