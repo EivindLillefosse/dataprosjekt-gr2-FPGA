@@ -17,99 +17,96 @@ entity arty_spi_top is
         spi_miso        : out std_logic;   -- JA3
         spi_ss_n        : in  std_logic;   -- JA4
         
-        -- LEDs to show received data (4 regular LEDs on Arty)
-        led             : out std_logic_vector(3 downto 0);
-        
-        -- Use RGB LEDs to show upper 4 bits and ACK
-        led1_r          : out std_logic;   -- Bit 4 of received data
-        led1_g          : out std_logic;   -- Bit 5 of received data
-        led1_b          : out std_logic;   -- Bit 6 of received data
-        led2_r          : out std_logic;   -- Bit 7 of received data (MSB)
-        led2_g          : out std_logic;   -- ACK signal when byte received
-        led2_b          : out std_logic;   -- Unused
-        
-        -- RGB LEDs to show status
-        led0_r          : out std_logic;   -- Red when data received
-        led0_g          : out std_logic;   -- Green when idle
-        led0_b          : out std_logic    -- Blue unused
+        -- LEDs 0-7 to show 8-bit pixel value received from MOSI (LED0=bit7, LED7=bit0)
+        led0            : out std_logic;   -- Bit 7 (MSB)
+        led1            : out std_logic;   -- Bit 6
+        led2            : out std_logic;   -- Bit 5
+        led3            : out std_logic;   -- Bit 4
+        led4            : out std_logic;   -- Bit 3
+        led5            : out std_logic;   -- Bit 2
+        led6            : out std_logic;   -- Bit 1
+        led7            : out std_logic    -- Bit 0 (LSB)
     );
 end arty_spi_top;
 
 architecture Behavioral of arty_spi_top is
-    -- Component declaration for our simple SPI slave
-    component spi_slave_simple is
+    -- Component declaration for SPI slave
+    component SPI_SLAVE is
+        generic (
+            WORD_SIZE : natural := 8
+        );
         port (
-            clk         : in  std_logic;
-            rst_n       : in  std_logic;
-            sclk        : in  std_logic;
-            mosi        : in  std_logic;
-            miso        : out std_logic;
-            ss_n        : in  std_logic;
-            data_in     : in  std_logic_vector(7 downto 0);
-            data_out    : out std_logic_vector(7 downto 0);
-            data_ready  : out std_logic;
-            byte_ack    : out std_logic
+            CLK             : in  std_logic;
+            RESET           : in  std_logic;
+            SCLK            : in  std_logic;
+            CS_N            : in  std_logic;
+            MOSI            : in  std_logic;
+            MISO            : out std_logic;
+            DATA_IN         : in  std_logic_vector(7 downto 0);
+            DATA_IN_VALID   : in  std_logic;
+            DATA_IN_READY   : out std_logic;
+            DATA_OUT        : out std_logic_vector(7 downto 0);
+            DATA_OUT_VALID  : out std_logic
         );
     end component;
     
     -- Internal signals
-    signal rst_n        : std_logic;
-    signal spi_data_out : std_logic_vector(7 downto 0);
-    signal spi_data_in  : std_logic_vector(7 downto 0);
-    signal data_ready   : std_logic;
-    signal byte_ack     : std_logic;
+    signal reset_active     : std_logic;
+    signal spi_data_out     : std_logic_vector(7 downto 0);
+    signal spi_data_in      : std_logic_vector(7 downto 0);
+    signal spi_data_in_valid: std_logic;
+    signal spi_data_in_ready: std_logic;
+    signal data_out_valid   : std_logic;
     
-    -- Data register to hold received values
-    signal received_data : std_logic_vector(7 downto 0) := x"AA";
+    -- Pixel value register to hold received data
+    signal pixel_value : std_logic_vector(7 downto 0) := x"00";
     
 begin
-    -- Invert reset button (button is active high, SPI slave needs active low reset)
-    rst_n <= not btn_reset;
+    -- Reset is active high for new SPI module
+    reset_active <= btn_reset;
     
-    -- For demo: send back the inverse of what we received
-    spi_data_in <= not received_data;
+    -- Send back the inverse of received pixel value
+    spi_data_in <= not pixel_value;
+    spi_data_in_valid <= '1';  -- Always ready to send data
     
-    -- Show all 8 bits of received data across multiple LEDs
-    led <= received_data(3 downto 0);     -- Lower 4 bits on regular LEDs
-    
-    -- Upper 4 bits on RGB LEDs
-    led1_r <= received_data(4);           -- Bit 4
-    led1_g <= received_data(5);           -- Bit 5  
-    led1_b <= received_data(6);           -- Bit 6
-    led2_r <= received_data(7);           -- Bit 7 (MSB)
-    
-    -- Status indication
-    led0_r <= data_ready;                 -- Red flash when data received
-    led0_g <= not data_ready;             -- Green when idle
-    led0_b <= '0';                        -- Blue unused
-    
-    -- ACK indication
-    led2_b <= byte_ack;                   -- Green flash when complete byte ACK
-    led2_g <= '0';                        -- Blue unused
+    -- Display real-time SPI shift register on LEDs 0-7 (LED0=bit7, LED7=bit0)
+    -- This shows bits shifting in real-time as they are received
+    led0 <= spi_data_out(7);  -- MSB - shows current shift register bit 7
+    led1 <= spi_data_out(6);  -- Shows current shift register bit 6
+    led2 <= spi_data_out(5);  -- Shows current shift register bit 5
+    led3 <= spi_data_out(4);  -- Shows current shift register bit 4
+    led4 <= spi_data_out(3);  -- Shows current shift register bit 3
+    led5 <= spi_data_out(2);  -- Shows current shift register bit 2
+    led6 <= spi_data_out(1);  -- Shows current shift register bit 1
+    led7 <= spi_data_out(0);  -- LSB - shows current shift register bit 0
     
     -- Instantiate SPI slave
-    spi_slave_inst: spi_slave_simple
+    spi_slave_inst: SPI_SLAVE
+        generic map (
+            WORD_SIZE => 8
+        )
         port map (
-            clk         => clk100,
-            rst_n       => rst_n,
-            sclk        => spi_sclk,
-            mosi        => spi_mosi,
-            miso        => spi_miso,
-            ss_n        => spi_ss_n,
-            data_in     => spi_data_in,
-            data_out    => spi_data_out,
-            data_ready  => data_ready,
-            byte_ack    => byte_ack
+            CLK             => clk100,
+            RESET           => reset_active,
+            SCLK            => spi_sclk,
+            CS_N            => spi_ss_n,
+            MOSI            => spi_mosi,
+            MISO            => spi_miso,
+            DATA_IN         => spi_data_in,
+            DATA_IN_VALID   => spi_data_in_valid,
+            DATA_IN_READY   => spi_data_in_ready,
+            DATA_OUT        => spi_data_out,
+            DATA_OUT_VALID  => data_out_valid
         );
     
-    -- Process to store received data
+    -- Process to store completed pixel values (for reference, though LEDs show real-time data)
     process(clk100)
     begin
         if rising_edge(clk100) then
-            if rst_n = '0' then
-                received_data <= x"AA";  -- Default pattern
-            elsif data_ready = '1' then
-                received_data <= spi_data_out;  -- Store new received data
+            if reset_active = '1' then
+                pixel_value <= x"00";  -- Clear stored value
+            elsif data_out_valid = '1' then
+                pixel_value <= spi_data_out;  -- Store completed 8-bit word
             end if;
         end if;
     end process;

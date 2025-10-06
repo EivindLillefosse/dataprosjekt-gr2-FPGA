@@ -1,141 +1,225 @@
+--------------------------------------------------------------------------------
+-- PROJECT: SPI MASTER AND SLAVE FOR FPGA
+--------------------------------------------------------------------------------
+-- AUTHORS: Jakub Cabal <jakubcabal@gmail.com>
+-- LICENSE: The MIT License, please read LICENSE file
+-- WEBSITE: https://github.com/jakubcabal/spi-fpga
+--------------------------------------------------------------------------------
+
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use IEEE.MATH_REAL.ALL;
 
-entity spi_slave_simple_tb is
-end spi_slave_simple_tb;
+entity SPI_SLAVE_TB is
+    Generic (
+        CLK_FREQ      : natural := 50e6; -- system clock frequency in Hz
+        SPI_FREQ      : natural := 1e6;  -- spi clock frequency in Hz
+        WORD_SIZE     : natural := 8;    -- size of transfer word in bits, must be power of two
+        TRANS_COUNT   : natural := 1e4   -- number of test transaction
+    );
+end entity;
 
-architecture Behavioral of spi_slave_simple_tb is
-    -- Component declaration
-    component spi_slave_simple is
-        port (
-            clk         : in  std_logic;
-            rst_n       : in  std_logic;
-            sclk        : in  std_logic;
-            mosi        : in  std_logic;
-            miso        : out std_logic;
-            ss_n        : in  std_logic;
-            data_in     : in  std_logic_vector(7 downto 0);
-            data_out    : out std_logic_vector(7 downto 0);
-            data_ready  : out std_logic
-        );
-    end component;
-    
-    -- Test signals
-    signal clk : std_logic := '0';
-    signal rst_n : std_logic := '0';
-    signal sclk : std_logic := '0';
-    signal mosi : std_logic := '0';
-    signal miso : std_logic;
-    signal ss_n : std_logic := '1';
-    signal data_in : std_logic_vector(7 downto 0) := x"AA";  -- Default test data
-    signal data_out : std_logic_vector(7 downto 0);
-    signal data_ready : std_logic;
-    
-    -- Test control
-    signal test_done : boolean := false;
-    
-    -- Clock periods
-    constant CLK_PERIOD : time := 10 ns;   -- 100 MHz system clock
-    constant SCLK_PERIOD : time := 200 ns; -- Much slower SPI clock for easy viewing
-    
-begin
-    -- Instantiate the Unit Under Test (UUT)
-    uut: spi_slave_simple
-        port map (
-            clk => clk,
-            rst_n => rst_n,
-            sclk => sclk,
-            mosi => mosi,
-            miso => miso,
-            ss_n => ss_n,
-            data_in => data_in,
-            data_out => data_out,
-            data_ready => data_ready
-        );
-    
-    -- System clock generation
-    clk_process: process
+architecture SIM of SPI_SLAVE_TB is
+
+    constant CLK_PERIOD : time := 1 ns * integer(real(1e9)/real(CLK_FREQ));
+    constant SPI_PERIOD : time := 1 ns * integer(real(1e9)/real(SPI_FREQ));
+    constant RX_OFFSET  : natural := 42;
+    constant TX_OFFSET  : natural := 11;
+
+    signal CLK            : std_logic;
+    signal RST            : std_logic;
+
+    signal sclk           : std_logic := '0';
+    signal cs_n           : std_logic := '1';
+    signal mosi           : std_logic;
+    signal miso           : std_logic;
+
+    signal udi            : std_logic_vector(WORD_SIZE-1 downto 0);
+    signal udi_vld        : std_logic;
+    signal udi_rdy        : std_logic;
+    signal udo            : std_logic_vector(WORD_SIZE-1 downto 0);
+    signal udo_exp        : std_logic_vector(WORD_SIZE-1 downto 0);
+    signal udo_vld        : std_logic;
+
+    signal spi_mdi        : std_logic_vector(WORD_SIZE-1 downto 0);
+    signal spi_mdo        : std_logic_vector(WORD_SIZE-1 downto 0);
+    signal spi_mdo_exp    : std_logic_vector(WORD_SIZE-1 downto 0);
+
+    signal spi_model_done : std_logic := '0';
+    signal udi_done       : std_logic := '0';
+    signal udo_done       : std_logic := '0';
+    signal sim_done       : std_logic := '0';
+    signal rand_int       : integer := 0;
+    signal count_rx       : integer;
+    signal count_tx       : integer;
+
+    procedure SPI_MASTER (
+        constant SPI_PER : time;
+        signal SMM_MDI  : in  std_logic_vector(WORD_SIZE-1 downto 0);
+        signal SMM_MDO  : out std_logic_vector(WORD_SIZE-1 downto 0);
+        signal SMM_SCLK : out std_logic;
+        signal SMM_CS_N : out std_logic;
+        signal SMM_MOSI : out std_logic;
+        signal SMM_MISO : in  std_logic
+    ) is
     begin
-        while not test_done loop
-            clk <= '0';
-            wait for CLK_PERIOD/2;
-            clk <= '1';
-            wait for CLK_PERIOD/2;
+        SMM_CS_N <= '0';
+        for i in 0 to (WORD_SIZE-1) loop
+            SMM_SCLK <= '0';
+            SMM_MOSI <= SMM_MDI(WORD_SIZE-1-i);
+            wait for SPI_PER/2;
+            SMM_SCLK <= '1';
+            SMM_MDO(WORD_SIZE-1-i) <= SMM_MISO;
+            wait for SPI_PER/2;
         end loop;
-        wait;
-    end process;
-    
-    -- Test process
-    test_process: process
-        -- Procedure to send one byte via SPI
-        procedure send_spi_byte(data_byte: std_logic_vector(7 downto 0)) is
-        begin
-            -- Select slave
-            ss_n <= '0';
-            wait for SCLK_PERIOD;
-            
-            -- Send 8 bits (MSB first)
-            for i in 7 downto 0 loop
-                mosi <= data_byte(i);
-                
-                -- Rising edge: slave samples our data
-                sclk <= '1';
-                wait for SCLK_PERIOD/2;
-                
-                -- Falling edge: slave updates MISO
-                sclk <= '0';
-                wait for SCLK_PERIOD/2;
-            end loop;
-            
-            -- Deselect slave
-            ss_n <= '1';
-            wait for SCLK_PERIOD;
-        end procedure;
-        
+        SMM_SCLK <= '0';
+        wait for SPI_PER/2;
+        SMM_CS_N <= '1';
+    end procedure;
+
+begin
+
+    rand_int_p : process
+        variable seed1, seed2: positive;
+        variable rand : real;
     begin
-        -- Initial setup
-        ss_n <= '1';
-        sclk <= '0';  -- Mode 0: SCLK idles low
-        mosi <= '0';
-        
-        -- Reset the system
-        rst_n <= '0';
-        wait for 100 ns;
-        rst_n <= '1';
-        wait for 100 ns;
-        
-        -- Test 1: Send 0x55 to slave, expect to receive 0xAA back
-        data_in <= x"AA";  -- Slave will send this back
-        send_spi_byte(x"55");
-        
-        -- Check results
-        wait for 50 ns;
-        assert data_out = x"55" severity error;
-        assert data_ready = '1' severity error;
-        
-        wait for 200 ns;
-        
-        -- Test 2: Send 0xCC to slave, expect to receive 0x33 back  
-        data_in <= x"33";  -- Slave will send this back
-        send_spi_byte(x"CC");
-        
-        -- Check results
-        wait for 50 ns;
-        assert data_out = x"CC" severity error;
-        
-        wait for 200 ns;
-        
-        -- Test 3: Send alternating pattern
-        data_in <= x"F0";
-        send_spi_byte(x"0F");
-        
-        wait for 50 ns;
-        assert data_out = x"0F" severity error;
-        
-        -- End simulation
-        test_done <= true;
+        uniform(seed1, seed2, rand);
+        rand_int <= integer(rand*real(20));
+        --report "Random number X: " & integer'image(rand_int);
+        wait for CLK_PERIOD;
+        if (sim_done = '1') then
+            wait;
+        end if;
+    end process;
+
+    dut : entity work.SPI_SLAVE
+    generic map (
+        WORD_SIZE => WORD_SIZE
+    )
+    port map (
+        CLK      => CLK,
+        RESET      => RST,
+        -- SPI MASTER INTERFACE
+        SCLK     => sclk,
+        CS_N     => cs_n,
+        MOSI     => mosi,
+        MISO     => miso,
+        -- USER INTERFACE
+        DATA_IN      => udi,
+        DATA_IN_VALID  => udi_vld,
+        DATA_IN_READY  => udi_rdy,
+        DATA_OUT     => udo,
+        DATA_OUT_VALID => udo_vld
+    );
+
+    clk_gen_p : process
+    begin
+        CLK <= '0';
+        wait for CLK_PERIOD/2;
+        CLK <= '1';
+        wait for CLK_PERIOD/2;
+        if (sim_done = '1') then
+            wait;
+        end if;
+    end process;
+
+    rst_gen_p : process
+    begin
+        report "======== SIMULATION START! ========";
+        report "Total transactions for master to slave direction: " & integer'image(TRANS_COUNT);
+        report "Total transactions for slave to master direction: " & integer'image(TRANS_COUNT);
+        RST <= '1';
+        wait for CLK_PERIOD*3;
+        RST <= '0';
         wait;
     end process;
-    
-end Behavioral;
+
+    -- -------------------------------------------------------------------------
+    --  DUT TEST
+    -- -------------------------------------------------------------------------
+
+    spi_master_model_p : process
+    begin
+        count_tx <= 1;
+        cs_n <= '1';
+        sclk <= '0';
+        wait until RST = '0';
+        wait for 33 ns;
+        for i in 0 to TRANS_COUNT-1 loop
+            spi_mdi     <= std_logic_vector(to_unsigned(((i+RX_OFFSET) mod 2**WORD_SIZE),WORD_SIZE));
+            spi_mdo_exp <= std_logic_vector(to_unsigned(((i+TX_OFFSET) mod 2**WORD_SIZE),WORD_SIZE));
+            wait for SPI_PERIOD/2; -- minimum idle time between transactions
+            SPI_MASTER(SPI_PERIOD, spi_mdi, spi_mdo, sclk, cs_n, mosi, miso);
+            if (spi_mdo = spi_mdo_exp) then
+                if ((count_tx mod (TRANS_COUNT/10)) = 0) then
+                    report "Transactions received from slave: " & integer'image(count_tx);
+                end if;
+            else
+                report "======== UNEXPECTED TRANSACTION ON MISO SIGNAL (slave to master)! ========" severity failure;
+            end if;
+            count_tx <= count_tx + 1;
+            wait for (rand_int/2) * SPI_PERIOD;
+        end loop;
+        spi_model_done <= '1';
+        wait;
+    end process;
+
+    spi_slave_udi_p : process
+    begin
+        wait until RST = '0';
+        wait until rising_edge(CLK);
+        wait for CLK_PERIOD/2;
+        for i in 0 to TRANS_COUNT-1 loop
+            udi <= std_logic_vector(to_unsigned(((i+TX_OFFSET) mod 2**WORD_SIZE),WORD_SIZE));
+            udi_vld <= '1';
+            if (udi_rdy = '0') then	
+                wait until udi_rdy = '1';
+                wait for CLK_PERIOD/2;
+            end if;
+            wait for CLK_PERIOD;
+            udi_vld <= '0';
+            --wait for rand_int*CLK_PERIOD;
+        end loop;
+        udi_done <= '1';
+        wait;
+    end process;
+
+    spi_slave_udo_p : process
+    begin
+        count_rx <= 1;
+        for i in 0 to TRANS_COUNT-1 loop
+            udo_exp <= std_logic_vector(to_unsigned(((i+RX_OFFSET) mod 2**WORD_SIZE),WORD_SIZE));
+            wait until udo_vld = '1';
+            if (udo = udo_exp) then
+                if ((count_rx mod (TRANS_COUNT/10)) = 0) then
+                    report "Transactions received from master: " & integer'image(count_rx);
+                end if;
+            else
+                report "======== UNEXPECTED TRANSACTION ON DOUT SIGNAL (master to slave)! ========" severity failure;
+            end if;
+            count_rx <= count_rx + 1;
+            wait for CLK_PERIOD;
+        end loop;
+        udo_done <= '1';
+        wait;
+    end process;
+
+    -- -------------------------------------------------------------------------
+    --  TEST DONE CHECK
+    -- -------------------------------------------------------------------------
+
+    test_done_p : process
+        variable v_test_done : std_logic;
+    begin
+        v_test_done := spi_model_done and udi_done and udo_done;
+        if (v_test_done = '1') then
+            wait for 100*CLK_PERIOD;
+            sim_done <= '1';
+            report "======== SIMULATION SUCCESSFULLY COMPLETED! ========";
+            wait;
+        end if;
+        wait for CLK_PERIOD;
+    end process;
+
+end architecture;
