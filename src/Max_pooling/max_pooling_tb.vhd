@@ -97,6 +97,10 @@ begin
 
     -- Main stimulus process
     stim_proc: process
+        variable expected_row : integer;
+        variable expected_col : integer;
+        variable expected_val : integer;
+        variable received_val : integer;
     begin
         -- Initial reset
         rst_n <= '0';
@@ -142,21 +146,19 @@ begin
         assert false report "=== Verifying Results ===" severity note;
         
         for i in 0 to 15 loop
-            declare
-                expected_row : integer := i / 4;
-                expected_col : integer := i mod 4;
-                expected_val : integer := EXPECTED_OUTPUT(expected_row, expected_col);
-                received_val : integer := received_outputs(i);
-            begin
-                if received_val = expected_val then
-                    assert false report "PASS: Output " & integer'image(i) & 
-                           " = " & integer'image(received_val) severity note;
-                else
-                    assert false report "FAIL: Output " & integer'image(i) & 
-                           " expected " & integer'image(expected_val) & 
-                           " got " & integer'image(received_val) severity error;
-                end if;
-            end;
+            expected_row := i / 4;
+            expected_col := i mod 4;
+            expected_val := EXPECTED_OUTPUT(expected_row, expected_col);
+            received_val := received_outputs(i);
+            
+            if received_val = expected_val then
+                assert false report "PASS: Output " & integer'image(i) & 
+                       " = " & integer'image(received_val) severity note;
+            else
+                assert false report "Error: At " & integer'image(now / 1 ns) & " ns: Output " & integer'image(i) & 
+                       ", expected " & integer'image(expected_val) & 
+                       " but got " & integer'image(received_val) severity error;
+            end if;
         end loop;
         
         -- Test reset during operation

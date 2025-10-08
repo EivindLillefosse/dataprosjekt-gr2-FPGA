@@ -104,6 +104,8 @@ begin
         
         -- Wait for MAC computation to complete
         wait until compute_done = (compute_done'range => '1');
+
+        wait for CLK_PERIOD;
         
         report "MAC computation completed";
         for i in 0 to NUM_FILTERS-1 loop
@@ -111,7 +113,8 @@ begin
                    integer'image(to_integer(unsigned(results(i))));
             -- Expected: 10 * (i+1) = 10, 20, 30, 40, 50, 60, 70, 80
             assert to_integer(unsigned(results(i))) = 10 * (i + 1)
-                report "Unexpected result for filter " & integer'image(i)
+                report "Error: At " & integer'image(now / 1 ns) & " ns: Unexpected result for filter " & integer'image(i) & 
+                       ", expected " & integer'image(10 * (i + 1)) & " but got " & integer'image(to_integer(unsigned(results(i))))
                 severity error;
         end loop;
         
@@ -134,7 +137,8 @@ begin
                    integer'image(to_integer(unsigned(results(i))));
             -- Expected: previous + 5 * (i+1) = 10*(i+1) + 5*(i+1) = 15*(i+1)
             assert to_integer(unsigned(results(i))) = 15 * (i + 1)
-                report "Unexpected accumulated result for filter " & integer'image(i)
+                report "Error: At " & integer'image(now / 1 ns) & " ns: Unexpected accumulated result for filter " & integer'image(i) & 
+                       ", expected " & integer'image(15 * (i + 1)) & " but got " & integer'image(to_integer(unsigned(results(i))))
                 severity error;
         end loop;
         
@@ -162,7 +166,8 @@ begin
                    integer'image(to_integer(unsigned(results(i))));
             -- Expected: 3 * (i+1) = 3, 6, 9, 12, 15, 18, 21, 24
             assert to_integer(unsigned(results(i))) = 3 * (i + 1)
-                report "Unexpected result after clear for filter " & integer'image(i)
+                report "Error: At " & integer'image(now / 1 ns) & " ns: Unexpected result after clear for filter " & integer'image(i) & 
+                       ", expected " & integer'image(3 * (i + 1)) & " but got " & integer'image(to_integer(unsigned(results(i))))
                 severity error;
         end loop;
         
@@ -183,7 +188,8 @@ begin
                    integer'image(to_integer(unsigned(results(i))));
             -- Should remain the same as previous (3 * (i+1))
             assert to_integer(unsigned(results(i))) = 3 * (i + 1)
-                report "Result should not change with zero pixel for filter " & integer'image(i)
+                report "Error: At " & integer'image(now / 1 ns) & " ns: Result should not change with zero pixel for filter " & integer'image(i) & 
+                       ", expected " & integer'image(3 * (i + 1)) & " but got " & integer'image(to_integer(unsigned(results(i))))
                 severity error;
         end loop;
         
@@ -200,7 +206,7 @@ begin
     begin
         wait for 2 ms;
         if not test_done then
-            report "TEST TIMEOUT - Convolution engine test did not complete" severity failure;
+            report "Error: At " & integer'image(now / 1 ns) & " ns: TEST TIMEOUT - Convolution engine test did not complete" severity failure;
         end if;
         wait;
     end process;

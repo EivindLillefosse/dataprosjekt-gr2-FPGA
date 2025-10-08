@@ -42,12 +42,12 @@ vivado -mode batch -source ./scripts/create-project.tcl -tclargs 100   # XC7A100
 
 ### Default Configuration
 
-| Parameter | Default Value |
-|-----------|---------------|
-| **Project Name** | `CNN` |
-| **Project Directory** | `./vivado_project` |
-| **Part Number** | `XC7A35TICSG324-1L` |
-| **Top Module** | `top` |
+| Parameter             | Default Value       |
+| --------------------- | ------------------- |
+| **Project Name**      | `CNN`               |
+| **Project Directory** | `./vivado_project`  |
+| **Part Number**       | `XC7A35TICSG324-1L` |
+| **Top Module**        | `top`               |
 
 ## Project Structure
 
@@ -109,3 +109,119 @@ The SPI slave module in this project is designed for flexibility and reliability
   - The testbench is simple, parameterized, and sends/receives multiple words to verify correct operation for any data length.
 
 This approach ensures the SPI interface is both easy to use and adaptable to a wide range of applications and word sizes.
+
+## Testbench Automation & Simulation Workflow
+
+Extensive TCL automation is provided to run either the full suite of testbenches or a single testbench with rich logging, error classification, and optional isolation.
+
+### Run All Testbenches (Sequential)
+
+```
+vivado -mode batch -source ./scripts/run-all-testbenches.tcl 2>&1 | Select-String -Pattern "^(?!#)" -CaseSensitive
+```
+
+Key features:
+
+- Automatic discovery of all files matching `*_tb.vhd` anywhere under `./src`
+- Per‑test result classification: PASS / FAIL / SKIP
+- Log delta scanning (only new lines since previous test) across `vivado.log` and project `.log` files
+- Error categorization: Assertion, Compile (xvhdl/xvlog/xelab), Simulation, Other
+- Per‑test artifact directory: `testbench_logs/<test>_<timestamp>/` containing:
+  - `root_errors.log` (or `pass_trace.log` for passes)
+  - Copied raw simulator logs (`elaborate.log`, `simulate.log`, `xvhdl.log`, etc.)
+  - `error_summary.log` with contextual (prev/next line) excerpts
+- Final aggregated report: `testbench_report_<timestamp>.log`
+
+### Environment Controls (Optional)
+
+| Variable                 | Value      | Effect                                                                          |
+| ------------------------ | ---------- | ------------------------------------------------------------------------------- |
+| `VIVADO_TEST_ISOLATE`    | `1`        | Re-opens the Vivado project before every test (fresh context)                   |
+| `VIVADO_TEST_CLEAN`      | `1`        | Deletes the `xsim` simulation directory and forces `-clean` simulation per test |
+| `VIVADO_TEST_TIMEOUT_NS` | integer ns | Overrides default 30,000,000 ns run timeout                                     |
+
+PowerShell example enabling isolation & clean:
+
+```
+$env:VIVADO_TEST_ISOLATE="1"; $env:VIVADO_TEST_CLEAN="1"; vivado -mode batch -source ./scripts/run-all-testbenches.tcl 2>&1 | Select-String -Pattern "^(?!#)" -CaseSensitive
+```
+
+### Run a Single Testbench
+
+Use the dedicated script for faster iteration:
+
+```
+vivado -mode batch -source ./scripts/run-single-testbench.tcl -tclargs <entity_name>
+```
+
+Examples:
+
+```
+vivado -mode batch -source ./scripts/run-single-testbench.tcl -tclargs top_tb
+vivado -mode batch -source ./scripts/run-single-testbench.tcl -tclargs conv_layer_modular_tb
+$env:VIVADO_TEST_CLEAN="1"; vivado -mode batch -source ./scripts/run-single-testbench.tcl -tclargs weight_memory_controller_tb
+```
+
+Outputs:
+
+- `single_testbench_report_<entity>_<timestamp>.log`
+- `testbench_logs/<entity>_<timestamp>/` (same structure as multi-run)
+
+### Interpreting Error Classification
+
+| Category  | Meaning                                                | Typical Root Causes                                                           |
+| --------- | ------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| Assertion | Testbench or design `assert` triggered                 | Wrong expected data, timing, handshake mismatch                               |
+| Compile   | Parsing/elaboration errors (`xvhdl`, `xvlog`, `xelab`) | Missing file, order dependency, unbound component, package not compiled first |
+| Sim       | Runtime simulation issues (`xsim`)                     | Access to uninitialized signals, fatal conditions                             |
+| Other     | Anything else matched (generic `ERROR:` / `FATAL:`)    | Tool internal errors or unclassified messages                                 |
+
+### Typical Failure: `[Common 17-39] 'launch_simulation' failed due to earlier errors.`
+
+This is a wrapper message. Look inside:
+
+1. `testbench_logs/<test>_<timestamp>/root_errors.log`
+2. `error_summary.log` for the first underlying compile/elab message.
+
+Common fixes:
+
+- Ensure `types.vhd` (packages) are compiled before dependents (automation already calls `update_compile_order`).
+- For generated memory/IP modules, confirm their simulation sources are added to `sim_1` fileset.
+- Remove stale simulation artifacts (`VIVADO_TEST_CLEAN=1`).
+- Use isolation (`VIVADO_TEST_ISOLATE=1`) when state leakage between tests is suspected.
+
+### Reducing Noise
+
+- Filtering pipeline (`Select-String -Pattern "^(?!#)"`) removes echoed commented lines from Vivado batch output.
+- Pass logs can be pruned by deleting their directories if storage is a concern; adjust script if you wish to suppress pass traces entirely.
+
+### Adding New Testbenches
+
+1. Create `your_module_tb.vhd` in the same (or a sub) directory under `src/`.
+2. Ensure entity name matches filename root (`your_module_tb`).
+3. Re-run the multi-test script; discovery is automatic.
+
+### Quick Debug Loop
+
+1. Run single test: `run-single-testbench.tcl`.
+2. Inspect `root_errors.log` & waveform (launch GUI if needed after batch creation).
+3. Iterate design/testbench.
+4. Run full suite before commit to ensure no cross-test regressions.
+
+### Troubleshooting Checklist
+
+- No tests found: Confirm filenames end with `_tb.vhd` and reside under `./src`.
+- All tests failing instantly: Project not created — run `create-project.tcl` first.
+- Intermittent failures only in batch mode: enable isolation & clean env vars.
+- Assertions only when run after another test: potential shared resource or uninitialized signal; add reset logic in TB.
+- Large vivado.log producing false positives: refine regex inside scripts (look for additional tokens) — current defaults focus on `ERROR:` / `FATAL:` / assertion text.
+
+### Future Enhancements (Ideas)
+
+- Optional JUnit/XML export for CI systems.
+- Waveform capture toggle (e.g., `VIVADO_TEST_WAVES=1`).
+- Parallel safe execution (currently experimental on Windows due to result file race conditions).
+
+---
+
+If you modify or extend the automation, keep naming consistent and prefer incremental log scanning to avoid re-processing large logs for every test.

@@ -110,7 +110,8 @@ begin
                     
                     -- Check that data is valid
                     assert data_valid = '1' 
-                        report "Data should be valid when load_done is asserted" 
+                        report "Error: At " & integer'image(now / 1 ns) & " ns: Data should be valid when load_done is asserted for filter " & 
+                               integer'image(filter) & " at [" & integer'image(row) & "," & integer'image(col) & "]"
                         severity error;
                     
                     report "Loaded weight for filter " & integer'image(filter) & 
@@ -135,7 +136,7 @@ begin
     begin
         wait for 1 ms;
         if not test_done then
-            report "TEST TIMEOUT - Weight memory controller test did not complete" severity failure;
+            report "Error: At " & integer'image(now / 1 ns) & " ns: TEST TIMEOUT - Weight memory controller test did not complete" severity failure;
         end if;
         wait;
     end process;
