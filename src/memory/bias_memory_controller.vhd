@@ -36,7 +36,7 @@ end bias_memory_controller;
 
 architecture Behavioral of bias_memory_controller is
 
-    COMPONENT conv0_mem_bias
+    COMPONENT layer0_conv2d_biases
     PORT (
         clka : IN STD_LOGIC;
         ena : IN STD_LOGIC;
@@ -56,7 +56,7 @@ architecture Behavioral of bias_memory_controller is
 begin
 
     -- Instantiate bias memory
-    bias_mem_inst : conv0_mem_bias
+    bias_mem_inst : layer0_conv2d_biases
     PORT MAP (
         clka => clk,
         ena => bias_en,

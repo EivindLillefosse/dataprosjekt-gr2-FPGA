@@ -38,7 +38,7 @@ end weight_memory_controller;
 
 architecture Behavioral of weight_memory_controller is
 
-    COMPONENT conv0_mem_weights
+    COMPONENT layer0_conv2d_weights
     PORT (
         clka : IN STD_LOGIC;
         ena : IN STD_LOGIC;
@@ -58,7 +58,7 @@ architecture Behavioral of weight_memory_controller is
 begin
 
     -- Instantiate weight memory
-    weight_mem_inst : conv0_mem_weights
+    weight_mem_inst : layer0_conv2d_weights
     PORT MAP (
         clka => clk,
         ena => weight_en,
