@@ -27,11 +27,10 @@ entity weight_memory_controller is
         rst         : in  std_logic;
         -- Control interface
         load_req    : in  std_logic;
-        filter_idx  : in  integer range 0 to NUM_FILTERS-1;
         kernel_row  : in  integer range 0 to KERNEL_SIZE-1;
         kernel_col  : in  integer range 0 to KERNEL_SIZE-1;
-        -- Data interface
-        weight_data : out std_logic_vector(7 downto 0);
+        -- Data interface (64 bits = 8 filters * 8 bits per weight)
+        weight_data : out std_logic_vector(63 downto 0);
         data_valid  : out std_logic;
         load_done   : out std_logic
     );
@@ -43,13 +42,13 @@ architecture Behavioral of weight_memory_controller is
     PORT (
         clka : IN STD_LOGIC;
         ena : IN STD_LOGIC;
-        addra : IN STD_LOGIC_VECTOR(6 DOWNTO 0);
-        douta : OUT STD_LOGIC_VECTOR(7 DOWNTO 0) 
+        addra : IN STD_LOGIC_VECTOR(3 DOWNTO 0);  -- Address width reduced (9 positions instead of 72)
+        douta : OUT STD_LOGIC_VECTOR(63 DOWNTO 0)  -- 64-bit output (8 weights)
     );
     END COMPONENT;
 
     -- Internal signals
-    signal weight_addr : std_logic_vector(ADDR_WIDTH-1 downto 0) := (others => '0');
+    signal weight_addr : std_logic_vector(3 downto 0) := (others => '0');  -- Only need 4 bits for 9 addresses
     signal weight_en   : std_logic := '0';
     signal wait_cycles : integer range 0 to 3 := 0;
     
@@ -86,10 +85,10 @@ begin
                     weight_en <= '0';
                     
                     if load_req = '1' then
-                        -- Calculate memory address
+                        -- Calculate memory address (kernel position only, all filters loaded together)
+                        -- Address = kernel_row * KERNEL_SIZE + kernel_col
                         weight_addr <= std_logic_vector(to_unsigned(
-                            filter_idx * (KERNEL_SIZE * KERNEL_SIZE) + 
-                            (kernel_row * KERNEL_SIZE + kernel_col), ADDR_WIDTH));
+                            kernel_row * KERNEL_SIZE + kernel_col, 4));
                         weight_en <= '1';
                         wait_cycles <= 0;
                         current_state <= LOAD_REQUEST;

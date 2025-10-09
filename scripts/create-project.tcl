@@ -89,82 +89,276 @@ if {[file isdirectory $constraints_dir]} {
     puts "Warning: Constraints directory '$constraints_dir' does not exist."
 }
 
-# Add IP cores from memory directory
-puts "\n=== Adding IP Cores ==="
-set memory_dir "./src/memory"
-if {[file isdirectory $memory_dir]} {
-    # Find all .xci files in the memory directory
-    set ip_files [glob -nocomplain "$memory_dir/*.xci"]
+# ============================================================================
+# Procedure to parse COE file metadata
+# ============================================================================
+proc parse_coe_metadata {coe_file} {
+    set metadata [dict create]
     
-    if {[llength $ip_files] > 0} {
-        puts "Found [llength $ip_files] IP core(s) in $memory_dir"
-        
-        foreach ip_file $ip_files {
-            set ip_name [file tail [file rootname $ip_file]]
-            puts "Adding IP: $ip_name ($ip_file)"
-            
-            if {[catch {add_files $ip_file} result]} {
-                puts "Warning: Failed to add IP $ip_name: $result"
-            } else {
-                puts "Successfully added IP: $ip_name"
-            }
-        }
-    } else {
-        puts "No IP cores (.xci files) found in $memory_dir"
+    if {![file exists $coe_file]} {
+        puts "Warning: COE file not found: $coe_file"
+        return $metadata
     }
     
-    # Also check for any subdirectories that might contain IP cores
-    foreach subdir [glob -nocomplain -type d "$memory_dir/*"] {
-        set sub_ip_files [glob -nocomplain "$subdir/*.xci"]
-        if {[llength $sub_ip_files] > 0} {
-            puts "Found [llength $sub_ip_files] IP core(s) in [file tail $subdir]"
-            
-            foreach ip_file $sub_ip_files {
-                set ip_name [file tail [file rootname $ip_file]]
-                puts "Adding IP: $ip_name ($ip_file)"
-                
-                if {[catch {add_files $ip_file} result]} {
-                    puts "Warning: Failed to add IP $ip_name: $result"
-                } else {
-                    puts "Successfully added IP: $ip_name"
+    set fp [open $coe_file r]
+    set content [read $fp]
+    close $fp
+    
+    # Parse metadata from comments
+    foreach line [split $content "\n"] {
+        set line [string trim $line]
+        
+        # Extract shape information
+        if {[regexp {Original shape:\s*\(([^)]+)\)} $line -> shape_str]} {
+            dict set metadata shape $shape_str
+            # Parse shape tuple (e.g., "3, 3, 1, 8")
+            set shape_values [split $shape_str ","]
+            set cleaned_values {}
+            foreach val $shape_values {
+                set trimmed [string trim $val]
+                # Only add non-empty values (filter out trailing comma)
+                if {$trimmed != ""} {
+                    lappend cleaned_values $trimmed
                 }
             }
-        }
-    }
-} else {
-    puts "Warning: Memory directory '$memory_dir' does not exist."
-}
-
-# Fix COE file paths before IP generation
-puts "\n=== Fixing COE File Paths ==="
-set all_ips [get_ips]
-if {[llength $all_ips] > 0} {
-    foreach ip $all_ips {
-        # Get current COE file path
-        if {[catch {set current_coe [get_property CONFIG.Coe_File [get_ips $ip]]} result]} {
-            puts "IP $ip does not use COE files"
-            continue
+            dict set metadata shape_list $cleaned_values
         }
         
-        if {$current_coe != ""} {
-            puts "Updating COE path for IP: $ip"
-            puts "Current path: $current_coe"
-            
-            # Convert to absolute path
-            if {[string match "*weights*" $ip]} {
-                set abs_coe_path [file normalize "./model/fpga_weights_and_bias/layer_0_conv2d_weights.coe"]
-            } elseif {[string match "*bias*" $ip]} {
-                set abs_coe_path [file normalize "./model/fpga_weights_and_bias/layer_0_conv2d_biases.coe"]
-            } else {
-                puts "Warning: Unknown IP type for $ip, skipping COE update"
-                continue
+        # Alternative shape format (for biases)
+        if {[regexp {Shape:\s*\(([^)]+)\)} $line -> shape_str]} {
+            dict set metadata shape $shape_str
+            set shape_values [split $shape_str ","]
+            set cleaned_values {}
+            foreach val $shape_values {
+                set trimmed [string trim $val]
+                # Only add non-empty values (filter out trailing comma)
+                if {$trimmed != ""} {
+                    lappend cleaned_values $trimmed
+                }
             }
+            dict set metadata shape_list $cleaned_values
+        }
+        
+        # Extract total elements
+        if {[regexp {Total elements:\s*(\d+)} $line -> total]} {
+            dict set metadata total_elements $total
+        }
+        
+        # Extract layer type
+        if {[regexp {Layer (\d+):\s*(\w+)} $line -> layer_num layer_type]} {
+            dict set metadata layer_number $layer_num
+            dict set metadata layer_type $layer_type
+        }
+    }
+    
+    return $metadata
+}
+
+# ============================================================================
+# Procedure to calculate memory parameters from COE metadata
+# ============================================================================
+proc calculate_memory_params {metadata memory_type} {
+    set params [dict create]
+    
+    if {![dict exists $metadata shape_list]} {
+        puts "Warning: No shape information found in COE metadata"
+        return $params
+    }
+    
+    set shape_list [dict get $metadata shape_list]
+    set total_elements [dict get $metadata total_elements]
+    
+    if {$memory_type == "weights"} {
+        # For weights: shape is (kernel_h, kernel_w, in_channels, num_filters)
+        # Memory organization: depth = kernel_h * kernel_w
+        #                      width = num_filters * 8 bits
+        set kernel_h [lindex $shape_list 0]
+        set kernel_w [lindex $shape_list 1]
+        set num_filters [lindex $shape_list 3]
+        
+        set depth [expr {$kernel_h * $kernel_w}]
+        set width [expr {$num_filters * 8}]
+
+        puts "Calculated depth: $depth, width: $width for weights"
+        puts "  Total elements: $total_elements"
+        
+        dict set params depth $depth
+        dict set params width $width
+        dict set params description "Weights: ${kernel_h}x${kernel_w} kernel, ${num_filters} filters"
+        
+    } elseif {$memory_type == "bias"} {
+        # For biases: shape is (num_filters,)
+        # Memory organization: depth = num_filters (one address per bias)
+        #                      width = 8 bits (unpacked, individual values)
+        set num_filters [lindex $shape_list 0]
+        
+        set depth $num_filters
+        set width 8
+        
+        dict set params depth $depth
+        dict set params width $width
+        dict set params description "Biases: ${num_filters} filters (unpacked)"
+    }
+    
+    return $params
+}
+
+# ============================================================================
+# Procedure to create Block Memory Generator IP
+# ============================================================================
+proc create_bram_ip {ip_name width depth coe_file {description "Block RAM"}} {
+    puts "\nCreating IP: $ip_name"
+    puts "  Description: $description"
+    puts "  Width: $width bits"
+    puts "  Depth: $depth words"
+    puts "  COE file: $coe_file"
+    
+    # Calculate address width
+    set addr_width [expr {int(ceil(log($depth)/log(2)))}]
+    if {$addr_width < 1} {set addr_width 1}
+    puts "  Address width: $addr_width bits"
+    
+    # Create the IP
+    if {[catch {
+        create_ip -name blk_mem_gen -vendor xilinx.com -library ip -version 8.4 \
+                  -module_name $ip_name -dir ./ip_repo
+        
+        # Configure the IP
+        set_property -dict [list \
+            CONFIG.Memory_Type {Single_Port_ROM} \
+            CONFIG.Write_Width_A $width \
+            CONFIG.Write_Depth_A $depth \
+            CONFIG.Read_Width_A $width \
+            CONFIG.Enable_A {Use_ENA_Pin} \
+            CONFIG.Register_PortA_Output_of_Memory_Primitives {true} \
+            CONFIG.Register_PortA_Output_of_Memory_Core {false} \
+            CONFIG.Use_REGCEA_Pin {false} \
+            CONFIG.Load_Init_File {true} \
+            CONFIG.Coe_File $coe_file \
+            CONFIG.Fill_Remaining_Memory_Locations {false} \
+            CONFIG.Use_RSTA_Pin {false} \
+            CONFIG.Port_A_Write_Rate {0} \
+            CONFIG.Port_A_Enable_Rate {100} \
+            CONFIG.Algorithm {Minimum_Area} \
+        ] [get_ips $ip_name]
+        
+        puts "  ✓ IP $ip_name created successfully"
+        return 1
+    } result]} {
+        puts "  ✗ Failed to create IP $ip_name: $result"
+        return 0
+    }
+}
+
+# ============================================================================
+# Search for and process COE files
+# ============================================================================
+puts "\n=== Searching for COE Files ==="
+set memory_dir "./src/memory"
+set coe_search_dirs [list "./model/fpga_weights_and_bias" "./model" "."]
+
+set found_coe_files [list]
+
+foreach search_dir $coe_search_dirs {
+    if {[file isdirectory $search_dir]} {
+        set coe_files [glob -nocomplain "$search_dir/*.coe"]
+        foreach coe_file $coe_files {
+            lappend found_coe_files [file normalize $coe_file]
+        }
+    }
+}
+
+# Remove duplicates
+set found_coe_files [lsort -unique $found_coe_files]
+
+if {[llength $found_coe_files] == 0} {
+    puts "WARNING: No COE files found in search directories"
+    puts "Searched in: $coe_search_dirs"
+} else {
+    puts "Found [llength $found_coe_files] COE file(s):"
+    foreach coe $found_coe_files {
+        puts "  - $coe"
+    }
+}
+
+# ============================================================================
+# Parse COE files and create IPs
+# ============================================================================
+puts "\n=== Creating/Adding IP Cores ==="
+
+# Track which IPs have been created by name (to avoid duplicates)
+set created_ips [dict create]
+
+# Check for existing IPs first
+if {[file isdirectory $memory_dir]} {
+    set ip_files [glob -nocomplain "$memory_dir/*/*.xci"]
+    foreach ip_file $ip_files {
+        set ip_basename [file rootname [file tail $ip_file]]
+        puts "Found existing IP: $ip_file"
+        add_files $ip_file
+        dict set created_ips $ip_basename 1
+    }
+}
+
+# Process each COE file
+foreach coe_file $found_coe_files {
+    set filename [file tail $coe_file]
+    
+    puts "\n--- Processing: $filename ---"
+    
+    # Parse metadata
+    set metadata [parse_coe_metadata $coe_file]
+    
+    if {[dict exists $metadata layer_type]} {
+        puts "Layer [dict get $metadata layer_number]: [dict get $metadata layer_type]"
+    }
+    if {[dict exists $metadata shape]} {
+        puts "Shape: [dict get $metadata shape]"
+    }
+    if {[dict exists $metadata total_elements]} {
+        puts "Total elements: [dict get $metadata total_elements]"
+    }
+    
+    # Determine memory type and create IP
+    if {[string match "*weight*" $filename]} {
+        set params [calculate_memory_params $metadata "weights"]
+        if {[dict size $params] > 0} {
+            set width [dict get $params width]
+            set depth [dict get $params depth]
+            set desc [dict get $params description]
             
-            if {[file exists $abs_coe_path]} {
-                puts "Setting absolute COE path: $abs_coe_path"
-                set_property CONFIG.Coe_File $abs_coe_path [get_ips $ip]
+            # Extract layer name from filename (e.g., "layer_0_conv2d_weights.coe" -> "conv2d")
+            set layer_num [dict get $metadata layer_number]
+            set layer_type [dict get $metadata layer_type]
+            set ip_name "layer${layer_num}_${layer_type}_weights"
+            
+            # Check if this specific IP already exists
+            if {![dict exists $created_ips $ip_name]} {
+                create_bram_ip $ip_name $width $depth $coe_file $desc
+                dict set created_ips $ip_name 1
             } else {
-                puts "Warning: COE file not found: $abs_coe_path"
+                puts "Skipping - IP $ip_name already exists"
+            }
+        }
+        
+    } elseif {[string match "*bias*" $filename]} {
+        set params [calculate_memory_params $metadata "bias"]
+        if {[dict size $params] > 0} {
+            set width [dict get $params width]
+            set depth [dict get $params depth]
+            set desc [dict get $params description]
+            
+            # Extract layer name from filename (e.g., "layer_0_conv2d_biases.coe" -> "conv2d")
+            set layer_num [dict get $metadata layer_number]
+            set layer_type [dict get $metadata layer_type]
+            set ip_name "layer${layer_num}_${layer_type}_biases"
+            
+            # Check if this specific IP already exists
+            if {![dict exists $created_ips $ip_name]} {
+                create_bram_ip $ip_name $width $depth $coe_file $desc
+                dict set created_ips $ip_name 1
+            } else {
+                puts "Skipping - IP $ip_name already exists"
             }
         }
     }
@@ -172,6 +366,7 @@ if {[llength $all_ips] > 0} {
 
 # Generate IP output products
 puts "\n=== Generating IP Output Products ==="
+set all_ips [get_ips]
 if {[llength $all_ips] > 0} {
     puts "Found IPs: $all_ips"
     foreach ip $all_ips {

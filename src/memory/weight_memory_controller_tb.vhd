@@ -33,10 +33,9 @@ architecture Behavioral of weight_memory_controller_tb is
     signal clk         : std_logic := '0';
     signal rst         : std_logic := '0';
     signal load_req    : std_logic := '0';
-    signal filter_idx  : integer range 0 to NUM_FILTERS-1 := 0;
     signal kernel_row  : integer range 0 to KERNEL_SIZE-1 := 0;
     signal kernel_col  : integer range 0 to KERNEL_SIZE-1 := 0;
-    signal weight_data : std_logic_vector(7 downto 0);
+    signal weight_data : std_logic_vector(63 downto 0);  -- 64 bits: 8 filters * 8 bits
     signal data_valid  : std_logic;
     signal load_done   : std_logic;
     
@@ -56,7 +55,6 @@ begin
             clk => clk,
             rst => rst,
             load_req => load_req,
-            filter_idx => filter_idx,
             kernel_row => kernel_row,
             kernel_col => kernel_col,
             weight_data => weight_data,
@@ -90,36 +88,38 @@ begin
         
         report "Starting weight memory controller test...";
         
-        -- Test loading weights for different filters and positions
-        for filter in 0 to NUM_FILTERS-1 loop
-            for row in 0 to KERNEL_SIZE-1 loop
-                for col in 0 to KERNEL_SIZE-1 loop
-                    
-                    -- Set up request
-                    filter_idx <= filter;
-                    kernel_row <= row;
-                    kernel_col <= col;
-                    
-                    -- Issue load request
-                    load_req <= '1';
-                    wait for CLK_PERIOD;
-                    load_req <= '0';
-                    
-                    -- Wait for completion
-                    wait until load_done = '1';
-                    
-                    -- Check that data is valid
-                    assert data_valid = '1' 
-                        report "Error: At " & integer'image(now / 1 ns) & " ns: Data should be valid when load_done is asserted for filter " & 
-                               integer'image(filter) & " at [" & integer'image(row) & "," & integer'image(col) & "]"
-                        severity error;
-                    
-                    report "Loaded weight for filter " & integer'image(filter) & 
-                           " at [" & integer'image(row) & "," & integer'image(col) & 
-                           "] = " & integer'image(to_integer(unsigned(weight_data)));
-                    
-                    wait for CLK_PERIOD;
+        -- Test loading weights for different kernel positions
+        -- Each load brings all 8 filter weights for that position
+        for row in 0 to KERNEL_SIZE-1 loop
+            for col in 0 to KERNEL_SIZE-1 loop
+                
+                -- Set up request
+                kernel_row <= row;
+                kernel_col <= col;
+                
+                -- Issue load request
+                load_req <= '1';
+                wait for CLK_PERIOD;
+                load_req <= '0';
+                
+                -- Wait for completion
+                wait until load_done = '1';
+                
+                -- Check that data is valid
+                assert data_valid = '1' 
+                    report "Error: At " & integer'image(now / 1 ns) & " ns: Data should be valid when load_done is asserted for position [" & 
+                           integer'image(row) & "," & integer'image(col) & "]"
+                    severity error;
+                
+                report "Loaded weights for kernel position [" & integer'image(row) & "," & integer'image(col) & "]";
+                
+                -- Display all 8 filter weights
+                for filter in 0 to NUM_FILTERS-1 loop
+                    report "  Filter " & integer'image(filter) & " weight = " & 
+                           integer'image(to_integer(signed(weight_data((filter*8+7) downto (filter*8)))));
                 end loop;
+                
+                wait for CLK_PERIOD;
             end loop;
         end loop;
         

@@ -128,29 +128,37 @@ begin
         wait;
     end process;
 
-    -- Input pixel provider process
-    input_provider: process(clk, rst)
+    -- Input pixel provider process (combinatorial for same-cycle response)
+    input_provider: process(input_ready, input_row, input_col)
     begin
-        if rst = '1' then
+        if input_ready = '1' then
+            -- Check if the requested coordinates are valid
+            if input_row >= 0 and input_row < IMAGE_SIZE and 
+               input_col >= 0 and input_col < IMAGE_SIZE then
+                input_pixel <= std_logic_vector(to_unsigned(test_image(input_row, input_col), 8));
+                input_valid <= '1';
+            else
+                -- Provide zero for out-of-bounds pixels (padding)
+                input_pixel <= (others => '0');
+                input_valid <= '1';
+            end if;
+        else
             input_valid <= '0';
-            input_pixel <= (others => '0');
-        elsif rising_edge(clk) then
-            if input_ready = '1' then
-                -- Check if the requested coordinates are valid
+        end if;
+    end process;
+    
+    -- Monitor input requests (separate process for reporting)
+    input_monitor: process(clk)
+    begin
+        if rising_edge(clk) then
+            if input_ready = '1' and input_valid = '1' then
                 if input_row >= 0 and input_row < IMAGE_SIZE and 
                    input_col >= 0 and input_col < IMAGE_SIZE then
-                    input_pixel <= std_logic_vector(to_unsigned(test_image(input_row, input_col), 8));
-                    input_valid <= '1';
                     report "Providing pixel [" & integer'image(input_row) & "," & integer'image(input_col) & 
                            "] = " & integer'image(test_image(input_row, input_col));
                 else
-                    -- Provide zero for out-of-bounds pixels (padding)
-                    input_pixel <= (others => '0');
-                    input_valid <= '1';
                     report "Providing padding pixel [" & integer'image(input_row) & "," & integer'image(input_col) & "] = 0";
                 end if;
-            else
-                input_valid <= '0';
             end if;
         end if;
     end process;

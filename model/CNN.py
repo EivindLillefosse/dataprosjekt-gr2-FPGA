@@ -450,27 +450,70 @@ def export_to_FPGA(model, q_format="Q1.6"):
                     f.write(f"; Total elements: {len(quantized_weights)}\n")
                     f.write(f"; Quantization: {fractional_bits} fractional bits\n")
                     f.write(f"; Range: [{min_value}, {max_value}]\n")
+                    
+                    # Determine memory organization based on layer type
+                    if len(weights.shape) == 4:  # Conv2D: (kernel_h, kernel_w, in_channels, num_filters)
+                        kernel_h, kernel_w, in_channels, num_filters = weights.shape
+                        f.write(f"; Memory organization: {kernel_h}x{kernel_w} addresses × {num_filters*8} bits (packed)\n")
+                        f.write(f"; Each address contains all {num_filters} filter weights for one kernel position\n")
                     f.write(f";\n")
                     
                     # Proper COE format keywords
                     f.write(f"memory_initialization_radix=16; Hexadecimal format\n")
                     f.write(f"memory_initialization_vector=")
                     
-                    # Write data values
-                    for j, qw in enumerate(quantized_weights):
-                        if j == 0:
-                            f.write(f"{int8_to_hex(qw)}")
-                        elif j == len(quantized_weights) - 1:  # Last element
-                            f.write(f",{int8_to_hex(qw)};")
-                        else:
-                            f.write(f",{int8_to_hex(qw)}")
+                    # Pack weights for Conv2D layers
+                    if len(weights.shape) == 4:  # Conv2D
+                        kernel_h, kernel_w, in_channels, num_filters = weights.shape
+                        depth = kernel_h * kernel_w
                         
-                        # Add newline every 16 values for readability
-                        if (j + 1) % 16 == 0 and j != len(quantized_weights) - 1:
+                        # Reshape: (K_H, K_W, C_in, N_filters) -> pack by kernel position
+                        # For each kernel position (h,w), pack all filters together
+                        for addr in range(depth):
+                            kh = addr // kernel_w
+                            kw = addr % kernel_w
+                            
+                            # Pack all num_filters weights at this kernel position into one wide word
+                            packed_value = 0
+                            for f_idx in range(num_filters):
+                                # Get weight for this kernel position and filter
+                                weight_idx = kh * kernel_w * in_channels * num_filters + \
+                                           kw * in_channels * num_filters + \
+                                           f_idx
+                                qw = quantized_weights[weight_idx]
+                                byte_value = int(qw) & 0xFF
+                                packed_value |= (byte_value << (f_idx * 8))
+                            
+                            # Write packed value
+                            num_hex_chars = (num_filters * 8 + 3) // 4
+                            if addr == 0:
+                                f.write(f"{packed_value:0{num_hex_chars}X}")
+                            elif addr == depth - 1:
+                                f.write(f",{packed_value:0{num_hex_chars}X};")
+                            else:
+                                f.write(f",{packed_value:0{num_hex_chars}X}")
+                            
+                            # Add newline for readability
+                            if (addr + 1) % 4 == 0 and addr != depth - 1:
+                                f.write("\n")
+                        
+                        if depth % 4 != 0:
                             f.write("\n")
-                    
-                    if len(quantized_weights) % 16 != 0:
-                        f.write("\n")
+                    else:
+                        # Dense layers: write individual values (unpacked)
+                        for j, qw in enumerate(quantized_weights):
+                            if j == 0:
+                                f.write(f"{int8_to_hex(qw)}")
+                            elif j == len(quantized_weights) - 1:
+                                f.write(f",{int8_to_hex(qw)};")
+                            else:
+                                f.write(f",{int8_to_hex(qw)}")
+                            
+                            if (j + 1) % 16 == 0 and j != len(quantized_weights) - 1:
+                                f.write("\n")
+                        
+                        if len(quantized_weights) % 16 != 0:
+                            f.write("\n")
                 
                 print(f"  ✓ Weights saved to: {weights_filename}")
                 total_params += len(quantized_weights)
@@ -504,11 +547,11 @@ def export_to_FPGA(model, q_format="Q1.6"):
                     f.write(f"memory_initialization_radix=16; Hexadecimal format\n")
                     f.write(f"memory_initialization_vector=")
                     
-                    # Write data values
+                    # Write individual bias values (unpacked format)
                     for j, qb in enumerate(quantized_biases):
                         if j == 0:
                             f.write(f"{int8_to_hex(qb)}")
-                        elif j == len(quantized_biases) - 1:  # Last element
+                        elif j == len(quantized_biases) - 1:
                             f.write(f",{int8_to_hex(qb)};")
                         else:
                             f.write(f",{int8_to_hex(qb)}")
@@ -517,6 +560,7 @@ def export_to_FPGA(model, q_format="Q1.6"):
                         if (j + 1) % 16 == 0 and j != len(quantized_biases) - 1:
                             f.write("\n")
                     
+                    # Final newline if not already added
                     if len(quantized_biases) % 16 != 0:
                         f.write("\n")
                 
