@@ -35,7 +35,7 @@ architecture Behavioral of weight_memory_controller_tb is
     signal load_req    : std_logic := '0';
     signal kernel_row  : integer range 0 to KERNEL_SIZE-1 := 0;
     signal kernel_col  : integer range 0 to KERNEL_SIZE-1 := 0;
-    signal weight_data : std_logic_vector(63 downto 0);  -- 64 bits: 8 filters * 8 bits
+    signal weight_data : WORD_ARRAY(0 to NUM_FILTERS-1);
     signal data_valid  : std_logic;
     signal load_done   : std_logic;
     
@@ -116,7 +116,7 @@ begin
                 -- Display all 8 filter weights
                 for filter in 0 to NUM_FILTERS-1 loop
                     report "  Filter " & integer'image(filter) & " weight = " & 
-                           integer'image(to_integer(signed(weight_data((filter*8+7) downto (filter*8)))));
+                           integer'image(to_integer(signed(weight_data(filter))));
                 end loop;
                 
                 wait for CLK_PERIOD;
