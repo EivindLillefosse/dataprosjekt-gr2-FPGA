@@ -1,6 +1,8 @@
 # Create project with optional command-line parameters
-# Usage: vivado -mode batch -source create-project.tcl -tclargs [part_number] [top_module] [project_name]
-# Example: vivado -mode batch -source create-project.tcl -tclargs XC7A100TCSG324-1 my_top MyProject
+# Usage: 
+#   With GUI: vivado -source create-project.tcl -tclargs [part_number] [top_module] [project_name]
+#   Batch mode: vivado -mode batch -source create-project.tcl -tclargs [part_number] [top_module] [project_name]
+# Example: vivado -source create-project.tcl -tclargs 100 top my_proj
 
 # Set default values
 set project_name "CNN"
@@ -48,8 +50,14 @@ puts "Top Module: $top_module"
 # Create the project
 create_project $project_name $project_dir -part $part_number -force
 
-# Start GUI
-start_gui
+# Start GUI (will only work if Vivado was launched in GUI mode, not batch mode)
+# To run with GUI: vivado -source scripts/create-project.tcl -tclargs 35
+# To run without GUI: vivado -mode batch -source scripts/create-project.tcl -tclargs 35
+if {[catch {start_gui} err]} {
+    puts "Note: Running in batch mode (GUI not available)"
+} else {
+    puts "GUI started successfully"
+}
 
 # Recursive procedure to collect files matching a pattern
 proc get_files_recursive {dir pattern} {
@@ -76,6 +84,16 @@ if {[file isdirectory $src_dir]} {
     }
 } else {
     puts "Warning: Source directory '$src_dir' does not exist."
+}
+
+# Ensure Vivado treats VHDL sources as VHDL-2019
+puts "\nSetting VHDL standard to 2019 for all VHDL files..."
+foreach vfile [get_files_recursive $src_dir "*.vhd"] {
+    if {[catch {set_property FILE_TYPE {VHDL 2019} [get_files $vfile]} err]} {
+        puts "Warning: failed to set FILE_TYPE for $vfile : $err"
+    } else {
+        puts "  Set VHDL 2019 for: $vfile"
+    }
 }
 
 # Add constraint files from constraints directory
@@ -167,24 +185,45 @@ proc calculate_memory_params {metadata memory_type} {
     
     set shape_list [dict get $metadata shape_list]
     set total_elements [dict get $metadata total_elements]
+    set layer_type [dict get $metadata layer_type]
+    set num_dims [llength $shape_list]
     
     if {$memory_type == "weights"} {
-        # For weights: shape is (kernel_h, kernel_w, in_channels, num_filters)
-        # Memory organization: depth = kernel_h * kernel_w
-        #                      width = num_filters * 8 bits
-        set kernel_h [lindex $shape_list 0]
-        set kernel_w [lindex $shape_list 1]
-        set num_filters [lindex $shape_list 3]
-        
-        set depth [expr {$kernel_h * $kernel_w}]
-        set width [expr {$num_filters * 8}]
+        if {$layer_type == "dense"} {
+            # Dense layer weights: shape is (input_dim, output_dim)
+            # Memory organization: depth = input_dim
+            #                      width = output_dim * 8 bits
+            set input_dim [lindex $shape_list 0]
+            set output_dim [lindex $shape_list 1]
+            
+            set depth $input_dim
+            set width [expr {$output_dim * 8}]
+            
+            puts "Calculated depth: $depth, width: $width for dense weights"
+            puts "  Total elements: $total_elements"
+            
+            dict set params depth $depth
+            dict set params width $width
+            dict set params description "Dense: ${input_dim}x${output_dim} weights"
+            
+        } else {
+            # Conv layer weights: shape is (kernel_h, kernel_w, in_channels, num_filters)
+            # Memory organization: depth = kernel_h * kernel_w
+            #                      width = num_filters * 8 bits
+            set kernel_h [lindex $shape_list 0]
+            set kernel_w [lindex $shape_list 1]
+            set num_filters [lindex $shape_list 3]
+            
+            set depth [expr {$kernel_h * $kernel_w}]
+            set width [expr {$num_filters * 8}]
 
-        puts "Calculated depth: $depth, width: $width for weights"
-        puts "  Total elements: $total_elements"
-        
-        dict set params depth $depth
-        dict set params width $width
-        dict set params description "Weights: ${kernel_h}x${kernel_w} kernel, ${num_filters} filters"
+            puts "Calculated depth: $depth, width: $width for conv weights"
+            puts "  Total elements: $total_elements"
+            
+            dict set params depth $depth
+            dict set params width $width
+            dict set params description "Weights: ${kernel_h}x${kernel_w} kernel, ${num_filters} filters"
+        }
         
     } elseif {$memory_type == "bias"} {
         # For biases: shape is (num_filters,)
@@ -219,7 +258,7 @@ proc create_bram_ip {ip_name width depth coe_file {description "Block RAM"}} {
     puts "  Address width: $addr_width bits"
     
     # Create the IP
-    if {[catch {
+    set error_code [catch {
         create_ip -name blk_mem_gen -vendor xilinx.com -library ip -version 8.4 \
                   -module_name $ip_name -dir ./ip_repo
         
@@ -241,10 +280,12 @@ proc create_bram_ip {ip_name width depth coe_file {description "Block RAM"}} {
             CONFIG.Port_A_Enable_Rate {100} \
             CONFIG.Algorithm {Minimum_Area} \
         ] [get_ips $ip_name]
-        
+    } result]
+    
+    if {$error_code == 0} {
         puts "  ✓ IP $ip_name created successfully"
         return 1
-    } result]} {
+    } else {
         puts "  ✗ Failed to create IP $ip_name: $result"
         return 0
     }
@@ -321,7 +362,11 @@ foreach coe_file $found_coe_files {
     
     # Determine memory type and create IP
     if {[string match "*weight*" $filename]} {
-        set params [calculate_memory_params $metadata "weights"]
+        if {[catch {set params [calculate_memory_params $metadata "weights"]} err]} {
+            puts "  ✗ Error calculating parameters: $err"
+            puts "  Skipping this file"
+            continue
+        }
         if {[dict size $params] > 0} {
             set width [dict get $params width]
             set depth [dict get $params depth]
@@ -334,15 +379,23 @@ foreach coe_file $found_coe_files {
             
             # Check if this specific IP already exists
             if {![dict exists $created_ips $ip_name]} {
-                create_bram_ip $ip_name $width $depth $coe_file $desc
-                dict set created_ips $ip_name 1
+                set success [create_bram_ip $ip_name $width $depth $coe_file $desc]
+                if {$success} {
+                    dict set created_ips $ip_name 1
+                } else {
+                    puts "  Note: IP creation failed, continuing with next file"
+                }
             } else {
                 puts "Skipping - IP $ip_name already exists"
             }
         }
         
     } elseif {[string match "*bias*" $filename]} {
-        set params [calculate_memory_params $metadata "bias"]
+        if {[catch {set params [calculate_memory_params $metadata "bias"]} err]} {
+            puts "  ✗ Error calculating parameters: $err"
+            puts "  Skipping this file"
+            continue
+        }
         if {[dict size $params] > 0} {
             set width [dict get $params width]
             set depth [dict get $params depth]
@@ -355,8 +408,12 @@ foreach coe_file $found_coe_files {
             
             # Check if this specific IP already exists
             if {![dict exists $created_ips $ip_name]} {
-                create_bram_ip $ip_name $width $depth $coe_file $desc
-                dict set created_ips $ip_name 1
+                set success [create_bram_ip $ip_name $width $depth $coe_file $desc]
+                if {$success} {
+                    dict set created_ips $ip_name 1
+                } else {
+                    puts "  Note: IP creation failed, continuing with next file"
+                }
             } else {
                 puts "Skipping - IP $ip_name already exists"
             }
@@ -404,6 +461,119 @@ if {[file exists $coe_biases]} {
 
 # Set top module
 set_property top $top_module [current_fileset]
+
+# ============================================================================
+# Add UVVM support
+# ============================================================================
+puts "\n=== Adding UVVM Support ==="
+set uvvm_root "./UVVM"
+set uvvm_compile_script "$uvvm_root/script/compile_all.do"
+
+if {[file exists $uvvm_compile_script] && [file isdirectory $uvvm_root]} {
+    puts "Found UVVM installation: $uvvm_root"
+    
+    # Get absolute paths for UVVM
+    set uvvm_abs_path [file normalize $uvvm_root]
+    set project_abs_path [file normalize $project_dir]
+    
+    puts "  UVVM path: $uvvm_abs_path"
+    puts "  Project path: $project_abs_path"
+    
+    # Create UVVM compilation script for Vivado
+    set uvvm_compile_tcl "$project_dir/compile_uvvm.tcl"
+    set fp [open $uvvm_compile_tcl w]
+    puts $fp "# UVVM Compilation Script for Vivado"
+    puts $fp "# Generated automatically by create-project.tcl"
+    puts $fp "#"
+    puts $fp "# Note: UVVM requires VHDL-2008 or newer"
+    puts $fp ""
+    puts $fp "puts \"=== Compiling UVVM Libraries ===\""
+    puts $fp ""
+    puts $fp "# Set UVVM library compilation order"
+    puts $fp "set uvvm_libs \[list \\"
+    puts $fp "    uvvm_util \\"
+    puts $fp "    uvvm_vvc_framework \\"
+    puts $fp "    bitvis_vip_scoreboard \\"
+    puts $fp "\]"
+    puts $fp ""
+    puts $fp "# Add other VIPs as needed, e.g.:"
+    puts $fp "# lappend uvvm_libs bitvis_vip_sbi"
+    puts $fp "# lappend uvvm_libs bitvis_vip_uart"
+    puts $fp "# lappend uvvm_libs bitvis_vip_avalon_mm"
+    puts $fp ""
+    puts $fp "set uvvm_path \"$uvvm_abs_path\""
+    puts $fp ""
+    puts $fp "foreach lib \$uvvm_libs \{"
+    puts $fp "    set lib_path \"\$uvvm_path/\$lib\""
+    puts $fp "    if \{\[file isdirectory \$lib_path\]\} \{"
+    puts $fp "        puts \"Compiling \$lib...\""
+    puts $fp "        "
+    puts $fp "        # Create library if it doesn't exist"
+    puts $fp "        if \{\[catch \{create_fileset -simset \$lib\}\]\} \{"
+    puts $fp "            puts \"  Library \$lib already exists\""
+    puts $fp "        \}"
+    puts $fp "        "
+    puts $fp "        # Find and add all VHDL source files"
+    puts $fp "        set src_path \"\$lib_path/src\""
+    puts $fp "        if \{\[file isdirectory \$src_path\]\} \{"
+    puts $fp "            set vhd_files \[glob -nocomplain \$src_path/*.vhd\]"
+    puts $fp "            foreach vhd_file \$vhd_files \{"
+    puts $fp "                puts \"  Adding: \$vhd_file\""
+    puts $fp "                add_files -fileset sim_1 \$vhd_file"
+    puts $fp "                # Ensure VHDL-2008 is used"
+    puts $fp "                set_property FILE_TYPE \{VHDL 2008\} \[get_files \$vhd_file\]"
+    puts $fp "                set_property LIBRARY \$lib \[get_files \$vhd_file\]"
+    puts $fp "            \}"
+    puts $fp "        \} else \{"
+    puts $fp "            puts \"  Warning: Source directory not found: \$src_path\""
+    puts $fp "        \}"
+    puts $fp "    \} else \{"
+    puts $fp "        puts \"  Warning: Library directory not found: \$lib_path\""
+    puts $fp "    \}"
+    puts $fp "\}"
+    puts $fp ""
+    puts $fp "puts \"=== UVVM Compilation Complete ===\""
+    puts $fp "update_compile_order -fileset sim_1"
+    close $fp
+    puts "  ✓ Created UVVM compilation script: $uvvm_compile_tcl"
+    
+    # Create a simulation helper script
+    set sim_script "$project_dir/simulate.tcl"
+    set fp [open $sim_script w]
+    puts $fp "# Simulation Helper Script"
+    puts $fp "# Usage: source simulate.tcl"
+    puts $fp ""
+    puts $fp "# Compile UVVM libraries (if not already compiled)"
+    puts $fp "# source compile_uvvm.tcl"
+    puts $fp ""
+    puts $fp "# Set simulation top"
+    puts $fp "# set_property top <testbench_name> \[get_filesets sim_1\]"
+    puts $fp ""
+    puts $fp "# Launch simulation"
+    puts $fp "# launch_simulation"
+    puts $fp ""
+    puts $fp "# Run simulation"
+    puts $fp "# run all"
+    close $fp
+    puts "  ✓ Created simulation helper script: $sim_script"
+    
+    # Optionally compile UVVM libraries now (commented out by default)
+    puts ""
+    puts "To compile UVVM libraries, run from Vivado TCL console:"
+    puts "  source $project_dir/compile_uvvm.tcl"
+    puts ""
+    puts "Or from command line:"
+    puts "  vivado -mode batch -source $project_dir/compile_uvvm.tcl"
+    
+} else {
+    puts "Warning: UVVM not found at: $uvvm_root"
+    puts "  Expected compile script: $uvvm_compile_script"
+    puts "  Skipping UVVM integration."
+    puts ""
+    puts "To install UVVM:"
+    puts "  git clone https://github.com/UVVM/UVVM.git"
+    puts "  or download from: https://github.com/UVVM/UVVM"
+}
 
 puts "\n=== Project Setup Complete ==="
 puts "Project: $project_name"

@@ -30,7 +30,7 @@ entity weight_memory_controller is
         kernel_row  : in  integer range 0 to KERNEL_SIZE-1;
         kernel_col  : in  integer range 0 to KERNEL_SIZE-1;
         -- Data interface (64 bits = 8 filters * 8 bits per weight)
-        weight_data : out std_logic_vector(63 downto 0);
+        weight_data : out WORD_ARRAY(0 to NUM_FILTERS-1);
         data_valid  : out std_logic;
         load_done   : out std_logic
     );
@@ -51,6 +51,7 @@ architecture Behavioral of weight_memory_controller is
     signal weight_addr : std_logic_vector(3 downto 0) := (others => '0');  -- Only need 4 bits for 9 addresses
     signal weight_en   : std_logic := '0';
     signal wait_cycles : integer range 0 to 3 := 0;
+    signal weight_dout : std_logic_vector(63 downto 0) := (others => '0');  -- Raw 64-bit output from BRAM IP
     
     type state_type is (IDLE, LOAD_REQUEST, WAIT_DATA, DATA_READY);
     signal current_state : state_type := IDLE;
@@ -63,8 +64,14 @@ begin
         clka => clk,
         ena => weight_en,
         addra => weight_addr,
-        douta => weight_data
+        douta => weight_dout
     );
+
+    -- Convert 64-bit BRAM output into WORD_ARRAY elements (8 bits per filter)
+    -- Each byte in the 64-bit output corresponds to one filter's weight
+    gen_unpack_weights : for i in 0 to NUM_FILTERS-1 generate
+        weight_data(i) <= weight_dout((i+1)*8 - 1 downto i*8);
+    end generate;
 
     -- Memory controller process
     memory_ctrl_proc: process(clk, rst)

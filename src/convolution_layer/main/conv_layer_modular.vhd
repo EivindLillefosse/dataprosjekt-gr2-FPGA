@@ -52,11 +52,10 @@ architecture Behavioral of conv_layer_modular is
     
     -- Weight memory controller signals
     signal weight_load_req   : std_logic;
-    signal weight_filter_idx : integer range 0 to NUM_FILTERS-1;
     signal weight_kernel_row : integer range 0 to KERNEL_SIZE-1;
     signal weight_kernel_col : integer range 0 to KERNEL_SIZE-1;
-    signal weight_data       : std_logic_vector(7 downto 0);
     signal weight_data_valid : std_logic;
+    signal weight_data       : WORD_ARRAY(0 to NUM_FILTERS-1);
     signal weight_load_done  : std_logic;
     
     -- Position calculator signals
@@ -73,7 +72,6 @@ architecture Behavioral of conv_layer_modular is
     signal compute_clear : std_logic;
     signal compute_done : std_logic_vector(NUM_FILTERS-1 downto 0);
     signal conv_results : WORD_ARRAY_16(0 to NUM_FILTERS-1);
-    signal weight_array : WORD_ARRAY(0 to NUM_FILTERS-1);
     
     -- ReLU activation signals
     signal relu_valid_in : std_logic;
@@ -93,7 +91,6 @@ begin
             clk => clk,
             rst => rst,
             load_req => weight_load_req,
-            filter_idx => weight_filter_idx,
             kernel_row => weight_kernel_row,
             kernel_col => weight_kernel_col,
             weight_data => weight_data,
@@ -119,18 +116,6 @@ begin
             region_done => region_done,
             layer_done => pos_layer_done
         );
-    
-    -- Weight data distribution
-    weight_distribution: process(clk, rst)
-    begin
-        if rst = '1' then
-            weight_array <= (others => (others => '0'));
-        elsif rising_edge(clk) then
-            if weight_data_valid = '1' then
-                weight_array(weight_filter_idx) <= weight_data;
-            end if;
-        end if;
-    end process;
 
     -- Convolution Engine
     conv_engine : entity work.convolution_engine
@@ -144,7 +129,7 @@ begin
             rst => rst,
             clear => compute_clear,
             pixel_data => input_pixel,
-            weight_data => weight_array,
+            weight_data => weight_data,
             compute_en => compute_en,
             results => conv_results,
             compute_done => compute_done
@@ -176,7 +161,6 @@ begin
             rst => rst,
             enable => enable,
             weight_load_req => weight_load_req,
-            weight_filter_idx => weight_filter_idx,
             weight_kernel_row => weight_kernel_row,
             weight_kernel_col => weight_kernel_col,
             weight_data_valid => weight_data_valid,
