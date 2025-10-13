@@ -54,7 +54,7 @@ architecture Behavioral of conv_layer_modular_tb is
     signal input_ready : std_logic;
     
     signal output_valid : std_logic;
-    signal output_pixel : WORD_ARRAY_16(0 to NUM_FILTERS-1);
+    signal output_pixel : WORD_ARRAY(0 to NUM_FILTERS-1);
     signal output_row : integer;
     signal output_col : integer;
     signal output_ready : std_logic := '1';
@@ -87,6 +87,239 @@ architecture Behavioral of conv_layer_modular_tb is
     
     -- Debug signal for MAC intermediate values
     signal debug_mac_results : WORD_ARRAY_16(0 to NUM_FILTERS-1);
+
+    -- Helper: convert std_logic_vector to hex string (prefixed with 0x)
+    function slv_to_hex(bv : std_logic_vector) return string is
+        variable u       : unsigned(bv'range) := unsigned(bv);
+        variable val     : integer := to_integer(u);
+        variable nibbles : integer := (bv'length + 3) / 4;
+        variable outstr  : string(1 to 2 + nibbles);
+        variable digit   : integer;
+        variable divisor : integer;
+    begin
+        outstr(1) := '0';
+        outstr(2) := 'x';
+        for i in 1 to nibbles loop
+            divisor := 16 ** (nibbles - i);
+            digit := (val / divisor) mod 16;
+            case digit is
+                when 0  => outstr(i+2) := '0';
+                when 1  => outstr(i+2) := '1';
+                when 2  => outstr(i+2) := '2';
+                when 3  => outstr(i+2) := '3';
+                when 4  => outstr(i+2) := '4';
+                when 5  => outstr(i+2) := '5';
+                when 6  => outstr(i+2) := '6';
+                when 7  => outstr(i+2) := '7';
+                when 8  => outstr(i+2) := '8';
+                when 9  => outstr(i+2) := '9';
+                when 10 => outstr(i+2) := 'A';
+                when 11 => outstr(i+2) := 'B';
+                when 12 => outstr(i+2) := 'C';
+                when 13 => outstr(i+2) := 'D';
+                when 14 => outstr(i+2) := 'E';
+                when 15 => outstr(i+2) := 'F';
+                when others => outstr(i+2) := '?';
+            end case;
+        end loop;
+        return outstr;
+    end function;
+
+    -- Helper: convert std_logic_vector to plain binary string
+    function slv_to_bin(bv : std_logic_vector) return string is
+        variable outstr : string(1 to bv'length);
+        variable idx : integer := 1;
+    begin
+        for i in bv'range loop
+            if bv(i) = '1' then
+                outstr(idx) := '1';
+            else
+                outstr(idx) := '0';
+            end if;
+            idx := idx + 1;
+        end loop;
+        return outstr;
+    end function;
+
+    -- Helper: interpret std_logic_vector as signed Q1.6 and return decimal string
+    function slv_to_q1_6(bv : std_logic_vector) return string is
+        variable sval    : integer := to_integer(signed(bv));
+        variable absval  : integer;
+        variable intpart : integer;
+        variable frac    : integer;
+        variable frac3   : integer;
+        variable signstr : string(1 to 1);
+        variable s_int   : string(1 to 20);
+        variable s_frac  : string(1 to 3);
+        variable s_out   : string(1 to 30);
+        variable len_int : integer;
+        variable len_out : integer := 0;
+        variable tmp     : string(1 to 20);
+        variable trim_idx: integer;
+        -- local temporaries declared here (declarative region)
+        variable tmp_frac   : string(1 to 10);
+        variable frac_digits: integer;
+    begin
+        if sval < 0 then
+            absval := -sval;
+            signstr(1) := '-';
+        else
+            absval := sval;
+            signstr(1) := ' ';
+        end if;
+
+        intpart := absval / 64; -- Q1.6 -> divide by 2^6
+        frac := absval mod 64;   -- fractional bits
+        -- fractional part scaled to 3 decimal digits with rounding
+        frac3 := (frac * 1000 + 32) / 64;
+        if frac3 = 1000 then
+            intpart := intpart + 1;
+            frac3 := 0;
+        end if;
+
+        -- integer part as string
+        tmp := integer'image(intpart);
+        -- trim leading spaces from integer'image
+        trim_idx := tmp'low;
+        while trim_idx <= tmp'high and tmp(trim_idx) = ' ' loop
+            trim_idx := trim_idx + 1;
+        end loop;
+        len_int := tmp'high - trim_idx + 1;
+        for i in 1 to len_int loop
+            s_int(i) := tmp(trim_idx + i - 1);
+        end loop;
+
+        -- fractional part padded to 3 digits
+        tmp_frac := integer'image(frac3);
+        -- find first non-space
+        trim_idx := tmp_frac'low;
+        while trim_idx <= tmp_frac'high and tmp_frac(trim_idx) = ' ' loop
+            trim_idx := trim_idx + 1;
+        end loop;
+        -- fill s_frac with padding zeros then digits
+        if trim_idx > tmp_frac'high then
+            s_frac := (others => '0');
+        else
+            frac_digits := tmp_frac'high - trim_idx + 1;
+            -- pad on the left
+            for i in 1 to 3-frac_digits loop
+                s_frac(i) := '0';
+            end loop;
+            for i in 1 to frac_digits loop
+                s_frac(3-frac_digits+i) := tmp_frac(trim_idx + i - 1);
+            end loop;
+        end if;
+
+        -- build output: optional sign, integer, dot, 3 frac digits
+        len_out := 0;
+        if signstr(1) = '-' then
+            len_out := len_out + 1;
+            s_out(len_out) := '-';
+        end if;
+        for i in 1 to len_int loop
+            len_out := len_out + 1;
+            s_out(len_out) := s_int(i);
+        end loop;
+        len_out := len_out + 1;
+        s_out(len_out) := '.';
+        for i in 1 to 3 loop
+            len_out := len_out + 1;
+            s_out(len_out) := s_frac(i);
+        end loop;
+
+        return s_out(1 to len_out);
+    end function;
+
+    -- Helper: interpret std_logic_vector as signed Q2.12 and fill an output buffer
+    procedure slv_to_q2_12(bv : std_logic_vector; out_buf : out string(1 to 40)) is
+        variable sval    : integer := to_integer(signed(bv));
+        variable absval  : integer;
+        variable intpart : integer;
+        variable frac    : integer;
+        variable frac3   : integer;
+        variable signstr : string(1 to 1);
+        variable s_int   : string(1 to 20);
+        variable s_frac  : string(1 to 3);
+        variable tmp     : string(1 to 20);
+        variable trim_idx: integer;
+        variable tmp_frac: string(1 to 20);
+        variable frac_digits: integer;
+        variable i       : integer;
+        variable len_int : integer;
+        variable len_out : integer := 0;
+    begin
+        -- initialize buffer with spaces
+        for i in out_buf'range loop
+            out_buf(i) := ' ';
+        end loop;
+
+        if sval < 0 then
+            absval := -sval;
+            signstr(1) := '-';
+        else
+            absval := sval;
+            signstr(1) := ' ';
+        end if;
+
+        intpart := absval / 4096; -- Q2.12 -> divide by 2^12
+        frac := absval mod 4096;   -- fractional bits
+        -- fractional part scaled to 3 decimal digits with rounding
+        frac3 := (frac * 1000 + 2048) / 4096;
+        if frac3 = 1000 then
+            intpart := intpart + 1;
+            frac3 := 0;
+        end if;
+
+        -- integer part as string
+        tmp := integer'image(intpart);
+        -- trim leading spaces from integer'image
+        trim_idx := tmp'low;
+        while trim_idx <= tmp'high and tmp(trim_idx) = ' ' loop
+            trim_idx := trim_idx + 1;
+        end loop;
+        len_int := tmp'high - trim_idx + 1;
+        for i in 1 to len_int loop
+            s_int(i) := tmp(trim_idx + i - 1);
+        end loop;
+
+        -- fractional part padded to 3 digits
+        tmp_frac := integer'image(frac3);
+        -- find first non-space
+        trim_idx := tmp_frac'low;
+        while trim_idx <= tmp_frac'high and tmp_frac(trim_idx) = ' ' loop
+            trim_idx := trim_idx + 1;
+        end loop;
+        -- fill s_frac with padding zeros then digits
+        if trim_idx > tmp_frac'high then
+            s_frac := (others => '0');
+        else
+            frac_digits := tmp_frac'high - trim_idx + 1;
+            -- pad on the left
+            for i in 1 to 3-frac_digits loop
+                s_frac(i) := '0';
+            end loop;
+            for i in 1 to frac_digits loop
+                s_frac(3-frac_digits+i) := tmp_frac(trim_idx + i - 1);
+            end loop;
+        end if;
+
+        -- build output into out_buf starting at position 1
+        len_out := 0;
+        if signstr(1) = '-' then
+            len_out := len_out + 1;
+            out_buf(len_out) := '-';
+        end if;
+        for i in 1 to len_int loop
+            len_out := len_out + 1;
+            out_buf(len_out) := s_int(i);
+        end loop;
+        len_out := len_out + 1;
+        out_buf(len_out) := '.';
+        for i in 1 to 3 loop
+            len_out := len_out + 1;
+            out_buf(len_out) := s_frac(i);
+        end loop;
+    end procedure;
 
 begin
     -- Unit Under Test (UUT) - Using the modular version
@@ -173,9 +406,9 @@ begin
             if input_ready = '1' then
                 write(debug_line, string'("INPUT_REQUEST: ["));
                 write(debug_line, input_row);
-                write(debug_line, string'(","));
+                write(debug_line, ',');
                 write(debug_line, input_col);
-                write(debug_line, string'("]"));
+                write(debug_line, ']');
                 writeline(debug_file, debug_line);
             end if;
             
@@ -183,10 +416,10 @@ begin
             if input_valid = '1' then
                 write(debug_line, string'("INPUT_PROVIDED: ["));
                 write(debug_line, input_row);
-                write(debug_line, string'(","));
+                write(debug_line, ',');
                 write(debug_line, input_col);
-                write(debug_line, string'("] = "));
-                write(debug_line, to_integer(unsigned(input_pixel)));
+                write(debug_line, string'("] "));
+                write(debug_line, to_integer(signed(input_pixel)));
                 writeline(debug_file, debug_line);
             end if;
             
@@ -194,21 +427,22 @@ begin
             if output_valid = '1' and output_ready = '1' then
                 report "Modular Output at position [" & integer'image(output_row) & "," & integer'image(output_col) & "]";
                 
+                -- MODULAR_OUTPUT header
                 write(debug_line, string'("MODULAR_OUTPUT: ["));
                 write(debug_line, output_row);
-                write(debug_line, string'(","));
+                write(debug_line, ',');
                 write(debug_line, output_col);
-                write(debug_line, string'("]"));
+                write(debug_line, ']');
                 writeline(debug_file, debug_line);
                 
                 for i in 0 to NUM_FILTERS-1 loop
                     report "  Filter " & integer'image(i) & ": " & 
-                           integer'image(to_integer(unsigned(output_pixel(i))));
-                    
+                        integer'image(to_integer(signed(output_pixel(i))));
+                    -- Write filter output with Q2.12 formatting
                     write(debug_line, string'("Filter_"));
                     write(debug_line, i);
                     write(debug_line, string'(": "));
-                    write(debug_line, to_integer(unsigned(output_pixel(i))));
+                    write(debug_line, to_integer(signed(output_pixel(i))));
                     writeline(debug_file, debug_line);
                 end loop;
             end if;

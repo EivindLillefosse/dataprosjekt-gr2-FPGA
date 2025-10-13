@@ -86,13 +86,13 @@ if {[file isdirectory $src_dir]} {
     puts "Warning: Source directory '$src_dir' does not exist."
 }
 
-# Ensure Vivado treats VHDL sources as VHDL-2019
-puts "\nSetting VHDL standard to 2019 for all VHDL files..."
+# Ensure Vivado treats VHDL sources as VHDL-2008 (XSIM does not support 2019)
+puts "\nSetting VHDL standard to 2008 for all VHDL files..."
 foreach vfile [get_files_recursive $src_dir "*.vhd"] {
-    if {[catch {set_property FILE_TYPE {VHDL 2019} [get_files $vfile]} err]} {
+    if {[catch {set_property FILE_TYPE {VHDL 2008} [get_files $vfile]} err]} {
         puts "Warning: failed to set FILE_TYPE for $vfile : $err"
     } else {
-        puts "  Set VHDL 2019 for: $vfile"
+        puts "  Set VHDL 2008 for: $vfile"
     }
 }
 

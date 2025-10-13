@@ -29,8 +29,7 @@ entity bias_memory_controller is
         filter_idx  : in  integer range 0 to NUM_FILTERS-1;
         -- Data interface
         bias_data   : out std_logic_vector(7 downto 0);
-        data_valid  : out std_logic;
-        load_done   : out std_logic
+        data_valid  : out std_logic
     );
 end bias_memory_controller;
 
@@ -71,7 +70,6 @@ begin
             current_state <= IDLE;
             bias_en <= '0';
             data_valid <= '0';
-            load_done <= '0';
             wait_cycles <= 0;
             bias_addr <= (others => '0');
             
@@ -79,7 +77,6 @@ begin
             case current_state is
                 when IDLE =>
                     data_valid <= '0';
-                    load_done <= '0';
                     bias_en <= '0';
                     
                     if load_req = '1' then
@@ -104,7 +101,6 @@ begin
                     
                 when DATA_READY =>
                     data_valid <= '1';
-                    load_done <= '1';
                     current_state <= IDLE;
                     
                 when others =>

@@ -416,6 +416,8 @@ def export_to_FPGA(model, q_format="Q1.6"):
     
     layer_count = 0
     total_params = 0
+    # Collect quantized biases per layer to emit a single VHDL package
+    bias_collections = {}
     
     # Process each layer
     for i, layer in enumerate(model.layers):
@@ -566,6 +568,11 @@ def export_to_FPGA(model, q_format="Q1.6"):
                 
                 print(f"  ✓ Biases saved to: {biases_filename}")
                 total_params += len(quantized_biases)
+                # Store quantized biases for package emission later
+                if len(quantized_biases.shape) == 1 or isinstance(quantized_biases, (list, np.ndarray)):
+                    key = f"layer_{i}_{layer.name}"
+                    # convert to plain Python list of ints
+                    bias_collections[key] = [int(x) for x in np.asarray(quantized_biases).flatten().tolist()]
             
             layer_count += 1
     
@@ -594,7 +601,31 @@ def export_to_FPGA(model, q_format="Q1.6"):
     print(f"  - {total_params} parameters exported")
     print(f"  - Files saved in: {output_dir}/")
     print(f"  - Summary: {summary_filename}")
-    
+    # Emit a single VHDL package with all collected bias arrays
+    if bias_collections:
+        try:
+            vhd_path = os.path.join('src', 'convolution_layer', 'bias_pkg.vhd')
+            os.makedirs(os.path.dirname(vhd_path), exist_ok=True)
+            with open(vhd_path, 'w') as vhd:
+                vhd.write("library IEEE;\n")
+                vhd.write("use IEEE.STD_LOGIC_1164.ALL;\n")
+                vhd.write("use IEEE.NUMERIC_STD.ALL;\n\n")
+                vhd.write("package bias_pkg is\n")
+                # Write each bias array type and constant
+                for idx, (key, vals) in enumerate(bias_collections.items()):
+                    n = len(vals)
+                    vhd.write(f"    type {key}_t is array(0 to {n-1}) of signed(15 downto 0);\n")
+                    vhd.write(f"    constant {key}_BIAS : {key}_t := (\n")
+                    for j, val in enumerate(vals):
+                        comma = ',' if j < n-1 else ''
+                        vhd.write(f"        {j} => to_signed({int(val)}, 16){comma}\n")
+                    vhd.write("    );\n")
+                vhd.write("end package bias_pkg;\n\n")
+                vhd.write("package body bias_pkg is\nend package body bias_pkg;\n")
+            print(f"✓ Wrote single VHDL bias package: {vhd_path}")
+        except Exception as e:
+            print(f"! Failed to write combined bias VHDL package: {e}")
+
     return output_dir
 
 # Main execution

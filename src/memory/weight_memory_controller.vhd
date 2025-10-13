@@ -31,8 +31,7 @@ entity weight_memory_controller is
         kernel_col  : in  integer range 0 to KERNEL_SIZE-1;
         -- Data interface (64 bits = 8 filters * 8 bits per weight)
         weight_data : out WORD_ARRAY(0 to NUM_FILTERS-1);
-        data_valid  : out std_logic;
-        load_done   : out std_logic
+        data_valid  : out std_logic
     );
 end weight_memory_controller;
 
@@ -80,7 +79,6 @@ begin
             current_state <= IDLE;
             weight_en <= '0';
             data_valid <= '0';
-            load_done <= '0';
             wait_cycles <= 0;
             weight_addr <= (others => '0');
             
@@ -88,7 +86,6 @@ begin
             case current_state is
                 when IDLE =>
                     data_valid <= '0';
-                    load_done <= '0';
                     weight_en <= '0';
                     
                     if load_req = '1' then
@@ -115,7 +112,6 @@ begin
                     
                 when DATA_READY =>
                     data_valid <= '1';
-                    load_done <= '1';
                     current_state <= IDLE;
                     
                 when others =>

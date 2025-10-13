@@ -10,17 +10,33 @@ Quick reference for the automatic memory-IP creation and testbench scripts in th
 
 vivado -mode batch -source scripts/create-project.tcl 2>&1 | Select-String -Pattern "^(?!#)" -CaseSensitive
 
+# Linux (bash) equivalent
+
+vivado -mode batch -source scripts/create-project.tcl 2>&1 | grep -v '^#'
+
 # Create / regenerate only memory IPs (standalone)
 
 vivado -mode batch -source scripts/create-memory-ips.tcl 2>&1 | Select-String -Pattern "^(?!#)" -CaseSensitive
+
+# Linux (bash) equivalent
+
+vivado -mode batch -source scripts/create-memory-ips.tcl 2>&1 | grep -v '^#'
 
 # Run testbenches (examples are in scripts/README_TESTBENCHES.md)
 
 vivado -mode batch -source scripts/run-single-testbench.tcl -tclargs <testbench_entity> 2>&1 | Select-String -Pattern "^(?!#)" -CaseSensitive
 
+# Linux (bash) equivalent
+
+vivado -mode batch -source scripts/run-single-testbench.tcl -tclargs <testbench_entity> 2>&1 | grep -v '^#'
+
 # Run all testbenches
 
 vivado -mode batch -source ./scripts/run-all-testbenches.tcl 2>&1 | Select-String -Pattern "^(?!#)" -CaseSensitive
+
+# Linux (bash) equivalent
+
+vivado -mode batch -source ./scripts/run-all-testbenches.tcl 2>&1 | grep -v '^#'
 
 ## COE file requirements (minimal)
 

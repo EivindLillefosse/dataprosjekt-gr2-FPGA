@@ -6,7 +6,7 @@ This directory contains Python scripts for training a CNN model and exporting it
 
 ### Python Requirements
 
-- Python 3.8-2.9
+- Python 3.8-3.11
 
 # model — CNN training & FPGA export (short)
 
@@ -14,7 +14,7 @@ Minimal instructions to train the CNN and produce FPGA COE files.
 
 ## Prerequisites
 
-- Python 3.8-3.9
+- Python 3.8-3.11
 - pip
 
 Quick venv + install (Windows PowerShell):
