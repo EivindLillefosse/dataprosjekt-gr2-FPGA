@@ -1,0 +1,54 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Vivado: Create Project (GUI)",
+            "type": "shell",
+            "group": { "kind": "build", "isDefault": true },
+            "command": "vivado -source scripts/create-project.tcl",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Vivado: Dump & Apply IP Manifests (GUI)",
+            "type": "shell",
+            "command": "vivado -source scripts/dump_all_wrapper.tcl",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Vivado: Create Project (GUI) [Linux]",
+            "type": "shell",
+            "command": "vivado -source scripts/create-project.tcl",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Vivado: Dump & Apply IP Manifests (GUI) [Linux]",
+            "type": "shell",
+            "command": "vivado -source scripts/dump_all_wrapper.tcl",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        }
+    ]
+}

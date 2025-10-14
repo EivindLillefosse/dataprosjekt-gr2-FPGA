@@ -1,0 +1,12 @@
+[
+    {
+        "key": "f7",
+        "command": "workbench.action.tasks.runTask",
+        "args": "Vivado: Create Project (GUI)"
+    },
+    {
+        "key": "f8",
+        "command": "workbench.action.tasks.runTask",
+        "args": "Vivado: Dump & Apply IP Manifests (GUI)"
+    }
+]
