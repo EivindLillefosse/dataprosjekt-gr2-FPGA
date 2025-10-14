@@ -92,21 +92,19 @@ architecture Behavioral of conv_layer_modular is
 begin
 
     -- Weight Memory Controller
+    -- Use the entity's default generics (they match the module defaults),
+    -- and explicitly map the ports. This avoids parser confusion in some
+    -- tool versions when mixing generic/port maps across files.
     weight_mem_ctrl : entity work.weight_memory_controller
-        generic map (
-            NUM_FILTERS => NUM_FILTERS,
-            KERNEL_SIZE => KERNEL_SIZE,
-            ADDR_WIDTH => 7
-        )
-            port map (
-            clk => clk,
-            rst => rst,
-            load_req => weight_load_req,
+        port map (
+            clk        => clk,
+            rst        => rst,
+            load_req   => weight_load_req,
             kernel_row => weight_kernel_row,
             kernel_col => weight_kernel_col,
-            weight_data => weight_data,
-                data_valid => weight_data_valid
-            );
+            weight_data=> weight_data,
+            data_valid => weight_data_valid
+        );
 
     -- Position Calculator
     pos_calc : entity work.position_calculator
