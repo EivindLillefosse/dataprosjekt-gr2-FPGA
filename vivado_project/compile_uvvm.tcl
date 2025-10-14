@@ -17,7 +17,7 @@ set uvvm_libs [list \
 # lappend uvvm_libs bitvis_vip_uart
 # lappend uvvm_libs bitvis_vip_avalon_mm
 
-set uvvm_path "/home/eivind/dataprosjekt-gr2-FPGA/UVVM"
+set uvvm_path "C:/Users/eivin/Documents/Skule/FPGA/dataprosjekt-gr2-FPGA/UVVM"
 
 foreach lib $uvvm_libs {
     set lib_path "$uvvm_path/$lib"

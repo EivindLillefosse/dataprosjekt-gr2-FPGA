@@ -442,6 +442,23 @@ if {[llength $all_ips] > 0} {
     puts "No IP cores found in project."
 }
 
+    # If there are editable manifests in scripts/ip_manifests, apply them to create/update IPs under ip_repo
+    set manifests_dir "./scripts/ip_manifests"
+    if {[file isdirectory $manifests_dir]} {
+        puts "Found manifests directory: $manifests_dir - attempting to apply manifests"
+        if {[catch {source ./scripts/dump_ip_config.tcl} err]} {
+            puts "Warning: failed to source dump_ip_config.tcl : $err"
+        } else {
+            if {[catch {apply_ip_manifests $manifests_dir "./ip_repo"} err]} {
+                puts "Warning: apply_ip_manifests failed: $err"
+            } else {
+                puts "apply_ip_manifests completed"
+            }
+        }
+    } else {
+        puts "No IP manifest directory found at: $manifests_dir (skipping apply)"
+    }
+
 # Verify COE file paths (optional check)
 puts "\n=== Verifying COE Files ==="
 set coe_weights "./model/fpga_weights_and_bias/layer_0_conv2d_weights.coe"
