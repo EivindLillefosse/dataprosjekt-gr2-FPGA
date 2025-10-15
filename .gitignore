@@ -1,0 +1,29 @@
+# Vivado build directories
+.Xil/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+*.gen/
+
+# Vivado log files
+*.jou
+*.log
+*.backup.jou
+*.backup.log
+
+# Vivado temporary files
+vivado*.jou
+vivado*.log
+
+# TCL scripts (if they are temporary/generated)
+*.tcl
+
+# Keep only source files
+!*.xpr
+!*.srcs/
+
+# OS files
+.DS_Store
+Thumbs.db
