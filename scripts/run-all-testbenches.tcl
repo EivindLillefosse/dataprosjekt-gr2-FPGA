@@ -1,9 +1,24 @@
 # run-all-testbenches.tcl
-# Automatically finds and runs all testbenches in the project
-# Usage: vivado -mode batch -source ./scripts/run-all-testbenches.tcl
+# Automatically finds and runs testbenches in the project
+# Usage examples:
+#   Run all (default):
+#     vivado -mode batch -source ./scripts/run-all-testbenches.tcl
+#   Run interactive selection (pure Tcl prompt):
+#     vivado -mode batch -source ./scripts/run-all-testbenches.tcl -tclargs interactive
+#   Run a selection by indices/names (comma separated):
+#     vivado -mode batch -source ./scripts/run-all-testbenches.tcl -tclargs 1,3-5,my_testbench
+# Notes: arguments passed with -tclargs are available in the Tcl variable $argv
 
 # Close any currently open project to avoid conflicts
 catch {close_project}
+
+# Allow a quick syntax-only run by setting environment variable SYNTAX_CHECK=1
+# Usage: set environment variable and run tclsh to verify script parsing without
+# executing Vivado-specific commands which are unavailable in plain tclsh.
+if {[info exists ::env(SYNTAX_CHECK)] && $::env(SYNTAX_CHECK) eq "1"} {
+    puts "SYNTAX_CHECK=1 detected - exiting early after parse (no Vivado calls)"
+    exit 0
+}
 
 # Open the existing project
 if {[file exists "./vivado_project/CNN.xpr"]} {
@@ -57,6 +72,126 @@ foreach tb $all_testbenches {
     set file_path [lindex $tb 1]
     set relative_path [file dirname $file_path]
     puts [format "  %-30s %s" $entity_name $relative_path]
+}
+
+# ---------------------------------------------------------------------------
+# Selection handling
+# Supports:
+#   - no args or 'all' => run all testbenches
+#   - 'interactive' => prompt user on stdin with a numbered checklist (pure Tcl)
+#   - comma-separated indices/names/ranges passed via -tclargs
+# ---------------------------------------------------------------------------
+
+# Helper: parse a selection string into 0-based indices list
+proc parse_selection {sel_str total_count names_list} {
+    set sel_str [string trim $sel_str]
+    if {$sel_str eq "" || [string tolower $sel_str] eq "all"} {
+        set all {}
+        for {set i 0} {$i < $total_count} {incr i} { lappend all $i }
+        return $all
+    }
+
+    set result {}
+    # Split on commas and whitespace
+    set parts [split $sel_str ","]
+    foreach raw $parts {
+        set token [string trim $raw]
+        if {$token eq ""} { continue }
+        # Range like 2-5
+        if {[regexp {^(\d+)-(\d+)$} $token -> a b]} {
+            if {$a < 1} { set a 1 }
+            if {$b > $total_count} { set b $total_count }
+            for {set i $a} {$i <= $b} {incr i} { lappend result [expr {$i-1}] }
+            continue
+        }
+        # Single numeric index
+        if {[regexp {^\d+$} $token]} {
+            set idx [expr {$token - 1}]
+            if {$idx >= 0 && $idx < $total_count} {
+                lappend result $idx
+            } else {
+                puts "[WARNING] Index $token out of range (1..$total_count) - skipping"
+            }
+            continue
+        }
+        # Try exact name match first
+        set found 0
+        for {set i 0} {$i < $total_count} {incr i} {
+            if {[string equal $token [lindex $names_list $i]]} {
+                lappend result $i
+                set found 1
+                break
+            }
+        }
+        if {!$found} {
+            # Match by substring/prefix
+            for {set i 0} {$i < $total_count} {incr i} {
+                if {[string first $token [lindex $names_list $i]] >= 0} {
+                    lappend result $i
+                    set found 1
+                }
+            }
+        }
+        if {!$found} { puts "[WARNING] Couldn't match '$token' to any testbench name - skipping" }
+    }
+
+    # Unique while preserving order
+    array set seen {}
+    set uniq {}
+    foreach x $result {
+        if {![info exists seen($x)]} {
+            set seen($x) 1
+            lappend uniq $x
+        }
+    }
+    return $uniq
+}
+
+# Build name list for matching and interactive display
+set tb_names [list]
+foreach tb $all_testbenches { lappend tb_names [lindex $tb 0] }
+
+# Decide selection mode based on $argv
+set selected_indices {}
+if {[info exists argv] && $argv ne ""} {
+    set argstr [join $argv " "]
+    if {[string tolower [string trim $argstr]] eq "interactive"} {
+        # Interactive prompt on stdin
+        puts ""
+        puts "Select testbenches to run (enter numbers, ranges e.g. 1,3-5, names, or 'all'):\n"
+        for {set i 0} {$i < [llength $tb_names]} {incr i} {
+            set disp_idx [expr {$i + 1}]
+            set tb_entry [lindex $all_testbenches $i]
+            set file_path [lindex $tb_entry 1]
+            puts [format "  %3d) %-30s %s" $disp_idx [lindex $tb_names $i] [file dirname $file_path]]
+        }
+        puts -nonewline "Selection> "
+        flush stdout
+        if {[gets stdin user_input] < 0} {
+            puts "\nNo input detected; defaulting to all"
+            set user_input "all"
+        }
+        set selected_indices [parse_selection $user_input [llength $tb_names] $tb_names]
+    } else {
+        # Treat args as selection string (comma-separated list)
+        set selected_indices [parse_selection $argstr [llength $tb_names] $tb_names]
+    }
+} else {
+    # Default: all testbenches
+    set selected_indices [parse_selection "all" [llength $tb_names] $tb_names]
+}
+
+# Build selected_testbenches as a subset of all_testbenches
+set selected_testbenches {}
+foreach idx $selected_indices {
+    if {$idx >= 0 && $idx < [llength $all_testbenches]} {
+        lappend selected_testbenches [lindex $all_testbenches $idx]
+    }
+}
+
+if {[llength $selected_testbenches] == 0} {
+    puts "ERROR: No testbenches selected. Exiting."
+    exit 2
 }
 
 # Initialize results tracking
@@ -256,8 +391,8 @@ proc capture_sim_logs {entity_name run_timestamp per_test_log_dir} {
     return [list $copied $error_entries $summary_file $test_dir]
 }
 
-# Run each testbench
-foreach tb $all_testbenches {
+# Run each selected testbench
+foreach tb $selected_testbenches {
     set entity_name [lindex $tb 0]
     set file_path [lindex $tb 1]
     set module_path [file dirname $file_path]

@@ -82,60 +82,111 @@ puts "dump_ip_config.tcl loaded. Use 'dump_ip_config <ip_name> <out_file>' or 'd
 # ============================================================================
 # Apply manifests: read YAML files and create/update IPs in ip_repo
 # ============================================================================
-proc apply_ip_manifests {manifests_dir {ip_repo_dir "./ip_repo"}} {
+# normalize values for robust comparisons
+proc normalize_val {v} {
+    # trim whitespace
+    set v [string trim $v]
+    # strip surrounding braces { ... } produced by some properties
+    if {[regexp {^\{(.*)\}$} $v -> inner]} {
+        set v $inner
+        set v [string trim $v]
+    }
+    # lowercase boolean-like values
+    if {[string tolower $v] == "true"} { return "true" }
+    if {[string tolower $v] == "false"} { return "false" }
+    # remove surrounding double quotes if any
+    if {[regexp {^"(.*)"$} $v -> q]} { set v $q }
+    return $v
+}
+
+proc apply_ip_manifests {manifests_dir {ip_repo_dir "./ip_repo"} {dry_run 0}} {
     if {![file isdirectory $manifests_dir]} {
         puts "ERROR: manifests directory not found: $manifests_dir"
-        return
-    }
-
-    foreach f [glob -nocomplain "$manifests_dir/*_config.yaml"] {
-        puts "Processing manifest: $f"
-        set fh [open $f r]
-        set content [read $fh]
-        close $fh
-        set lines [split $content "\n"]
-
-        set ipname ""
-        set in_config 0
-        set kv {}
-        foreach l $lines {
-            set line [string trim $l]
-            if {$line == ""} { continue }
-            if {[string index $line 0] == "#"} { continue }
-            if {[regexp {^id:\s*(\S+)} $line -> id]} {
-                set ipname $id
-                continue
-            }
-            if {$line == "config:"} {
-                set in_config 1
-                continue
-            }
-            if {$in_config} {
-                # Expect: <PROP>: <VALUE>
-                if {[regexp {^([^:]+):\s*(.*)$} $line -> key val]} {
-                    set key [string trim $key]
-                    set val [string trim $val]
-                    # strip surrounding quotes if present
-                    if {[regexp {^"(.*)"$} $val -> qq]} { set val $qq }
-                    # append key/value
-                    lappend kv $key $val
-                }
-            }
-        }
-
-        if {$ipname == ""} {
-            puts "Warning: no 'id' found in manifest $f - skipping"
-            continue
-        }
-
         # create ip if missing
         set created_new 0
-        if {[llength [get_ips $ipname]] == 0} {
+        set ip_exists [expr {[llength [get_ips $ipname]] > 0}]
+        if {!$ip_exists} {
+            if {$dry_run} {
+                # In dry-run mode we won't create or apply anything, just report
+                set num_props [expr {[llength $kv] / 2}]
+                puts "DRY-RUN: Would create IP instance '$ipname' in $ip_repo_dir and set $num_props property(ies)."
+                continue
+            }
             # infer ip core name from ipname (strip trailing _N)
             if {[regexp {^([a-zA-Z0-9_]+)_(\d+)$} $ipname -> base idx]} {
                 set ipcore $base
             } else {
                 set ipcore $ipname
+            }
+            puts "Creating IP instance '$ipname' (core: $ipcore) in $ip_repo_dir"
+            if {[catch {create_ip -name $ipcore -vendor xilinx.com -library ip -module_name $ipname -dir $ip_repo_dir} err]} {
+                puts "ERROR: failed to create IP $ipname : $err"
+                continue
+            }
+            set created_new 1
+        } else {
+            puts "IP instance '$ipname' already exists - checking for changed properties"
+        }
+        # prepare to apply only changed properties
+        set ipobj [lindex [get_ips $ipname] 0]
+        set changes 0
+        set dictlist [list]
+        for {set i 0} {$i < [llength $kv]} {incr i 2} {
+            set k [lindex $kv $i]
+            set v [lindex $kv [expr {$i+1}]]
+            set v_norm [normalize_val $v]
+            # if newly created, just add
+            if {$created_new} {
+                lappend dictlist $k $v
+                incr changes
+                continue
+            }
+            # otherwise compare current property value
+            if {[catch {set cur [get_property $k $ipobj]} err]} {
+                # if we can't read it, include it so we attempt to set
+                lappend dictlist $k $v
+                incr changes
+            } else {
+                set cur_norm [normalize_val $cur]
+                if {$cur_norm ne $v_norm} {
+                    lappend dictlist $k $v
+                    incr changes
+                }
+            }
+        }
+
+        if {$changes > 0} {
+            if {$dry_run} {
+                puts "DRY-RUN: Would update $changes property(ies) on $ipname:"
+                # print planned changes
+                for {set ci 0} {$ci < [llength $dictlist]} {incr ci 2} {
+                    puts "  [lindex $dictlist $ci]: [lindex $dictlist [expr {$ci+1}]]"
+                }
+            } else {
+                if {[catch {set_property -dict $dictlist $ipobj} err]} {
+                    puts "Warning: failed to set properties on $ipname : $err"
+                } else {
+                    puts "Updated $changes property(ies) on $ipname"
+                }
+            }
+        } else {
+            puts "No property changes detected for $ipname"
+        }
+
+        # generate outputs only if created new or there were changes
+        if {$created_new || $changes > 0} {
+            if {$dry_run} {
+                puts "DRY-RUN: Would generate output products for $ipname"
+            } else {
+                if {[catch {generate_target all [get_files [get_property IP_FILE $ipobj]]} err]} {
+                    puts "Warning: failed to generate IP outputs for $ipname : $err"
+                } else {
+                    puts "Generated output products for $ipname"
+                }
+            }
+        } else {
+            puts "Skipping IP generation for $ipname (no changes)"
+        }
             }
             puts "Creating IP instance '$ipname' (core: $ipcore) in $ip_repo_dir"
             if {[catch {create_ip -name $ipcore -vendor xilinx.com -library ip -module_name $ipname -dir $ip_repo_dir} err]} {

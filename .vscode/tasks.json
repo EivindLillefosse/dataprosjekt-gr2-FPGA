@@ -6,6 +6,12 @@
             "type": "shell",
             "group": { "kind": "build", "isDefault": true },
             "command": "vivado -source scripts/create-project.tcl",
+            "windows": {
+                "command": "vivado -source scripts/create-project.tcl 2>&1 | Select-String -Pattern '^[^#]' -CaseSensitive"
+            },
+            "linux": {
+                "command": "vivado -source scripts/create-project.tcl 2>&1 | grep -v '^#'"
+            },
             "presentation": {
                 "echo": true,
                 "reveal": "always",
@@ -18,6 +24,12 @@
             "label": "Vivado: Dump & Apply IP Manifests (GUI)",
             "type": "shell",
             "command": "vivado -source scripts/dump_all_wrapper.tcl",
+            "windows": {
+                "command": "vivado -source scripts/dump_all_wrapper.tcl 2>&1 | Select-String -Pattern '^[^#]' -CaseSensitive"
+            },
+            "linux": {
+                "command": "vivado -source scripts/dump_all_wrapper.tcl 2>&1 | grep -v '^#'"
+            },
             "presentation": {
                 "echo": true,
                 "reveal": "always",
@@ -27,9 +39,15 @@
             "problemMatcher": []
         },
         {
-            "label": "Vivado: Create Project (GUI) [Linux]",
+            "label": "Vivado: Run All Testbenches (batch)",
             "type": "shell",
-            "command": "vivado -source scripts/create-project.tcl",
+            "command": "vivado -mode batch -source scripts/run-all-testbenches.tcl -tclargs all",
+            "windows": {
+                "command": "vivado -mode batch -source scripts/run-all-testbenches.tcl -tclargs all 2>&1 | Select-String -Pattern '^[^#]' -CaseSensitive"
+            },
+            "linux": {
+                "command": "vivado -mode batch -source scripts/run-all-testbenches.tcl -tclargs all 2>&1 | grep -v '^#'"
+            },
             "presentation": {
                 "echo": true,
                 "reveal": "always",
@@ -39,9 +57,15 @@
             "problemMatcher": []
         },
         {
-            "label": "Vivado: Dump & Apply IP Manifests (GUI) [Linux]",
+            "label": "Vivado: Run Testbenches (Custom, batch)",
             "type": "shell",
-            "command": "vivado -source scripts/dump_all_wrapper.tcl",
+            "command": "vivado -mode batch -source scripts/run-all-testbenches.tcl -tclargs ${input:tbCustom}",
+            "windows": {
+                "command": "vivado -mode batch -source scripts/run-all-testbenches.tcl -tclargs ${input:tbCustom} 2>&1 | Select-String -Pattern '^[^#]' -CaseSensitive"
+            },
+            "linux": {
+                "command": "vivado -mode batch -source scripts/run-all-testbenches.tcl -tclargs ${input:tbCustom} 2>&1 | grep -v '^#'"
+            },
             "presentation": {
                 "echo": true,
                 "reveal": "always",
@@ -49,6 +73,32 @@
                 "panel": "shared"
             },
             "problemMatcher": []
+        },
+        {
+            "label": "Vivado: Run Single Testbench (batch)",
+            "type": "shell",
+            "command": "vivado -mode batch -source scripts/run-single-testbench.tcl -tclargs ${fileBasenameNoExtension}",
+            "windows": {
+                "command": "vivado -mode batch -source scripts/run-single-testbench.tcl -tclargs ${fileBasenameNoExtension} 2>&1 | Select-String -Pattern '^[^#]' -CaseSensitive"
+            },
+            "linux": {
+                "command": "vivado -mode batch -source scripts/run-single-testbench.tcl -tclargs ${fileBasenameNoExtension} 2>&1 | grep -v '^#'"
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "tbCustom",
+            "type": "promptString",
+            "description": "Enter comma-separated indices/names/ranges (e.g. 1,3-5,my_tb) or 'interactive' to prompt",
+            "default": "interactive"
         }
     ]
 }

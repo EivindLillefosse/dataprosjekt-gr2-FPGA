@@ -26,6 +26,8 @@ use work.types_pkg.all;
 -- Required for file I/O operations
 use STD.TEXTIO.ALL;
 use IEEE.STD_LOGIC_TEXTIO.ALL;
+-- Optional: VHDL-2008 simulator control (std.env). Some simulators support this to stop/finish simulation.
+use std.env.all;
 
 entity conv_layer_modular_tb is
 end conv_layer_modular_tb;
@@ -498,15 +500,21 @@ begin
         
         wait for CLK_PERIOD * 10;
         
-        test_done <= true;
-        report "All MODULAR tests completed successfully!";
-        wait;
+    test_done <= true;
+    report "All MODULAR tests completed successfully!";
+    -- Allow signals to settle for one clock period
+    wait for CLK_PERIOD;
+    -- Explicitly stop simulation when the simulator supports VHDL-2008 std.env
+    -- This forces immediate termination; remove/comment out if your simulator doesn't support std.env
+    std.env.stop(0);
+    wait;
     end process;
 
     -- Timeout watchdog
     timeout_watchdog: process
     begin
-        wait for 10 ms;  -- Timeout after 10ms
+        -- Simple watchdog pattern used by other testbenches in this repo
+        wait for 1000 ms;
         if not test_done then
             report "MODULAR TEST TIMEOUT - Test did not complete within expected time" severity failure;
         end if;
