@@ -12,10 +12,6 @@
 ----------------------------------------------------------------------------------
 
 library IEEE;
-library uvvm_util;
-context uvvm_util.uvvm_util_context;
-library uvvm_vvc_framework;
-use uvvm_vvc_framework.ti_vvc_framework_support_pkg.all;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 
