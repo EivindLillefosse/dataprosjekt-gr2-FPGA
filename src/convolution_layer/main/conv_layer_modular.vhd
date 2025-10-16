@@ -36,7 +36,7 @@ entity conv_layer_modular is
         input_row      : out integer;
         input_col      : out integer;
         input_ready    : out std_logic;
-
+    
         output_valid   : out std_logic;
         output_pixel   : out WORD_ARRAY(0 to NUM_FILTERS-1);  -- Changed from WORD_ARRAY_16 to WORD_ARRAY (8-bit Q1.6)
         output_row     : out integer;
