@@ -45,9 +45,33 @@ def load_data():
     
     print(f'Data shape: {x.shape}, Labels shape: {y.shape}')
     
-    # Preprocess data
-    x = x.reshape(-1, 28, 28, 1).astype('float32') / 255.0
+    # Shuffle data to ensure good distribution for train/test splits
+    # Use stratified shuffle: shuffle within each class to maintain class structure
+    shuffled_data = []
+    shuffled_labels = []
+    np.random.seed(42)  # Set seed for reproducibility
+    
+    for i in range(len(categories)):
+        # Get indices for this class
+        class_mask = (y == i)
+        class_x = x[class_mask]
+        class_y = y[class_mask]
+        
+        # Shuffle within this class
+        class_indices = np.arange(len(class_x))
+        np.random.shuffle(class_indices)
+        
+        shuffled_data.append(class_x[class_indices])
+        shuffled_labels.append(class_y[class_indices])
+    
+    x = np.concatenate(shuffled_data)
+    y = np.concatenate(shuffled_labels)
+    print(f'Data shuffled within each class for better distribution')
+    
+    # Preprocess data - NO NORMALIZATION (train on raw [0-255] to match VHDL)
+    x = x.reshape(-1, 28, 28, 1).astype('float32')  # Keep raw pixel values
     y = to_categorical(y, num_classes=len(categories))
+    print('⚠️  Training on RAW [0-255] pixel values (matching VHDL implementation)')
     
     return x, y, categories
     
@@ -90,9 +114,11 @@ def capture_intermediate_values(model, x_sample, categories):
     # Use the same test pattern as VHDL instead of training data
     test_image = create_test_image_28x28()
     
-    test_image_normalized = test_image.astype(np.float32) / 255.0  # Normalize to [0,1] range
-    sample_input = np.expand_dims(np.expand_dims(test_image_normalized, 0), -1)  # Add batch and channel dims
+    # Model trained on RAW [0-255] inputs - no normalization needed!
+    test_image_raw = test_image.astype(np.float32)  # Keep raw values
+    sample_input = np.expand_dims(np.expand_dims(test_image_raw, 0), -1)  # Add batch and channel dims
     print(f"Using VHDL-compatible test pattern (28x28)")
+    print(f"Input range: [{sample_input.min():.1f}, {sample_input.max():.1f}] (raw pixel values)")
     
     # Create a model that outputs intermediate values
     layer_outputs = [layer.output for layer in model.layers]
@@ -117,18 +143,22 @@ def capture_intermediate_values(model, x_sample, categories):
         
         if isinstance(layer, tf.keras.layers.Conv2D):
             print(f"  Conv2D filters: {layer.filters}, kernel_size: {layer.kernel_size}")
-            # Save first few filter outputs
-            for filter_idx in range(min(3, output.shape[-1])):
+            # Save ALL filter outputs (not just first 3)
+            for filter_idx in range(output.shape[-1]):
                 filter_output = output[0, :, :, filter_idx]
-                print(f"  Filter {filter_idx} output (5x5 region):")
-                for row in range(min(5, filter_output.shape[0])):
-                    row_str = ""
-                    for col in range(min(5, filter_output.shape[1])):
-                        row_str += f"{filter_output[row,col]:8.3f} "
-                    print(f"    {row_str}")
+                # Only print first 3 for readability
+                if filter_idx < 3:
+                    print(f"  Filter {filter_idx} output (5x5 region):")
+                    for row in range(min(5, filter_output.shape[0])):
+                        row_str = ""
+                        for col in range(min(5, filter_output.shape[1])):
+                            row_str += f"{filter_output[row,col]:8.3f} "
+                        print(f"    {row_str}")
                 
-                # Save complete filter output
+                # Save complete filter output for ALL filters
                 intermediate_data[f"layer_{i}_filter_{filter_idx}"] = filter_output
+            
+            print(f"  ✓ Saved all {output.shape[-1]} filter outputs")
         
         elif isinstance(layer, tf.keras.layers.MaxPooling2D):
             print(f"  MaxPooling2D pool_size: {layer.pool_size}")
@@ -335,22 +365,29 @@ def test_quantized_model(quantized_model, x_test_quant, y_test_quant):
     print(f"Quantized model accuracy on {len(x_test_quant)} samples: {accuracy:.3f} ({accuracy*100:.1f}%)")
 
 def apply_manual_quantization(model, x_test_quant, y_test_quant):
-    """Apply manual quantization simulation for FPGA compatibility."""
-    print("\n=== Manual Quantization Simulation ===")
+    """Apply manual quantization simulation for FPGA compatibility using Q1.6 format."""
+    print("\n=== Manual Quantization Simulation (Q1.6 Format) ===")
     
-    # Manual quantization simulation
-    print("Applying manual quantization simulation...")
+    # Q1.6 format parameters (must match export_to_FPGA)
+    fractional_bits = 6
+    scale_factor = 2 ** fractional_bits  # 64
+    max_value = 2.0 - (1.0 / scale_factor)  # ~1.984375
+    min_value = -2.0
+    
+    print("Applying Q1.6 quantization simulation (matching FPGA export)...")
     
     manual_quant_model = tf.keras.models.clone_model(model)
     manual_quant_model.set_weights(model.get_weights())
     
-    # Simulate quantization by adding noise to weights
+    # Simulate Q1.6 quantization (same as FPGA export)
     quantized_weights = []
     for layer_weights in manual_quant_model.get_weights():
-        weight_max = np.max(np.abs(layer_weights))
-        scale = weight_max / 127  # 8-bit signed range
-        quantized = np.round(layer_weights / scale) * scale
-        quantized_weights.append(quantized)
+        # Clamp to Q1.6 range
+        clamped = np.clip(layer_weights, min_value, max_value)
+        # Quantize: scale to int8, then scale back
+        quantized_int = np.round(clamped * scale_factor)
+        quantized = quantized_int / scale_factor
+        quantized_weights.append(quantized.astype(np.float32))
     
     manual_quant_model.set_weights(quantized_weights)
     
@@ -384,8 +421,13 @@ def convert_to_onnx():
         print("ℹ️ ONNX conversion skipped (optional for FPGA development)")
 
 def export_to_FPGA(model, q_format="Q1.6"):
-    """ Export model weights and biases for each layer to .txt files for FPGA use """
+    """ Export model weights and biases for each layer to .txt files for FPGA use 
+    
+    NOTE: This model is NOW trained on RAW [0,255] inputs to match VHDL implementation.
+    No scaling adjustments needed during export.
+    """
     print(f"\n=== Exporting Weights and Biases to FPGA ({q_format} format) ===")
+    print("✓ Model trained on RAW [0-255] inputs (matching VHDL implementation)")
     
     # Q1.6 format: 1 sign bit + 6 fractional bits = 7 bits total (signed 8-bit)
     # Range: -2.0 to +1.984375 (step size: 1/64 = 0.015625)
@@ -456,8 +498,8 @@ def export_to_FPGA(model, q_format="Q1.6"):
                     # Determine memory organization based on layer type
                     if len(weights.shape) == 4:  # Conv2D: (kernel_h, kernel_w, in_channels, num_filters)
                         kernel_h, kernel_w, in_channels, num_filters = weights.shape
-                        f.write(f"; Memory organization: {kernel_h}x{kernel_w} addresses × {num_filters*8} bits (packed)\n")
-                        f.write(f"; Each address contains all {num_filters} filter weights for one kernel position\n")
+                        f.write(f"; Memory organization: {kernel_h}x{kernel_w}x{in_channels} addresses × {num_filters*8} bits (packed)\n")
+                        f.write(f"; Each address contains all {num_filters} filter weights for one (kernel_pos, channel) combination\n")
                     f.write(f";\n")
                     
                     # Proper COE format keywords
@@ -467,21 +509,22 @@ def export_to_FPGA(model, q_format="Q1.6"):
                     # Pack weights for Conv2D layers
                     if len(weights.shape) == 4:  # Conv2D
                         kernel_h, kernel_w, in_channels, num_filters = weights.shape
-                        depth = kernel_h * kernel_w
+                        depth = kernel_h * kernel_w * in_channels
                         
-                        # Reshape: (K_H, K_W, C_in, N_filters) -> pack by kernel position
-                        # For each kernel position (h,w), pack all filters together
+                        # Reshape: (K_H, K_W, C_in, N_filters) -> pack by kernel position and channel
+                        # For each combination of (kernel_h, kernel_w, channel), pack all filters together
                         for addr in range(depth):
-                            kh = addr // kernel_w
-                            kw = addr % kernel_w
+                            # Calculate position in 3D space (kh, kw, c_in)
+                            kh = addr // (kernel_w * in_channels)
+                            kw = (addr // in_channels) % kernel_w
+                            c_in = addr % in_channels
                             
-                            # Pack all num_filters weights at this kernel position into one wide word
+                            # Pack all num_filters weights at this (kh, kw, c_in) position into one wide word
                             packed_value = 0
                             for f_idx in range(num_filters):
-                                # Get weight for this kernel position and filter
-                                weight_idx = kh * kernel_w * in_channels * num_filters + \
-                                           kw * in_channels * num_filters + \
-                                           f_idx
+                                # Calculate correct index in flattened array
+                                # TensorFlow weight shape: (kernel_h, kernel_w, in_channels, num_filters)
+                                weight_idx = ((kh * kernel_w + kw) * in_channels + c_in) * num_filters + f_idx
                                 qw = quantized_weights[weight_idx]
                                 byte_value = int(qw) & 0xFF
                                 packed_value |= (byte_value << (f_idx * 8))
@@ -614,11 +657,11 @@ def export_to_FPGA(model, q_format="Q1.6"):
                 # Write each bias array type and constant
                 for idx, (key, vals) in enumerate(bias_collections.items()):
                     n = len(vals)
-                    vhd.write(f"    type {key}_t is array(0 to {n-1}) of signed(15 downto 0);\n")
+                    vhd.write(f"    type {key}_t is array(0 to {n-1}) of signed(7 downto 0);\n")
                     vhd.write(f"    constant {key}_BIAS : {key}_t := (\n")
                     for j, val in enumerate(vals):
                         comma = ',' if j < n-1 else ''
-                        vhd.write(f"        {j} => to_signed({int(val)}, 16){comma}\n")
+                        vhd.write(f"        {j} => to_signed({int(val)}, 8){comma}\n")
                     vhd.write("    );\n")
                 vhd.write("end package bias_pkg;\n\n")
                 vhd.write("package body bias_pkg is\nend package body bias_pkg;\n")
