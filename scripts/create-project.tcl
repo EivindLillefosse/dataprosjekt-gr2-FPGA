@@ -513,25 +513,56 @@ if {[llength $all_ips] > 0} {
                     }
                     
                     # Determine IP vendor, library, name, and version from the ID
-                    # Most common pattern: <ip_name>_<instance_number>
-                    # We need to map this to the actual Xilinx IP catalog entry
+                    # Strategy 1: Try to infer from Component_Name if available
+                    # Strategy 2: Use pattern matching on IP ID
                     set ip_name ""
                     set ip_vendor "xilinx.com"
                     set ip_library "ip"
                     set ip_version ""
                     
-                    # Map common IP names
-                    if {[string match "fifo_generator*" $ip_id]} {
-                        set ip_name "fifo_generator"
-                        set ip_version "13.2"
-                    } elseif {[string match "blk_mem_gen*" $ip_id]} {
-                        set ip_name "blk_mem_gen"
-                        set ip_version "8.4"
+                    # Strategy 1: Check Component_Name for IP type hints
+                    if {[dict exists $config_dict Component_Name]} {
+                        set comp_name [dict get $config_dict Component_Name]
+                        # Try to extract IP core name (e.g., "fifo_generator_0" -> "fifo_generator")
+                        if {[regexp {^(fifo_generator)} $comp_name -> core_name]} {
+                            set ip_name "fifo_generator"
+                            set ip_version "13.2"
+                        } elseif {[regexp {^(blk_mem_gen)} $comp_name -> core_name]} {
+                            set ip_name "blk_mem_gen"
+                            set ip_version "8.4"
+                        }
                     }
-                    # Add more IP type mappings as needed
+                    
+                    # Strategy 2: Pattern matching on IP ID (fallback)
+                    if {$ip_name == ""} {
+                        if {[string match "fifo_generator*" $ip_id]} {
+                            set ip_name "fifo_generator"
+                            set ip_version "13.2"
+                        } elseif {[string match "blk_mem_gen*" $ip_id]} {
+                            set ip_name "blk_mem_gen"
+                            set ip_version "8.4"
+                        }
+                    }
+                    
+                    # Strategy 3: Detect IP type from CONFIG properties (smart detection)
+                    if {$ip_name == ""} {
+                        # Check for FIFO-specific properties
+                        if {[dict exists $config_dict INTERFACE_TYPE] && 
+                            [dict exists $config_dict Fifo_Implementation]} {
+                            set ip_name "fifo_generator"
+                            set ip_version "13.2"
+                            puts "  Detected FIFO Generator IP from CONFIG properties"
+                        }
+                        # Check for Block RAM properties
+                        if {[dict exists $config_dict Memory_Type]} {
+                            set ip_name "blk_mem_gen"
+                            set ip_version "8.4"
+                            puts "  Detected Block Memory Generator IP from CONFIG properties"
+                        }
+                    }
                     
                     if {$ip_name == ""} {
-                        puts "  Warning: Could not determine IP type for $ip_id, skipping"
+                        puts "  Warning: Could not determine IP type for $ip_id (Component_Name: $component_name), skipping"
                         continue
                     }
                     
