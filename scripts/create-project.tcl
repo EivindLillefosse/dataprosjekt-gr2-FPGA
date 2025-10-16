@@ -442,21 +442,234 @@ if {[llength $all_ips] > 0} {
     puts "No IP cores found in project."
 }
 
-    # If there are editable manifests in scripts/ip_manifests, apply them to create/update IPs under ip_repo
+    # ============================================================================
+    # Create IPs from YAML manifests
+    # ============================================================================
+    puts "\n=== Creating IPs from YAML Manifests ==="
     set manifests_dir "./scripts/ip_manifests"
+    
     if {[file isdirectory $manifests_dir]} {
-        puts "Found manifests directory: $manifests_dir - attempting to apply manifests"
-        if {[catch {source ./scripts/dump_ip_config.tcl} err]} {
-            puts "Warning: failed to source dump_ip_config.tcl : $err"
+        set yaml_files [glob -nocomplain "$manifests_dir/*.yaml"]
+        
+        if {[llength $yaml_files] == 0} {
+            puts "No YAML manifest files found in $manifests_dir"
         } else {
-            if {[catch {apply_ip_manifests $manifests_dir "./ip_repo"} err]} {
-                puts "Warning: apply_ip_manifests failed: $err"
+            puts "Found [llength $yaml_files] YAML manifest file(s)"
+            
+            foreach yaml_file $yaml_files {
+                puts "\n--- Processing manifest: [file tail $yaml_file] ---"
+                
+                # Parse YAML file
+                set fp [open $yaml_file r]
+                set yaml_content [read $fp]
+                close $fp
+                
+                # Extract IP ID and configuration
+                set ip_id ""
+                set config_dict [dict create]
+                
+                # Parse YAML (simple parser for our structured format)
+                foreach line [split $yaml_content "\n"] {
+                    set line [string trim $line]
+                    
+                    # Skip comments and empty lines
+                    if {[string match "#*" $line] || $line == ""} {
+                        continue
+                    }
+                    
+                    # Extract IP ID
+                    if {[regexp {^id:\s*(.+)$} $line -> id_value]} {
+                        set ip_id [string trim $id_value]
+                        puts "  IP ID: $ip_id"
+                    }
+                    
+                    # Extract configuration parameters
+                    if {[regexp {^\s*CONFIG\.([^:]+):\s*(.+)$} $line -> param_name param_value]} {
+                        set param_name [string trim $param_name]
+                        set param_value [string trim $param_value]
+                        
+                        # Remove quotes if present
+                        set param_value [string trim $param_value "\""]
+                        
+                        # Convert boolean strings to Tcl boolean values
+                        if {$param_value == "true"} {
+                            set param_value true
+                        } elseif {$param_value == "false"} {
+                            set param_value false
+                        }
+                        
+                        dict set config_dict $param_name $param_value
+                    }
+                }
+                
+                # Create IP if we have valid ID and config
+                if {$ip_id != "" && [dict size $config_dict] > 0} {
+                    puts "  Creating IP: $ip_id with [dict size $config_dict] configuration parameters"
+                    
+                    # Extract IP core name from Component_Name or derive from id
+                    set component_name $ip_id
+                    if {[dict exists $config_dict Component_Name]} {
+                        set component_name [dict get $config_dict Component_Name]
+                    }
+                    
+                    # Determine IP vendor, library, name, and version from the ID
+                    # Strategy 1: Try to infer from Component_Name if available
+                    # Strategy 2: Use pattern matching on IP ID
+                    set ip_name ""
+                    set ip_vendor "xilinx.com"
+                    set ip_library "ip"
+                    set ip_version ""
+                    
+                    # Strategy 1: Check Component_Name for IP type hints
+                    if {[dict exists $config_dict Component_Name]} {
+                        set comp_name [dict get $config_dict Component_Name]
+                        # Try to extract IP core name (e.g., "fifo_generator_0" -> "fifo_generator")
+                        if {[regexp {^(fifo_generator)} $comp_name -> core_name]} {
+                            set ip_name "fifo_generator"
+                            set ip_version "13.2"
+                        } elseif {[regexp {^(blk_mem_gen)} $comp_name -> core_name]} {
+                            set ip_name "blk_mem_gen"
+                            set ip_version "8.4"
+                        }
+                    }
+                    
+                    # Strategy 2: Pattern matching on IP ID (fallback)
+                    if {$ip_name == ""} {
+                        if {[string match "fifo_generator*" $ip_id]} {
+                            set ip_name "fifo_generator"
+                            set ip_version "13.2"
+                        } elseif {[string match "blk_mem_gen*" $ip_id]} {
+                            set ip_name "blk_mem_gen"
+                            set ip_version "8.4"
+                        }
+                    }
+                    
+                    # Strategy 3: Detect IP type from CONFIG properties (smart detection)
+                    if {$ip_name == ""} {
+                        # Check for FIFO-specific properties
+                        if {[dict exists $config_dict INTERFACE_TYPE] && 
+                            [dict exists $config_dict Fifo_Implementation]} {
+                            set ip_name "fifo_generator"
+                            set ip_version "13.2"
+                            puts "  Detected FIFO Generator IP from CONFIG properties"
+                        }
+                        # Check for Block RAM properties
+                        if {[dict exists $config_dict Memory_Type]} {
+                            set ip_name "blk_mem_gen"
+                            set ip_version "8.4"
+                            puts "  Detected Block Memory Generator IP from CONFIG properties"
+                        }
+                    }
+                    
+                    if {$ip_name == ""} {
+                        puts "  Warning: Could not determine IP type for $ip_id (Component_Name: $component_name), skipping"
+                        continue
+                    }
+                    
+                    # Check if IP already exists
+                    if {[dict exists $created_ips $component_name]} {
+                        puts "  IP $component_name already exists, skipping"
+                        continue
+                    }
+                    
+                    # Create the IP
+                    set create_result [catch {
+                        create_ip -name $ip_name \
+                                  -vendor $ip_vendor \
+                                  -library $ip_library \
+                                  -version $ip_version \
+                                  -module_name $component_name \
+                                  -dir ./ip_repo
+                    } create_err]
+                    
+                    if {$create_result != 0} {
+                        puts "  ✗ Failed to create IP $component_name: $create_err"
+                        continue
+                    }
+                    
+                    puts "  ✓ IP core created: $component_name"
+                    
+                    # Apply configuration properties
+                    set ip_obj [get_ips $component_name]
+                    set config_list [list]
+                    
+                    dict for {param_name param_value} $config_dict {
+                        lappend config_list "CONFIG.$param_name" $param_value
+                    }
+                    
+                    if {[llength $config_list] > 0} {
+                        set config_result [catch {
+                            set_property -dict $config_list $ip_obj
+                        } config_err]
+                        
+                        if {$config_result != 0} {
+                            puts "  Warning: Some configuration parameters failed: $config_err"
+                        } else {
+                            puts "  ✓ Configuration applied successfully"
+                        }
+                    }
+                    
+                    # Mark as created
+                    dict set created_ips $component_name 1
+                    
+                } else {
+                    puts "  Warning: Invalid manifest file (missing ID or config)"
+                }
+            }
+            
+            # Generate output products for all newly created IPs from YAML
+            puts "\n=== Generating Output Products for YAML-based IPs ==="
+            set all_current_ips [get_ips]
+            if {[llength $all_current_ips] > 0} {
+                foreach ip $all_current_ips {
+                    # Check if this IP was created from YAML manifest
+                    set ip_name [get_property NAME $ip]
+                    set should_generate false
+                    
+                    # Check if this IP matches any of our YAML-created IPs
+                    foreach yaml_file $yaml_files {
+                        set fp [open $yaml_file r]
+                        set yaml_content [read $fp]
+                        close $fp
+                        
+                        foreach line [split $yaml_content "\n"] {
+                            if {[regexp {^id:\s*(.+)$} $line -> id_value]} {
+                                set yaml_ip_id [string trim $id_value]
+                                if {$ip_name == $yaml_ip_id} {
+                                    set should_generate true
+                                    break
+                                }
+                            }
+                            if {[regexp {^\s*CONFIG\.Component_Name:\s*"?([^"]+)"?$} $line -> comp_name]} {
+                                set yaml_comp_name [string trim $comp_name "\""]
+                                if {$ip_name == $yaml_comp_name} {
+                                    set should_generate true
+                                    break
+                                }
+                            }
+                        }
+                        if {$should_generate} {break}
+                    }
+                    
+                    if {$should_generate} {
+                        puts "Generating output products for: $ip_name"
+                        if {[catch {generate_target all [get_files [get_property IP_FILE [get_ips $ip_name]]]} result]} {
+                            puts "  Warning: Failed to generate IP $ip_name: $result"
+                        } else {
+                            puts "  ✓ Successfully generated IP: $ip_name"
+                        }
+                    }
+                }
+                
+                # Update compile order to include generated IP files
+                update_compile_order -fileset sources_1
+                puts "YAML IP generation complete."
             } else {
-                puts "apply_ip_manifests completed"
+                puts "No IPs found to generate."
             }
         }
     } else {
-        puts "No IP manifest directory found at: $manifests_dir (skipping apply)"
+        puts "No IP manifest directory found at: $manifests_dir"
     }
 
 # Verify COE file paths (optional check)
