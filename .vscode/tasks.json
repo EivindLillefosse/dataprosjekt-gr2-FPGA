@@ -21,14 +21,14 @@
             "problemMatcher": []
         },
         {
-            "label": "Vivado: Dump & Apply IP Manifests (GUI)",
+            "label": "Vivado: Dump & Apply IP Manifests (batch)",
             "type": "shell",
             "command": "vivado -source scripts/dump_all_wrapper.tcl",
             "windows": {
-                "command": "vivado -source scripts/dump_all_wrapper.tcl 2>&1 | Select-String -Pattern '^[^#]' -CaseSensitive"
+                "command": "vivado -mode batch -source scripts/dump_all_wrapper.tcl 2>&1 | Select-String -Pattern '^[^#]' -CaseSensitive"
             },
             "linux": {
-                "command": "vivado -source scripts/dump_all_wrapper.tcl 2>&1 | grep -v '^#'"
+                "command": "vivado -mode batch -source scripts/dump_all_wrapper.tcl 2>&1 | grep -v '^#'"
             },
             "presentation": {
                 "echo": true,

@@ -1,5 +1,5 @@
 # Create project with optional command-line parameters
-# Usage: 
+# Usage:
 #   With GUI: vivado -source create-project.tcl -tclargs [part_number] [top_module] [project_name]
 #   Batch mode: vivado -mode batch -source create-project.tcl -tclargs [part_number] [top_module] [project_name]
 # Example: vivado -source create-project.tcl -tclargs 100 top my_proj
@@ -112,20 +112,20 @@ if {[file isdirectory $constraints_dir]} {
 # ============================================================================
 proc parse_coe_metadata {coe_file} {
     set metadata [dict create]
-    
+
     if {![file exists $coe_file]} {
         puts "Warning: COE file not found: $coe_file"
         return $metadata
     }
-    
+
     set fp [open $coe_file r]
     set content [read $fp]
     close $fp
-    
+
     # Parse metadata from comments
     foreach line [split $content "\n"] {
         set line [string trim $line]
-        
+
         # Extract shape information
         if {[regexp {Original shape:\s*\(([^)]+)\)} $line -> shape_str]} {
             dict set metadata shape $shape_str
@@ -141,7 +141,7 @@ proc parse_coe_metadata {coe_file} {
             }
             dict set metadata shape_list $cleaned_values
         }
-        
+
         # Alternative shape format (for biases)
         if {[regexp {Shape:\s*\(([^)]+)\)} $line -> shape_str]} {
             dict set metadata shape $shape_str
@@ -156,19 +156,19 @@ proc parse_coe_metadata {coe_file} {
             }
             dict set metadata shape_list $cleaned_values
         }
-        
+
         # Extract total elements
         if {[regexp {Total elements:\s*(\d+)} $line -> total]} {
             dict set metadata total_elements $total
         }
-        
+
         # Extract layer type
         if {[regexp {Layer (\d+):\s*(\w+)} $line -> layer_num layer_type]} {
             dict set metadata layer_number $layer_num
             dict set metadata layer_type $layer_type
         }
     }
-    
+
     return $metadata
 }
 
@@ -177,17 +177,17 @@ proc parse_coe_metadata {coe_file} {
 # ============================================================================
 proc calculate_memory_params {metadata memory_type} {
     set params [dict create]
-    
+
     if {![dict exists $metadata shape_list]} {
         puts "Warning: No shape information found in COE metadata"
         return $params
     }
-    
+
     set shape_list [dict get $metadata shape_list]
     set total_elements [dict get $metadata total_elements]
     set layer_type [dict get $metadata layer_type]
     set num_dims [llength $shape_list]
-    
+
     if {$memory_type == "weights"} {
         if {$layer_type == "dense"} {
             # Dense layer weights: shape is (input_dim, output_dim)
@@ -195,17 +195,17 @@ proc calculate_memory_params {metadata memory_type} {
             #                      width = output_dim * 8 bits
             set input_dim [lindex $shape_list 0]
             set output_dim [lindex $shape_list 1]
-            
+
             set depth $input_dim
             set width [expr {$output_dim * 8}]
-            
+
             puts "Calculated depth: $depth, width: $width for dense weights"
             puts "  Total elements: $total_elements"
-            
+
             dict set params depth $depth
             dict set params width $width
             dict set params description "Dense: ${input_dim}x${output_dim} weights"
-            
+
         } else {
             # Conv layer weights: shape is (kernel_h, kernel_w, in_channels, num_filters)
             # Memory organization: depth = kernel_h * kernel_w
@@ -213,32 +213,32 @@ proc calculate_memory_params {metadata memory_type} {
             set kernel_h [lindex $shape_list 0]
             set kernel_w [lindex $shape_list 1]
             set num_filters [lindex $shape_list 3]
-            
+
             set depth [expr {$kernel_h * $kernel_w}]
             set width [expr {$num_filters * 8}]
 
             puts "Calculated depth: $depth, width: $width for conv weights"
             puts "  Total elements: $total_elements"
-            
+
             dict set params depth $depth
             dict set params width $width
             dict set params description "Weights: ${kernel_h}x${kernel_w} kernel, ${num_filters} filters"
         }
-        
+
     } elseif {$memory_type == "bias"} {
         # For biases: shape is (num_filters,)
         # Memory organization: depth = num_filters (one address per bias)
         #                      width = 8 bits (unpacked, individual values)
         set num_filters [lindex $shape_list 0]
-        
+
         set depth $num_filters
         set width 8
-        
+
         dict set params depth $depth
         dict set params width $width
         dict set params description "Biases: ${num_filters} filters (unpacked)"
     }
-    
+
     return $params
 }
 
@@ -251,17 +251,17 @@ proc create_bram_ip {ip_name width depth coe_file {description "Block RAM"}} {
     puts "  Width: $width bits"
     puts "  Depth: $depth words"
     puts "  COE file: $coe_file"
-    
+
     # Calculate address width
     set addr_width [expr {int(ceil(log($depth)/log(2)))}]
     if {$addr_width < 1} {set addr_width 1}
     puts "  Address width: $addr_width bits"
-    
+
     # Create the IP
     set error_code [catch {
         create_ip -name blk_mem_gen -vendor xilinx.com -library ip -version 8.4 \
-                  -module_name $ip_name -dir ./ip_repo
-        
+            -module_name $ip_name -dir ./ip_repo
+
         # Configure the IP
         set_property -dict [list \
             CONFIG.Memory_Type {Single_Port_ROM} \
@@ -279,9 +279,9 @@ proc create_bram_ip {ip_name width depth coe_file {description "Block RAM"}} {
             CONFIG.Port_A_Write_Rate {0} \
             CONFIG.Port_A_Enable_Rate {100} \
             CONFIG.Algorithm {Minimum_Area} \
-        ] [get_ips $ip_name]
+            ] [get_ips $ip_name]
     } result]
-    
+
     if {$error_code == 0} {
         puts "  ✓ IP $ip_name created successfully"
         return 1
@@ -344,12 +344,12 @@ if {[file isdirectory $memory_dir]} {
 # Process each COE file
 foreach coe_file $found_coe_files {
     set filename [file tail $coe_file]
-    
+
     puts "\n--- Processing: $filename ---"
-    
+
     # Parse metadata
     set metadata [parse_coe_metadata $coe_file]
-    
+
     if {[dict exists $metadata layer_type]} {
         puts "Layer [dict get $metadata layer_number]: [dict get $metadata layer_type]"
     }
@@ -359,7 +359,7 @@ foreach coe_file $found_coe_files {
     if {[dict exists $metadata total_elements]} {
         puts "Total elements: [dict get $metadata total_elements]"
     }
-    
+
     # Determine memory type and create IP
     if {[string match "*weight*" $filename]} {
         if {[catch {set params [calculate_memory_params $metadata "weights"]} err]} {
@@ -371,12 +371,12 @@ foreach coe_file $found_coe_files {
             set width [dict get $params width]
             set depth [dict get $params depth]
             set desc [dict get $params description]
-            
+
             # Extract layer name from filename (e.g., "layer_0_conv2d_weights.coe" -> "conv2d")
             set layer_num [dict get $metadata layer_number]
             set layer_type [dict get $metadata layer_type]
             set ip_name "layer${layer_num}_${layer_type}_weights"
-            
+
             # Check if this specific IP already exists
             if {![dict exists $created_ips $ip_name]} {
                 set success [create_bram_ip $ip_name $width $depth $coe_file $desc]
@@ -389,7 +389,7 @@ foreach coe_file $found_coe_files {
                 puts "Skipping - IP $ip_name already exists"
             }
         }
-        
+
     } elseif {[string match "*bias*" $filename]} {
         if {[catch {set params [calculate_memory_params $metadata "bias"]} err]} {
             puts "  ✗ Error calculating parameters: $err"
@@ -400,12 +400,12 @@ foreach coe_file $found_coe_files {
             set width [dict get $params width]
             set depth [dict get $params depth]
             set desc [dict get $params description]
-            
+
             # Extract layer name from filename (e.g., "layer_0_conv2d_biases.coe" -> "conv2d")
             set layer_num [dict get $metadata layer_number]
             set layer_type [dict get $metadata layer_type]
             set ip_name "layer${layer_num}_${layer_type}_biases"
-            
+
             # Check if this specific IP already exists
             if {![dict exists $created_ips $ip_name]} {
                 set success [create_bram_ip $ip_name $width $depth $coe_file $desc]
@@ -434,7 +434,7 @@ if {[llength $all_ips] > 0} {
             puts "Successfully generated IP: $ip"
         }
     }
-    
+
     # Update compile order to include generated IP files
     update_compile_order -fileset sources_1
     puts "IP generation complete."
@@ -442,235 +442,336 @@ if {[llength $all_ips] > 0} {
     puts "No IP cores found in project."
 }
 
-    # ============================================================================
-    # Create IPs from YAML manifests
-    # ============================================================================
-    puts "\n=== Creating IPs from YAML Manifests ==="
-    set manifests_dir "./scripts/ip_manifests"
-    
-    if {[file isdirectory $manifests_dir]} {
-        set yaml_files [glob -nocomplain "$manifests_dir/*.yaml"]
-        
-        if {[llength $yaml_files] == 0} {
-            puts "No YAML manifest files found in $manifests_dir"
-        } else {
-            puts "Found [llength $yaml_files] YAML manifest file(s)"
-            
-            foreach yaml_file $yaml_files {
-                puts "\n--- Processing manifest: [file tail $yaml_file] ---"
-                
-                # Parse YAML file
-                set fp [open $yaml_file r]
-                set yaml_content [read $fp]
-                close $fp
-                
-                # Extract IP ID and configuration
-                set ip_id ""
-                set config_dict [dict create]
-                
-                # Parse YAML (simple parser for our structured format)
-                foreach line [split $yaml_content "\n"] {
-                    set line [string trim $line]
-                    
-                    # Skip comments and empty lines
-                    if {[string match "#*" $line] || $line == ""} {
-                        continue
-                    }
-                    
-                    # Extract IP ID
-                    if {[regexp {^id:\s*(.+)$} $line -> id_value]} {
-                        set ip_id [string trim $id_value]
-                        puts "  IP ID: $ip_id"
-                    }
-                    
-                    # Extract configuration parameters
-                    if {[regexp {^\s*CONFIG\.([^:]+):\s*(.+)$} $line -> param_name param_value]} {
-                        set param_name [string trim $param_name]
-                        set param_value [string trim $param_value]
-                        
-                        # Remove quotes if present
-                        set param_value [string trim $param_value "\""]
-                        
-                        # Convert boolean strings to Tcl boolean values
-                        if {$param_value == "true"} {
-                            set param_value true
-                        } elseif {$param_value == "false"} {
-                            set param_value false
-                        }
-                        
-                        dict set config_dict $param_name $param_value
-                    }
+# ============================================================================
+# Create IPs from YAML manifests
+# ============================================================================
+puts "\n=== Creating IPs from YAML Manifests ==="
+set manifests_dir "./scripts/ip_manifests"
+
+if {[file isdirectory $manifests_dir]} {
+    set yaml_files [glob -nocomplain "$manifests_dir/*.yaml"]
+
+    if {[llength $yaml_files] == 0} {
+        puts "No YAML manifest files found in $manifests_dir"
+    } else {
+        puts "Found [llength $yaml_files] YAML manifest file(s)"
+
+        foreach yaml_file $yaml_files {
+            puts "\n--- Processing manifest: [file tail $yaml_file] ---"
+
+            # Parse YAML file
+            set fp [open $yaml_file r]
+            set yaml_content [read $fp]
+            close $fp
+
+            # Extract IP ID and configuration
+            set ip_id ""
+            set config_dict [dict create]
+
+            # Parse YAML (simple parser for our structured format)
+            set metadata_dict [dict create]
+            set in_metadata 0
+            set in_config 0
+
+            foreach line [split $yaml_content "\n"] {
+                set orig_line $line
+                set line [string trim $line]
+
+                # Skip comments and empty lines
+                if {[string match "#*" $line] || $line == ""} {
+                    continue
                 }
-                
-                # Create IP if we have valid ID and config
-                if {$ip_id != "" && [dict size $config_dict] > 0} {
-                    puts "  Creating IP: $ip_id with [dict size $config_dict] configuration parameters"
-                    
-                    # Extract IP core name from Component_Name or derive from id
-                    set component_name $ip_id
-                    if {[dict exists $config_dict Component_Name]} {
-                        set component_name [dict get $config_dict Component_Name]
+
+                # Extract IP ID
+                if {[regexp {^id:\s*(.+)$} $line -> id_value]} {
+                    set ip_id [string trim $id_value]
+                    puts "  IP ID: $ip_id"
+                    continue
+                }
+
+                # Detect metadata section
+                if {[regexp {^metadata:\s*$} $line]} {
+                    set in_metadata 1
+                    set in_config 0
+                    puts "  Debug: Entered metadata section"
+                    continue
+                }
+
+                # Detect config section
+                if {[regexp {^config:\s*$} $line]} {
+                    set in_config 1
+                    set in_metadata 0
+                    puts "  Debug: Entered config section (metadata had [dict size $metadata_dict] entries)"
+                    continue
+                }
+
+                # Parse metadata entries (indented under metadata:) - check BEFORE trimming
+                if {$in_metadata && [regexp {^\s+([^:]+):\s*(.+)$} $orig_line -> meta_key meta_value]} {
+                    set meta_key [string trim $meta_key]
+                    set meta_value [string trim $meta_value "\""]
+                    puts "  Debug: Parsed metadata: $meta_key = $meta_value"
+                    dict set metadata_dict $meta_key $meta_value
+                    continue
+                }
+
+                # Extract configuration parameters (indented under config:) - check BEFORE trimming
+                if {$in_config && [regexp {^\s*CONFIG\.([^:]+):\s*(.+)$} $orig_line -> param_name param_value]} {
+                    set param_name [string trim $param_name]
+                    set param_value [string trim $param_value]
+
+                    # Remove quotes if present
+                    set param_value [string trim $param_value "\""]
+
+                    # Convert boolean strings to Tcl boolean values
+                    if {$param_value == "true"} {
+                        set param_value true
+                    } elseif {$param_value == "false"} {
+                        set param_value false
                     }
-                    
-                    # Determine IP vendor, library, name, and version from the ID
-                    # Strategy 1: Try to infer from Component_Name if available
-                    # Strategy 2: Use pattern matching on IP ID
-                    set ip_name ""
-                    set ip_vendor "xilinx.com"
-                    set ip_library "ip"
-                    set ip_version ""
-                    
-                    # Strategy 1: Check Component_Name for IP type hints
-                    if {[dict exists $config_dict Component_Name]} {
-                        set comp_name [dict get $config_dict Component_Name]
-                        # Try to extract IP core name (e.g., "fifo_generator_0" -> "fifo_generator")
-                        if {[regexp {^(fifo_generator)} $comp_name -> core_name]} {
-                            set ip_name "fifo_generator"
-                            set ip_version "13.2"
-                        } elseif {[regexp {^(blk_mem_gen)} $comp_name -> core_name]} {
-                            set ip_name "blk_mem_gen"
+
+                    dict set config_dict $param_name $param_value
+                }
+            }
+
+            # Create IP if we have valid ID and config
+            if {$ip_id != "" && [dict size $config_dict] > 0} {
+                puts "  Creating IP: $ip_id with [dict size $config_dict] configuration parameters"
+
+                # Extract IP core name from Component_Name or derive from id
+                set component_name $ip_id
+                if {[dict exists $config_dict Component_Name]} {
+                    set component_name [dict get $config_dict Component_Name]
+                }
+
+                # ============================================================
+                # UNIVERSAL IP DETECTION - Uses metadata from YAML manifest
+                # ============================================================
+                set ip_name ""
+                set ip_vendor "xilinx.com"
+                set ip_library "ip"
+                set ip_version ""
+
+                # STRATEGY 0: Use metadata from YAML (BEST - no guessing!)
+                puts "  Debug: metadata_dict has [dict size $metadata_dict] entries"
+                if {[dict size $metadata_dict] > 0} {
+                    puts "  Debug: metadata keys: [dict keys $metadata_dict]"
+                }
+
+                if {[dict exists $metadata_dict name]} {
+                    set ip_name [dict get $metadata_dict name]
+                    puts "  ✓ IP name from metadata: $ip_name"
+                }
+                if {[dict exists $metadata_dict vendor]} {
+                    set ip_vendor [dict get $metadata_dict vendor]
+                    puts "  ✓ IP vendor from metadata: $ip_vendor"
+                }
+                if {[dict exists $metadata_dict library]} {
+                    set ip_library [dict get $metadata_dict library]
+                }
+                if {[dict exists $metadata_dict version]} {
+                    set ip_version [dict get $metadata_dict version]
+                    puts "  ✓ IP version from metadata: $ip_version"
+                }
+
+                # If metadata provided complete info, we're done!
+                if {$ip_name != "" && $ip_version != ""} {
+                    puts "  ✓ Using metadata: $ip_vendor:$ip_library:$ip_name:$ip_version"
+                } else {
+                    # Fallback to smart detection if metadata incomplete
+                    puts "  Metadata incomplete, attempting smart detection..."
+
+                    # Strategy 1: Detect from Memory_Type (Block RAM Generator)
+                    if {$ip_name == "" && [dict exists $config_dict Memory_Type]} {
+                        set ip_name "blk_mem_gen"
+                        # Query available versions from catalog
+                        set catalog_info [get_ipdefs -filter {NAME == blk_mem_gen}]
+                        if {[llength $catalog_info] > 0} {
+                            set ip_version [get_property VERSION [lindex $catalog_info 0]]
+                            puts "  Detected Block Memory Generator v$ip_version from Memory_Type property"
+                        } else {
+                            # Fallback if catalog query fails
                             set ip_version "8.4"
+                            puts "  Detected Block Memory Generator (using fallback version $ip_version)"
                         }
                     }
-                    
-                    # Strategy 2: Pattern matching on IP ID (fallback)
-                    if {$ip_name == ""} {
-                        if {[string match "fifo_generator*" $ip_id]} {
-                            set ip_name "fifo_generator"
-                            set ip_version "13.2"
-                        } elseif {[string match "blk_mem_gen*" $ip_id]} {
-                            set ip_name "blk_mem_gen"
-                            set ip_version "8.4"
-                        }
-                    }
-                    
-                    # Strategy 3: Detect IP type from CONFIG properties (smart detection)
-                    if {$ip_name == ""} {
-                        # Check for FIFO-specific properties
-                        if {[dict exists $config_dict INTERFACE_TYPE] && 
+
+                    # Strategy 2: Detect from Interface_Type (FIFO Generator)
+                    if {$ip_name == "" && [dict exists $config_dict INTERFACE_TYPE]} {
+                        set interface_type [dict get $config_dict INTERFACE_TYPE]
+                        if {[string match "*FIFO*" $interface_type] ||
                             [dict exists $config_dict Fifo_Implementation]} {
                             set ip_name "fifo_generator"
-                            set ip_version "13.2"
-                            puts "  Detected FIFO Generator IP from CONFIG properties"
-                        }
-                        # Check for Block RAM properties
-                        if {[dict exists $config_dict Memory_Type]} {
-                            set ip_name "blk_mem_gen"
-                            set ip_version "8.4"
-                            puts "  Detected Block Memory Generator IP from CONFIG properties"
+                            # Query available versions from catalog
+                            set catalog_info [get_ipdefs -filter {NAME == fifo_generator}]
+                            if {[llength $catalog_info] > 0} {
+                                set ip_version [get_property VERSION [lindex $catalog_info 0]]
+                                puts "  Detected FIFO Generator v$ip_version from Interface_Type property"
+                            } else {
+                                # Fallback if catalog query fails
+                                set ip_version "13.2"
+                                puts "  Detected FIFO Generator (using fallback version $ip_version)"
+                            }
                         }
                     }
-                    
+
+                    # Strategy 3: Pattern matching on Component_Name (legacy support)
+                    if {$ip_name == "" && [dict exists $config_dict Component_Name]} {
+                        set comp_name [dict get $config_dict Component_Name]
+                        if {[regexp {^(fifo_generator|blk_mem_gen)_.*} $comp_name -> core_name]} {
+                            set ip_name $core_name
+                            # Query version from catalog
+                            set catalog_info [get_ipdefs -filter "NAME == $ip_name"]
+                            if {[llength $catalog_info] > 0} {
+                                set ip_version [get_property VERSION [lindex $catalog_info 0]]
+                                puts "  Detected $ip_name v$ip_version from component name pattern"
+                            }
+                        }
+                    }
+
+                    # Strategy 4: Universal fallback - try to find any matching IP in catalog
                     if {$ip_name == ""} {
-                        puts "  Warning: Could not determine IP type for $ip_id (Component_Name: $component_name), skipping"
-                        continue
-                    }
-                    
-                    # Check if IP already exists
-                    if {[dict exists $created_ips $component_name]} {
-                        puts "  IP $component_name already exists, skipping"
-                        continue
-                    }
-                    
-                    # Create the IP
-                    set create_result [catch {
-                        create_ip -name $ip_name \
-                                  -vendor $ip_vendor \
-                                  -library $ip_library \
-                                  -version $ip_version \
-                                  -module_name $component_name \
-                                  -dir ./ip_repo
-                    } create_err]
-                    
-                    if {$create_result != 0} {
-                        puts "  ✗ Failed to create IP $component_name: $create_err"
-                        continue
-                    }
-                    
-                    puts "  ✓ IP core created: $component_name"
-                    
-                    # Apply configuration properties
-                    set ip_obj [get_ips $component_name]
-                    set config_list [list]
-                    
-                    dict for {param_name param_value} $config_dict {
-                        lappend config_list "CONFIG.$param_name" $param_value
-                    }
-                    
-                    if {[llength $config_list] > 0} {
-                        set config_result [catch {
-                            set_property -dict $config_list $ip_obj
-                        } config_err]
-                        
-                        if {$config_result != 0} {
-                            puts "  Warning: Some configuration parameters failed: $config_err"
-                        } else {
-                            puts "  ✓ Configuration applied successfully"
-                        }
-                    }
-                    
-                    # Mark as created
-                    dict set created_ips $component_name 1
-                    
-                } else {
-                    puts "  Warning: Invalid manifest file (missing ID or config)"
-                }
-            }
-            
-            # Generate output products for all newly created IPs from YAML
-            puts "\n=== Generating Output Products for YAML-based IPs ==="
-            set all_current_ips [get_ips]
-            if {[llength $all_current_ips] > 0} {
-                foreach ip $all_current_ips {
-                    # Check if this IP was created from YAML manifest
-                    set ip_name [get_property NAME $ip]
-                    set should_generate false
-                    
-                    # Check if this IP matches any of our YAML-created IPs
-                    foreach yaml_file $yaml_files {
-                        set fp [open $yaml_file r]
-                        set yaml_content [read $fp]
-                        close $fp
-                        
-                        foreach line [split $yaml_content "\n"] {
-                            if {[regexp {^id:\s*(.+)$} $line -> id_value]} {
-                                set yaml_ip_id [string trim $id_value]
-                                if {$ip_name == $yaml_ip_id} {
-                                    set should_generate true
-                                    break
-                                }
-                            }
-                            if {[regexp {^\s*CONFIG\.Component_Name:\s*"?([^"]+)"?$} $line -> comp_name]} {
-                                set yaml_comp_name [string trim $comp_name "\""]
-                                if {$ip_name == $yaml_comp_name} {
-                                    set should_generate true
-                                    break
+                        puts "  Attempting universal IP detection for: $ip_id"
+
+                        # Try to find IP by searching catalog with component name keywords
+                        set search_keywords [list]
+                        if {[dict exists $config_dict Component_Name]} {
+                            set comp_name [dict get $config_dict Component_Name]
+                            # Extract potential keywords from component name
+                            foreach word [split $comp_name "_"] {
+                                if {[string length $word] > 3} {
+                                    lappend search_keywords $word
                                 }
                             }
                         }
-                        if {$should_generate} {break}
-                    }
-                    
-                    if {$should_generate} {
-                        puts "Generating output products for: $ip_name"
-                        if {[catch {generate_target all [get_files [get_property IP_FILE [get_ips $ip_name]]]} result]} {
-                            puts "  Warning: Failed to generate IP $ip_name: $result"
-                        } else {
-                            puts "  ✓ Successfully generated IP: $ip_name"
+
+                        # Search IP catalog for matching definitions
+                        foreach keyword $search_keywords {
+                            set matching_ipdefs [get_ipdefs -filter "NAME =~ *$keyword*"]
+                            if {[llength $matching_ipdefs] > 0} {
+                                set ipdef [lindex $matching_ipdefs 0]
+                                set ip_name [get_property NAME $ipdef]
+                                set ip_version [get_property VERSION $ipdef]
+                                set ip_vendor [get_property VENDOR $ipdef]
+                                set ip_library [get_property LIBRARY $ipdef]
+                                puts "  ✓ Found matching IP in catalog: $ip_vendor:$ip_library:$ip_name:$ip_version"
+                                break
+                            }
                         }
                     }
                 }
-                
-                # Update compile order to include generated IP files
-                update_compile_order -fileset sources_1
-                puts "YAML IP generation complete."
+
+                if {$ip_name == ""} {
+                    puts "  ✗ Warning: Could not determine IP type for $ip_id (Component_Name: $component_name)"
+                    puts "     Available CONFIG properties: [dict keys $config_dict]"
+                    puts "     Consider adding specific detection logic for this IP type"
+                    continue
+                }
+
+                # Check if IP already exists
+                if {[dict exists $created_ips $component_name]} {
+                    puts "  IP $component_name already exists, skipping"
+                    continue
+                }
+
+                # Create the IP
+                set create_result [catch {
+                    create_ip -name $ip_name \
+                        -vendor $ip_vendor \
+                        -library $ip_library \
+                        -version $ip_version \
+                        -module_name $component_name \
+                        -dir ./ip_repo
+                } create_err]
+
+                if {$create_result != 0} {
+                    puts "  ✗ Failed to create IP $component_name: $create_err"
+                    continue
+                }
+
+                puts "  ✓ IP core created: $component_name"
+
+                # Apply configuration properties
+                set ip_obj [get_ips $component_name]
+                set config_list [list]
+
+                dict for {param_name param_value} $config_dict {
+                    lappend config_list "CONFIG.$param_name" $param_value
+                }
+
+                if {[llength $config_list] > 0} {
+                    set config_result [catch {
+                        set_property -dict $config_list $ip_obj
+                    } config_err]
+
+                    if {$config_result != 0} {
+                        puts "  Warning: Some configuration parameters failed: $config_err"
+                    } else {
+                        puts "  ✓ Configuration applied successfully"
+                    }
+                }
+
+                # Mark as created
+                dict set created_ips $component_name 1
+
             } else {
-                puts "No IPs found to generate."
+                puts "  Warning: Invalid manifest file (missing ID or config)"
             }
         }
-    } else {
-        puts "No IP manifest directory found at: $manifests_dir"
+
+        # Generate output products for all newly created IPs from YAML
+        puts "\n=== Generating Output Products for YAML-based IPs ==="
+        set all_current_ips [get_ips]
+        if {[llength $all_current_ips] > 0} {
+            foreach ip $all_current_ips {
+                # Check if this IP was created from YAML manifest
+                set ip_name [get_property NAME $ip]
+                set should_generate false
+
+                # Check if this IP matches any of our YAML-created IPs
+                foreach yaml_file $yaml_files {
+                    set fp [open $yaml_file r]
+                    set yaml_content [read $fp]
+                    close $fp
+
+                    foreach line [split $yaml_content "\n"] {
+                        if {[regexp {^id:\s*(.+)$} $line -> id_value]} {
+                            set yaml_ip_id [string trim $id_value]
+                            if {$ip_name == $yaml_ip_id} {
+                                set should_generate true
+                                break
+                            }
+                        }
+                        if {[regexp {^\s*CONFIG\.Component_Name:\s*"?([^"]+)"?$} $line -> comp_name]} {
+                            set yaml_comp_name [string trim $comp_name "\""]
+                            if {$ip_name == $yaml_comp_name} {
+                                set should_generate true
+                                break
+                            }
+                        }
+                    }
+                    if {$should_generate} {break}
+                }
+
+                if {$should_generate} {
+                    puts "Generating output products for: $ip_name"
+                    if {[catch {generate_target all [get_files [get_property IP_FILE [get_ips $ip_name]]]} result]} {
+                        puts "  Warning: Failed to generate IP $ip_name: $result"
+                    } else {
+                        puts "  ✓ Successfully generated IP: $ip_name"
+                    }
+                }
+            }
+
+            # Update compile order to include generated IP files
+            update_compile_order -fileset sources_1
+            puts "YAML IP generation complete."
+        } else {
+            puts "No IPs found to generate."
+        }
     }
+} else {
+    puts "No IP manifest directory found at: $manifests_dir"
+}
 
 # Verify COE file paths (optional check)
 puts "\n=== Verifying COE Files ==="
@@ -701,14 +802,14 @@ set uvvm_compile_script "$uvvm_root/script/compile_all.do"
 
 if {[file exists $uvvm_compile_script] && [file isdirectory $uvvm_root]} {
     puts "Found UVVM installation: $uvvm_root"
-    
+
     # Get absolute paths for UVVM
     set uvvm_abs_path [file normalize $uvvm_root]
     set project_abs_path [file normalize $project_dir]
-    
+
     puts "  UVVM path: $uvvm_abs_path"
     puts "  Project path: $project_abs_path"
-    
+
     # Create UVVM compilation script for Vivado
     set uvvm_compile_tcl "$project_dir/compile_uvvm.tcl"
     set fp [open $uvvm_compile_tcl w]
@@ -766,7 +867,7 @@ if {[file exists $uvvm_compile_script] && [file isdirectory $uvvm_root]} {
     puts $fp "update_compile_order -fileset sim_1"
     close $fp
     puts "  ✓ Created UVVM compilation script: $uvvm_compile_tcl"
-    
+
     # Create a simulation helper script
     set sim_script "$project_dir/simulate.tcl"
     set fp [open $sim_script w]
@@ -786,7 +887,7 @@ if {[file exists $uvvm_compile_script] && [file isdirectory $uvvm_root]} {
     puts $fp "# run all"
     close $fp
     puts "  ✓ Created simulation helper script: $sim_script"
-    
+
     # Optionally compile UVVM libraries now (commented out by default)
     puts ""
     puts "To compile UVVM libraries, run from Vivado TCL console:"
@@ -794,7 +895,7 @@ if {[file exists $uvvm_compile_script] && [file isdirectory $uvvm_root]} {
     puts ""
     puts "Or from command line:"
     puts "  vivado -mode batch -source $project_dir/compile_uvvm.tcl"
-    
+
 } else {
     puts "Warning: UVVM not found at: $uvvm_root"
     puts "  Expected compile script: $uvvm_compile_script"

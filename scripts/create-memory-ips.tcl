@@ -19,22 +19,8 @@ puts "\n=========================================="
 puts "Creating Memory IP Cores for CNN"
 puts "=========================================="
 
-# Open project if not already open
-set proj_file "vivado_project/CNN.xpr"
-if {[llength [get_projects]] == 0} {
-    if {[file exists $proj_file]} {
-        puts "Opening project: $proj_file"
-        open_project $proj_file
-    } else {
-        puts "ERROR: No open project and cannot find: $proj_file"
-        exit 1
-    }
-} else {
-    puts "Using currently open project: [current_project]"
-}
-
-# IP output directory - use ip_repo instead of src/memory
-set ip_output_dir "ip_repo"
+# IP output directory
+set ip_output_dir "../src/memory"
 file mkdir $ip_output_dir
 
 # ============================================================================
