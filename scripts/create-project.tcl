@@ -189,40 +189,30 @@ proc calculate_memory_params {metadata memory_type} {
     set num_dims [llength $shape_list]
 
     if {$memory_type == "weights"} {
+        # Use 8-bit width for weights (Q1.6 / 8-bit signed storage).
+        # Store one weight per address (unpacked), so depth = total_elements.
+        set width 8
+        set depth $total_elements
+
         if {$layer_type == "dense"} {
-            # Dense layer weights: shape is (input_dim, output_dim)
-            # Memory organization: depth = input_dim
-            #                      width = output_dim * 8 bits
             set input_dim [lindex $shape_list 0]
             set output_dim [lindex $shape_list 1]
-
-            set depth $input_dim
-            set width [expr {$output_dim * 8}]
-
-            puts "Calculated depth: $depth, width: $width for dense weights"
-            puts "  Total elements: $total_elements"
-
+            puts "Calculated depth: $depth, width: $width for dense weights (unpacked)"
+            puts "  Input dim: $input_dim, Output dim: $output_dim, Total elements: $total_elements"
             dict set params depth $depth
             dict set params width $width
-            dict set params description "Dense: ${input_dim}x${output_dim} weights"
-
+            dict set params description "Dense (unpacked 8-bit): ${input_dim}x${output_dim} weights"
         } else {
             # Conv layer weights: shape is (kernel_h, kernel_w, in_channels, num_filters)
-            # Memory organization: depth = kernel_h * kernel_w
-            #                      width = num_filters * 8 bits
             set kernel_h [lindex $shape_list 0]
             set kernel_w [lindex $shape_list 1]
+            set in_ch [lindex $shape_list 2]
             set num_filters [lindex $shape_list 3]
-
-            set depth [expr {$kernel_h * $kernel_w}]
-            set width [expr {$num_filters * 8}]
-
-            puts "Calculated depth: $depth, width: $width for conv weights"
-            puts "  Total elements: $total_elements"
-
+            puts "Calculated depth: $depth, width: $width for conv weights (unpacked)"
+            puts "  Kernel: ${kernel_h}x${kernel_w}, In channels: ${in_ch}, Filters: ${num_filters}, Total elements: $total_elements"
             dict set params depth $depth
             dict set params width $width
-            dict set params description "Weights: ${kernel_h}x${kernel_w} kernel, ${num_filters} filters"
+            dict set params description "Conv weights (unpacked 8-bit): ${kernel_h}x${kernel_w} kernel, ${num_filters} filters"
         }
 
     } elseif {$memory_type == "bias"} {
