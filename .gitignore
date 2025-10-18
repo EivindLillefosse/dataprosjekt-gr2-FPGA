@@ -35,6 +35,10 @@ __pycache__/
 *.xsa
 *.xsc
 *.xdc~  # backup constraint files
+# Keep the ip_repo directory itself tracked, but ignore everything inside it.
+# Use a placeholder file (e.g. .gitkeep) inside ip_repo to preserve the empty folder in git.
+ip_repo/*
+!ip_repo/.gitkeep
 
 # Simulation output
 *.vcd
@@ -46,7 +50,6 @@ __pycache__/
 *.bak
 *.orig
 *.swp
-.vscode
 *.npy
 *~
 

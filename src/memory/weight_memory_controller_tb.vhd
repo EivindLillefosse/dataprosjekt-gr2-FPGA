@@ -33,15 +33,15 @@ architecture Behavioral of weight_memory_controller_tb is
     signal clk         : std_logic := '0';
     signal rst         : std_logic := '0';
     signal load_req    : std_logic := '0';
-    signal filter_idx  : integer range 0 to NUM_FILTERS-1 := 0;
     signal kernel_row  : integer range 0 to KERNEL_SIZE-1 := 0;
     signal kernel_col  : integer range 0 to KERNEL_SIZE-1 := 0;
-    signal weight_data : std_logic_vector(7 downto 0);
+    signal weight_data : WORD_ARRAY(0 to NUM_FILTERS-1);
     signal data_valid  : std_logic;
-    signal load_done   : std_logic;
     
     -- Test control
     signal test_done : boolean := false;
+    -- Simulation cycle counter for latency measurement
+    signal sim_cycle : integer := 0;
 
 begin
 
@@ -56,12 +56,10 @@ begin
             clk => clk,
             rst => rst,
             load_req => load_req,
-            filter_idx => filter_idx,
             kernel_row => kernel_row,
             kernel_col => kernel_col,
             weight_data => weight_data,
-            data_valid => data_valid,
-            load_done => load_done
+            data_valid => data_valid
         );
 
     -- Clock process
@@ -76,8 +74,22 @@ begin
         wait;
     end process;
 
+    -- Simple cycle counter
+    cycle_counter: process(clk)
+    begin
+        if rising_edge(clk) then
+            sim_cycle <= sim_cycle + 1;
+        end if;
+    end process;
+
     -- Test process
-    test_process: process
+    test_process: process is
+        constant MAX_LATENCY : integer := 16;
+        type hist_type is array(0 to MAX_LATENCY) of integer;
+        variable hist : hist_type := (others => 0);
+        variable start_cycle : integer := 0;
+        variable latency : integer := 0;
+
     begin
         -- Initialize
         rst <= '1';
@@ -90,36 +102,49 @@ begin
         
         report "Starting weight memory controller test...";
         
-        -- Test loading weights for different filters and positions
-        for filter in 0 to NUM_FILTERS-1 loop
-            for row in 0 to KERNEL_SIZE-1 loop
-                for col in 0 to KERNEL_SIZE-1 loop
-                    
-                    -- Set up request
-                    filter_idx <= filter;
-                    kernel_row <= row;
-                    kernel_col <= col;
-                    
-                    -- Issue load request
-                    load_req <= '1';
-                    wait for CLK_PERIOD;
-                    load_req <= '0';
-                    
-                    -- Wait for completion
-                    wait until load_done = '1';
-                    
-                    -- Check that data is valid
-                    assert data_valid = '1' 
-                        report "Data should be valid when load_done is asserted" 
-                        severity error;
-                    
-                    report "Loaded weight for filter " & integer'image(filter) & 
-                           " at [" & integer'image(row) & "," & integer'image(col) & 
-                           "] = " & integer'image(to_integer(unsigned(weight_data)));
-                    
-                    wait for CLK_PERIOD;
+        -- Test loading weights for different kernel positions and measure latency
+
+        -- Each load brings all 8 filter weights for that position
+        for row in 0 to KERNEL_SIZE-1 loop
+            for col in 0 to KERNEL_SIZE-1 loop
+                -- Set up request
+                kernel_row <= row;
+                kernel_col <= col;
+
+                -- Issue load request (pulse)
+                start_cycle := sim_cycle;
+                load_req <= '1';
+                wait for CLK_PERIOD;
+                load_req <= '0';
+
+                -- Wait for data_valid and measure latency
+                wait until data_valid = '1';
+                latency := sim_cycle - start_cycle;
+                if latency < 0 then
+                    latency := 0;
+                end if;
+                if latency > MAX_LATENCY then
+                    hist(MAX_LATENCY) := hist(MAX_LATENCY) + 1;
+                else
+                    hist(latency) := hist(latency) + 1;
+                end if;
+
+                report "Loaded weights for kernel position [" & integer'image(row) & "," & integer'image(col) & "] (latency=" & integer'image(latency) & " cycles)";
+
+                -- Display all 8 filter weights
+                for filter in 0 to NUM_FILTERS-1 loop
+                    report "  Filter " & integer'image(filter) & " weight = " & 
+                           integer'image(to_integer(signed(weight_data(filter))));
                 end loop;
+
+                wait for CLK_PERIOD;
             end loop;
+        end loop;
+
+        -- Print histogram
+        report "Weight data_valid latency histogram (cycles)";
+        for i in 0 to MAX_LATENCY loop
+            report "  cycles=" & integer'image(i) & " -> " & integer'image(hist(i));
         end loop;
         
         report "Weight memory controller test completed successfully!";
@@ -135,7 +160,7 @@ begin
     begin
         wait for 1 ms;
         if not test_done then
-            report "TEST TIMEOUT - Weight memory controller test did not complete" severity failure;
+            report "Error: At " & integer'image(now / 1 ns) & " ns: TEST TIMEOUT - Weight memory controller test did not complete" severity failure;
         end if;
         wait;
     end process;
