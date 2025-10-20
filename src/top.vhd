@@ -43,22 +43,4 @@ architecture Behavioral of top is
     
 begin
 
-    -- Instantiate the bulletproof SPI slave
-    spi_inst: entity work.spi_slave_bulletproof
-        port map (
-            clk        => clk,
-            rst_n      => rst_n,
-            spi_clk    => sclk,
-            spi_mosi   => mosi,
-            spi_miso   => miso,
-            spi_cs_n   => ss_n,
-            tx_data    => tx_data,
-            rx_data    => rx_data,
-            rx_valid   => rx_valid,
-            tx_ready   => tx_ready
-        );
-    
-    -- Connect received data to LEDs for visibility
-    led <= rx_data;
-
 end Behavioral;

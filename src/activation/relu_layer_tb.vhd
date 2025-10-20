@@ -92,15 +92,13 @@ begin
         wait for CLK_PERIOD;
         data_valid <= '0';
         
-        wait for CLK_PERIOD;
-        
         assert valid_out = '1' 
-            report "Output should be valid for positive inputs" 
+            report "Output should be valid for positive inputs at time " & time'image(now)
             severity error;
             
         for i in 0 to NUM_FILTERS-1 loop
             assert data_out(i) = data_in(i) 
-                report "Positive values should pass through unchanged" 
+                report "Positive values should pass through unchanged at time " & time'image(now)
                 severity error;
             report "Filter " & integer'image(i) & ": " & 
                    integer'image(to_integer(unsigned(data_in(i)))) & " -> " &
@@ -118,15 +116,13 @@ begin
         wait for CLK_PERIOD;
         data_valid <= '0';
         
-        wait for CLK_PERIOD;
-        
         assert valid_out = '1' 
-            report "Output should be valid for negative inputs" 
+            report "Output should be valid for negative inputs at time " & time'image(now)
             severity error;
             
         for i in 0 to NUM_FILTERS-1 loop
             assert data_out(i) = (DATA_WIDTH-1 downto 0 => '0') 
-                report "Negative values should be clamped to zero" 
+                report "Negative values should be clamped to zero at time " & time'image(now)
                 severity error;
             report "Filter " & integer'image(i) & ": " & 
                    integer'image(to_integer(unsigned(data_in(i)))) & " -> " &
@@ -148,20 +144,18 @@ begin
         wait for CLK_PERIOD;
         data_valid <= '0';
         
-        wait for CLK_PERIOD;
-        
         assert valid_out = '1' 
-            report "Output should be valid for mixed inputs" 
+            report "Output should be valid for mixed inputs at time " & time'image(now)
             severity error;
             
         for i in 0 to NUM_FILTERS-1 loop
             if i mod 2 = 0 then
                 assert data_out(i) = data_in(i) 
-                    report "Positive values should pass through unchanged" 
+                    report "Positive values should pass through unchanged at time " & time'image(now)
                     severity error;
             else
                 assert data_out(i) = (DATA_WIDTH-1 downto 0 => '0') 
-                    report "Negative values should be clamped to zero" 
+                    report "Negative values should be clamped to zero at time " & time'image(now)
                     severity error;
             end if;
             report "Filter " & integer'image(i) & ": " & 
@@ -177,7 +171,7 @@ begin
         wait for CLK_PERIOD * 3;
         
         assert valid_out = '0' 
-            report "Output should not be valid when input is not valid" 
+            report "Output should not be valid when input is not valid at time " & time'image(now)
             severity error;
         
         report "ReLU layer test completed successfully!";

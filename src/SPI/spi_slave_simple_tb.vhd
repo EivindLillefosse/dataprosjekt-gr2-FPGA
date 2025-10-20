@@ -112,7 +112,7 @@ begin
         -- Check results
         wait for 50 ns;
         assert data_out = x"55" severity error;
-        assert data_ready = '1' severity error;
+        assert data_ready = '1' report "Error: At " & integer'image(now / 1 ns) & " ns: data_ready should be '1', but got '0'" severity error;
         
         wait for 200 ns;
         
@@ -122,7 +122,8 @@ begin
         
         -- Check results
         wait for 50 ns;
-        assert data_out = x"CC" severity error;
+        assert data_out = x"CC" report "Error: At " & integer'image(now / 1 ns) & " ns: Expected data_out = 0xCC, but got 0x" & 
+                                        to_hstring(unsigned(data_out)) severity error;
         
         wait for 200 ns;
         
@@ -131,7 +132,8 @@ begin
         send_spi_byte(x"0F");
         
         wait for 50 ns;
-        assert data_out = x"0F" severity error;
+        assert data_out = x"0F" report "Error: At " & integer'image(now / 1 ns) & " ns: Expected data_out = 0x0F, but got 0x" & 
+                                        to_hstring(unsigned(data_out)) severity error;
         
         -- End simulation
         test_done <= true;

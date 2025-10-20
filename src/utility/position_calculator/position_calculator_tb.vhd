@@ -108,19 +108,23 @@ begin
             
             -- Check bounds
             assert row >= 0 and row < IMAGE_SIZE 
-                report "Row out of bounds: " & integer'image(row) 
+                report "Error: At " & integer'image(now / 1 ns) & " ns: Row out of bounds, expected 0-" & integer'image(IMAGE_SIZE-1) & 
+                       " but got " & integer'image(row) 
                 severity error;
                 
             assert col >= 0 and col < IMAGE_SIZE 
-                report "Col out of bounds: " & integer'image(col) 
+                report "Error: At " & integer'image(now / 1 ns) & " ns: Col out of bounds, expected 0-" & integer'image(IMAGE_SIZE-1) & 
+                       " but got " & integer'image(col) 
                 severity error;
                 
             assert region_row >= 0 and region_row < KERNEL_SIZE 
-                report "Region row out of bounds: " & integer'image(region_row) 
+                report "Error: At " & integer'image(now / 1 ns) & " ns: Region row out of bounds, expected 0-" & integer'image(KERNEL_SIZE-1) & 
+                       " but got " & integer'image(region_row) 
                 severity error;
                 
             assert region_col >= 0 and region_col < KERNEL_SIZE 
-                report "Region col out of bounds: " & integer'image(region_col) 
+                report "Error: At " & integer'image(now / 1 ns) & " ns: Region col out of bounds, expected 0-" & integer'image(KERNEL_SIZE-1) & 
+                       " but got " & integer'image(region_col) 
                 severity error;
             
             wait for CLK_PERIOD;
@@ -142,11 +146,13 @@ begin
         report "After reset: Position [" & integer'image(row) & "," & integer'image(col) & "]";
         
         assert row = 0 and col = 0 
-            report "Position should reset to [0,0]" 
+            report "Error: At " & integer'image(now / 1 ns) & " ns: Position should reset to [0,0], but got [" & 
+                   integer'image(row) & "," & integer'image(col) & "]" 
             severity error;
             
         assert region_row = 0 and region_col = 0 
-            report "Region should reset to [0,0]" 
+            report "Error: At " & integer'image(now / 1 ns) & " ns: Region should reset to [0,0], but got [" & 
+                   integer'image(region_row) & "," & integer'image(region_col) & "]" 
             severity error;
         
         report "Position calculator test completed successfully!";
@@ -162,7 +168,7 @@ begin
     begin
         wait for 1 ms;
         if not test_done then
-            report "TEST TIMEOUT - Position calculator test did not complete" severity failure;
+            report "Error: At " & integer'image(now / 1 ns) & " ns: TEST TIMEOUT - Position calculator test did not complete" severity failure;
         end if;
         wait;
     end process;
