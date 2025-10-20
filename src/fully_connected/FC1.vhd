@@ -34,25 +34,6 @@ end FC1;
 architecture Behavioral of FC1 is
 
     -- Component declarations
-    COMPONENT fc_generic
-    generic (
-        NUM_INPUTS  : integer;
-        NUM_OUTPUTS : integer;
-        ADDR_WIDTH  : integer
-    );
-    port (
-        clk           : in  std_logic;
-        rst           : in  std_logic;
-        pixel_valid   : in  std_logic;
-        pixel_data    : in  WORD;
-        pixel_index   : in  integer range 0 to NUM_INPUTS-1;
-        weight_data   : out WORD_ARRAY(0 to NUM_OUTPUTS-1);
-        weight_valid  : out std_logic;
-        weight_addr   : out std_logic_vector(ADDR_WIDTH-1 downto 0);
-        weight_en     : out std_logic
-    );
-    END COMPONENT;
-
     COMPONENT MAC
     generic (
         width_a : integer;
@@ -86,68 +67,37 @@ architecture Behavioral of FC1 is
     );
     END COMPONENT;
 
-    COMPONENT layer5_dense_biases
-    PORT (
-        clka  : IN STD_LOGIC;
-        ena   : IN STD_LOGIC;
-        addra : IN STD_LOGIC_VECTOR(5 DOWNTO 0);
-        douta : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
-    );
-    END COMPONENT;
-
     -- Constants
     constant NUM_INPUTS  : integer := 400;
     constant NUM_OUTPUTS : integer := 64;
-    constant ADDR_WIDTH  : integer := 15;
     constant MAC_WIDTH   : integer := 24;  -- Width of MAC accumulator output
 
-    -- Signals from weight memory
-    signal weight_mem_valid : std_logic;
-    signal weight_mem_data  : WORD_ARRAY(0 to NUM_OUTPUTS-1);
-    signal weight_mem_addr  : std_logic_vector(ADDR_WIDTH-1 downto 0);
-    signal weight_mem_en    : std_logic;
+    -- Custom type for 24-bit MAC results
+    type MAC_RESULT_ARRAY is array (natural range <>) of std_logic_vector(MAC_WIDTH-1 downto 0);
+
+    -- Signals for dummy weights (for testing)
+    signal weight_data : WORD_ARRAY(0 to NUM_OUTPUTS-1) := (others => x"01");  -- Simple weight = 1
 
     -- Signals for MAC units
     signal mac_pixel_in : std_logic_vector(7 downto 0);
     signal mac_valid    : std_logic;
     signal mac_clear    : std_logic_vector(0 to NUM_OUTPUTS-1);
-    signal mac_result   : WORD_ARRAY_16(0 to NUM_OUTPUTS-1);
+    signal mac_result   : MAC_RESULT_ARRAY(0 to NUM_OUTPUTS-1);
     signal mac_done     : std_logic_vector(0 to NUM_OUTPUTS-1);
-
-    -- Signals for bias memory
-    signal bias_mem_en   : std_logic := '0';
-    signal bias_mem_addr : std_logic_vector(5 downto 0) := (others => '0');
-    signal bias_mem_data : std_logic_vector(7 downto 0) := (others => '0');
 
     -- Signals for ReLU
     signal relu_in_valid : std_logic;
     signal relu_in_data  : WORD_ARRAY(0 to NUM_OUTPUTS-1);
     signal relu_out_valid : std_logic;
+    signal relu_out_data : WORD_ARRAY(0 to NUM_OUTPUTS-1);
 
-    -- Pixel counter
+    -- Pixel counter and state
     signal pixel_count : integer range 0 to NUM_INPUTS := 0;
-    
-    -- Output counter (for bias retrieval)
-    signal output_count : integer range 0 to NUM_OUTPUTS := 0;
+    signal wait_counter : integer range 0 to 15 := 0;
+    type state_type is (IDLE, CLEARING, ACCUMULATING, WAITING_MAC, SENDING_RELU, DONE);
+    signal state : state_type := IDLE;
 
 begin
-
-    -- Instantiate weight memory retrieval module
-    weight_memory_inst : fc_generic
-    generic map (
-        NUM_INPUTS  => NUM_INPUTS,
-        NUM_OUTPUTS => NUM_OUTPUTS,
-        ADDR_WIDTH  => ADDR_WIDTH
-    )
-    port map (
-        clk         => clk,
-        rst         => rst,
-        pixel_valid => pixel_valid,
-        pixel_data  => pixel_data,
-        pixel_index => pixel_index,
-        weight_data => weight_mem_data,
-        weight_valid => weight_mem_valid
-    );
 
     -- Generate MAC units for each output neuron
     mac_gen: for i in 0 to NUM_OUTPUTS-1 generate
@@ -161,7 +111,7 @@ begin
             clk      => clk,
             rst      => rst,
             pixel_in => mac_pixel_in,
-            weights  => weight_mem_data(i),
+            weights  => weight_data(i),  -- Use dummy weights
             valid    => mac_valid,
             clear    => mac_clear(i),
             result   => mac_result(i),
@@ -173,79 +123,111 @@ begin
     relu_inst : relu_layer
     generic map (
         NUM_FILTERS => NUM_OUTPUTS,
-        DATA_WIDTH  => MAC_WIDTH
+        DATA_WIDTH  => 8  -- WORD_ARRAY is always 8-bit words
     )
     port map (
         clk        => clk,
         rst        => rst,
         data_in    => relu_in_data,
         data_valid => relu_in_valid,
-        data_out   => output_data,
-        valid_out  => output_valid
-    );
-
-    -- Instantiate bias memory
-    bias_mem_inst : layer5_dense_biases
-    PORT MAP (
-        clka  => clk,
-        ena   => bias_mem_en,
-        addra => bias_mem_addr,
-        douta => bias_mem_data
+        data_out   => relu_out_data,
+        valid_out  => relu_out_valid
     );
 
     -- Main process: control pixel counter and MAC operations
     fc1_proc : process(clk, rst)
     begin
         if rst = '1' then
+            state <= IDLE;
             pixel_count <= 0;
-            output_count <= 0;
+            wait_counter <= 0;
             mac_pixel_in <= (others => '0');
             mac_valid <= '0';
             mac_clear <= (others => '0');
             relu_in_valid <= '0';
-            bias_mem_en <= '0';
-            bias_mem_addr <= (others => '0');
+            relu_in_data <= (others => (others => '0'));
+            output_valid <= '0';
+            output_data <= (others => (others => '0'));
             
         elsif rising_edge(clk) then
+            -- Default: clear one-cycle signals
             mac_valid <= '0';
             mac_clear <= (others => '0');
             relu_in_valid <= '0';
-            bias_mem_en <= '0';
 
-            -- Check if all pixels have been processed and MAC done
-            if pixel_count >= NUM_INPUTS then
-                -- All pixels processed - check if MAC is complete
-                if mac_done = (0 to NUM_OUTPUTS-1 => '1') then
-                    -- All MACs done - retrieve biases and add to MAC results
-                    if output_count < NUM_OUTPUTS then
-                        bias_mem_en <= '1';
-                        bias_mem_addr <= std_logic_vector(to_unsigned(output_count, 6));
-                        output_count <= output_count + 1;
-                    else
-                        -- All biases retrieved, pass to ReLU
+            case state is
+                when IDLE =>
+                    pixel_count <= 0;
+                    wait_counter <= 0;
+                    if pixel_valid = '1' then
+                        report "FC1: IDLE -> ACCUMULATING, clearing MACs and processing first pixel";
+                        -- Clear MACs and immediately start processing the first pixel
+                        mac_clear <= (others => '1');
+                        mac_pixel_in <= pixel_data;
+                        mac_valid <= '1';
+                        pixel_count <= 1;
+                        state <= ACCUMULATING;
+                    end if;
+                
+                when CLEARING =>
+                    -- This state is now unused but kept for compatibility
+                    report "FC1: In CLEARING (unused state)";
+                    state <= IDLE;
+                    
+                when ACCUMULATING =>
+                    -- Debug: print pixel_count every cycle
+                    report "FC1 ACCUMULATING: pixel_count=" & integer'image(pixel_count) & 
+                           " pixel_valid=" & std_logic'image(pixel_valid) &
+                           " check=" & boolean'image(pixel_count >= NUM_INPUTS);
+                    
+                    -- Check if we've processed all pixels
+                    if pixel_count >= NUM_INPUTS then
+                        report "FC1: Transitioning to WAITING_MAC, pixel_count = " & integer'image(pixel_count);
+                        wait_counter <= 0;
+                        state <= WAITING_MAC;
+                    elsif pixel_valid = '1' then
+                        -- Continue feeding pixels to MACs
+                        mac_pixel_in <= pixel_data;
+                        mac_valid <= '1';
+                        pixel_count <= pixel_count + 1;
+                        report "FC1: Processed pixel, new pixel_count will be " & integer'image(pixel_count + 1);
+                    end if;
+                    
+                when WAITING_MAC =>
+                    -- Wait 10 cycles for MACs to settle (MAC latency + margin)
+                    wait_counter <= wait_counter + 1;
+                    report "FC1: In WAITING_MAC, wait_counter = " & integer'image(wait_counter);
+                    if wait_counter >= 10 then
+                        report "FC1: Sending to ReLU";
+                        -- Send results to ReLU
                         relu_in_valid <= '1';
                         for i in 0 to NUM_OUTPUTS-1 loop
-                            -- Add bias to MAC result and take upper 8 bits
-                            relu_in_data(i) <= std_logic_vector(
-                                unsigned(mac_result(i)(15 downto 8)) + 
-                                unsigned(bias_mem_data)
-                            );
+                            -- Take middle 8 bits of 24-bit MAC result (bits 15:8)
+                            -- This gives us reasonable range without overflow
+                            relu_in_data(i) <= mac_result(i)(15 downto 8);
                         end loop;
-                        pixel_count <= 0;  -- Reset for next batch
-                        output_count <= 0;
+                        state <= SENDING_RELU;
                     end if;
-                end if;
-            elsif pixel_valid = '1' and weight_mem_valid = '1' then
-                -- Valid pixel and weight data available
-                mac_pixel_in <= pixel_data;
-                mac_valid <= '1';
-                pixel_count <= pixel_count + 1;
-                
-                -- Clear MAC on first pixel
-                if pixel_count = 0 then
-                    mac_clear <= (others => '1');
-                end if;
-            end if;
+                    
+                when SENDING_RELU =>
+                    -- Wait one cycle for ReLU to process
+                    report "FC1: In SENDING_RELU, relu_out_valid = " & std_logic'image(relu_out_valid);
+                    if relu_out_valid = '1' then
+                        report "FC1: ReLU output received, going to DONE";
+                        -- Capture output data from ReLU and set output_valid high
+                        output_data <= relu_out_data;
+                        output_valid <= '1';
+                        state <= DONE;
+                    end if;
+                    
+                when DONE =>
+                    -- Hold output_valid high until reset or new input
+                    output_valid <= '1';
+                    if pixel_valid = '1' then
+                        output_valid <= '0';
+                        state <= IDLE;
+                    end if;
+            end case;
         end if;
     end process;
 
