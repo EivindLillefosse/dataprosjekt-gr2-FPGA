@@ -36,7 +36,6 @@ architecture Behavioral of weight_memory_controller_tb is
     signal kernel_row  : integer range 0 to KERNEL_SIZE-1 := 0;
     signal kernel_col  : integer range 0 to KERNEL_SIZE-1 := 0;
     signal weight_data : WORD_ARRAY(0 to NUM_FILTERS-1);
-    signal data_valid  : std_logic;
     
     -- Test control
     signal test_done : boolean := false;
@@ -54,12 +53,10 @@ begin
         )
         port map (
             clk => clk,
-            rst => rst,
             load_req => load_req,
             kernel_row => kernel_row,
             kernel_col => kernel_col,
-            weight_data => weight_data,
-            data_valid => data_valid
+            weight_data => weight_data
         );
 
     -- Clock process
@@ -89,6 +86,19 @@ begin
         variable hist : hist_type := (others => 0);
         variable start_cycle : integer := 0;
         variable latency : integer := 0;
+        -- Threshold above which we consider BRAM latency a failure (assumption)
+        constant LATENCY_FAIL_THRESHOLD : integer := 4;
+
+        -- Helper: detect unknown/invalid bits in a std_logic_vector
+        function has_unknown(slv : std_logic_vector) return boolean is
+        begin
+            for i in slv'range loop
+                if slv(i) = 'U' or slv(i) = 'X' or slv(i) = 'Z' or slv(i) = '-' then
+                    return true;
+                end if;
+            end loop;
+            return false;
+        end function;
 
     begin
         -- Initialize
@@ -117,8 +127,8 @@ begin
                 wait for CLK_PERIOD;
                 load_req <= '0';
 
-                -- Wait for data_valid and measure latency
-                wait until data_valid = '1';
+                -- BRAM is synchronous; wait fixed read latency (2 cycles) before sampling
+                wait for CLK_PERIOD * 2;
                 latency := sim_cycle - start_cycle;
                 if latency < 0 then
                     latency := 0;
@@ -135,7 +145,17 @@ begin
                 for filter in 0 to NUM_FILTERS-1 loop
                     report "  Filter " & integer'image(filter) & " weight = " & 
                            integer'image(to_integer(signed(weight_data(filter))));
+
+                    -- Fail the test if any weight contains unknown bits
+                    if has_unknown(weight_data(filter)) then
+                        report "ERROR: weight_data(" & integer'image(filter) & ") contains unknown bits at kernel position [" & integer'image(row) & "," & integer'image(col) & "]" severity failure;
+                    end if;
                 end loop;
+
+                -- Fail on excessive latency (likely BRAM handshake/timing bug)
+                if latency > LATENCY_FAIL_THRESHOLD then
+                    report "ERROR: BRAM read latency too long (" & integer'image(latency) & " cycles) for kernel position [" & integer'image(row) & "," & integer'image(col) & "]" severity failure;
+                end if;
 
                 wait for CLK_PERIOD;
             end loop;
@@ -147,6 +167,13 @@ begin
             report "  cycles=" & integer'image(i) & " -> " & integer'image(hist(i));
         end loop;
         
+        -- If any histogram bucket beyond our threshold has entries, fail the test
+        for i in LATENCY_FAIL_THRESHOLD+1 to MAX_LATENCY loop
+            if hist(i) > 0 then
+                report "ERROR: Observed BRAM latency > " & integer'image(LATENCY_FAIL_THRESHOLD) & " cycles (hist bucket " & integer'image(i) & ")" severity failure;
+            end if;
+        end loop;
+
         report "Weight memory controller test completed successfully!";
         
         wait for CLK_PERIOD * 10;

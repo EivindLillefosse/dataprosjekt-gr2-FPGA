@@ -122,51 +122,86 @@ proc parse_coe_metadata {coe_file} {
     set content [read $fp]
     close $fp
 
-    # Parse metadata from comments
+    # Single-pass, case-insensitive parsing of relevant metadata
     foreach line [split $content "\n"] {
-        set line [string trim $line]
+        set l [string trim $line]
+        if {$l == ""} continue
 
-        # Extract shape information
-        if {[regexp {Original shape:\s*\(([^)]+)\)} $line -> shape_str]} {
-            dict set metadata shape $shape_str
-            # Parse shape tuple (e.g., "3, 3, 1, 8")
-            set shape_values [split $shape_str ","]
-            set cleaned_values {}
-            foreach val $shape_values {
-                set trimmed [string trim $val]
-                # Only add non-empty values (filter out trailing comma)
-                if {$trimmed != ""} {
-                    lappend cleaned_values $trimmed
-                }
-            }
-            dict set metadata shape_list $cleaned_values
-        }
-
-        # Alternative shape format (for biases)
-        if {[regexp {Shape:\s*\(([^)]+)\)} $line -> shape_str]} {
+        # Shape: Original shape: (3, 3, 1, 8)
+        if {[regexp -nocase {Original shape:\s*\(([^)]+)\)} $l -> shape_str]} {
             dict set metadata shape $shape_str
             set shape_values [split $shape_str ","]
             set cleaned_values {}
-            foreach val $shape_values {
-                set trimmed [string trim $val]
-                # Only add non-empty values (filter out trailing comma)
-                if {$trimmed != ""} {
-                    lappend cleaned_values $trimmed
-                }
-            }
+            foreach val $shape_values { lappend cleaned_values [string trim $val] }
             dict set metadata shape_list $cleaned_values
+            continue
         }
 
-        # Extract total elements
-        if {[regexp {Total elements:\s*(\d+)} $line -> total]} {
+        # Alternate shape line
+        if {[regexp -nocase {Shape:\s*\(([^)]+)\)} $l -> shape_str2]} {
+            dict set metadata shape $shape_str2
+            set shape_values [split $shape_str2 ","]
+            set cleaned_values {}
+            foreach val $shape_values { lappend cleaned_values [string trim $val] }
+            dict set metadata shape_list $cleaned_values
+            continue
+        }
+
+        # Total elements
+        if {[regexp -nocase {Total elements:\s*(\d+)} $l -> total]} {
             dict set metadata total_elements $total
+            continue
         }
 
-        # Extract layer type
-        if {[regexp {Layer (\d+):\s*(\w+)} $line -> layer_num layer_type]} {
+        # Layer / layer type
+        if {[regexp -nocase {Layer\s*(\d+):\s*([A-Za-z0-9_]+)} $l -> layer_num layer_type]} {
             dict set metadata layer_number $layer_num
             dict set metadata layer_type $layer_type
+            continue
         }
+
+        # Packed width: e.g. "64 bits (packed)" or fallback "64 bits"
+        if {![dict exists $metadata packed_width] && [regexp -nocase {([0-9]+)\s*bits\s*\(packed\)} $l -> pb]} {
+            dict set metadata packed_width $pb
+            continue
+        }
+        if {![dict exists $metadata packed_width] && [regexp -nocase {([0-9]+)\s*bits} $l -> pbf]} {
+            dict set metadata packed_width $pbf
+            # don't continue; allow packed_count detection below
+        }
+
+        # Packed count: "Each address contains all 8 filter weights" or "contains 16 values"
+        if {![dict exists $metadata packed_count] && [regexp -nocase {Each address contains(?: all)?\s+([0-9]+)\s+(?:filter weights|filter|weights|values)} $l -> pc]} {
+            dict set metadata packed_count $pc
+            continue
+        }
+        if {![dict exists $metadata packed_count] && [regexp -nocase {contains(?: all)?\s+([0-9]+)\s+(?:weights|values|filter)} $l -> pc2]} {
+            dict set metadata packed_count $pc2
+            continue
+        }
+    }
+
+    # If packed_width present but packed_count missing, try to infer packed_count from shape_list
+    if {[dict exists $metadata packed_width] && ![dict exists $metadata packed_count] && [dict exists $metadata shape_list]} {
+        set shape_list [dict get $metadata shape_list]
+        set nd [llength $shape_list]
+        if {$nd >= 4} {
+            # conv: (kh, kw, in_ch, num_filters) -> pack num_filters
+            set inferred [lindex $shape_list 3]
+        } elseif {$nd == 3} {
+            set inferred [lindex $shape_list end]
+        } else {
+            set inferred 1
+        }
+        dict set metadata packed_count $inferred
+        puts "parse_coe_metadata: inferred packed_count=$inferred from shape_list"
+    }
+
+    # Debug print of parsed metadata
+    if {[dict size $metadata] > 0} {
+        puts "parse_coe_metadata: Parsed metadata for $coe_file -> [dict get $metadata shape] total_elements=[dict get $metadata total_elements] packed_width=[expr {[dict exists $metadata packed_width] ? [dict get $metadata packed_width] : "N/A"}] packed_count=[expr {[dict exists $metadata packed_count] ? [dict get $metadata packed_count] : "N/A"} ]"
+    } else {
+        puts "parse_coe_metadata: No metadata parsed from $coe_file"
     }
 
     return $metadata
@@ -189,10 +224,33 @@ proc calculate_memory_params {metadata memory_type} {
     set num_dims [llength $shape_list]
 
     if {$memory_type == "weights"} {
-        # Use 8-bit width for weights (Q1.6 / 8-bit signed storage).
+        # Default: Use 8-bit width for weights (Q1.6 / 8-bit signed storage).
         # Store one weight per address (unpacked), so depth = total_elements.
         set width 8
         set depth $total_elements
+
+        # If COE metadata indicates packed memory organization, use that
+        if {[dict exists $metadata packed_width]} {
+            set width [dict get $metadata packed_width]
+            # If packed_count provided, use it. Otherwise try to infer from shape_list.
+            if {[dict exists $metadata packed_count]} {
+                set packed_count [dict get $metadata packed_count]
+            } else {
+                # For conv weights shape (kh, kw, in_ch, num_filters) it's common to pack all filters per address
+                if {$num_dims >= 4} {
+                    set packed_count [lindex $shape_list 3]
+                } elseif {$num_dims == 3} {
+                    # maybe (in_ch, num_filters, ) or (kh, kw, in_ch)
+                    set packed_count [lindex $shape_list end]
+                } else {
+                    set packed_count 1
+                }
+                puts "Inferred packed_count=$packed_count from shape_list"
+            }
+            # depth = ceil(total_elements / packed_count)
+            set depth [expr {int(ceil($total_elements / double($packed_count)))}]
+            puts "Detected/Infered packed COE: packed_width=$width, per_address=$packed_count -> depth=$depth"
+        }
 
         if {$layer_type == "dense"} {
             set input_dim [lindex $shape_list 0]

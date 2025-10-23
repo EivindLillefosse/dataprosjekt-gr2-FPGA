@@ -60,6 +60,17 @@ architecture Behavioral of convolution_controller is
     type state_type is (IDLE, LOAD_WEIGHTS, WAIT_WEIGHTS, LOAD_DATA, COMPUTE, POST_COMPUTE, OUTPUT_WAIT);
     signal current_state : state_type := IDLE;
     
+    -- Helper: return true when all bits in a std_logic_vector are '1'
+    function all_ones(vec : std_logic_vector) return boolean is
+    begin
+        for i in vec'range loop
+            if vec(i) /= '1' then
+                return false;
+            end if;
+        end loop;
+        return true;
+    end function;
+    
 begin
 
     fsm_proc: process(clk, rst)
@@ -117,8 +128,8 @@ begin
                     
                 when COMPUTE =>
                     compute_en <= '1';
-                    -- Wait for MAC computation to complete
-                    if compute_done = (compute_done'range => '1') then
+                    -- Wait for MAC computation to complete (all filters done)
+                    if all_ones(compute_done) then
                         compute_en <= '0';
                         -- move to post-compute bookkeeping (decide whether to output now or wait)
                         current_state <= POST_COMPUTE;

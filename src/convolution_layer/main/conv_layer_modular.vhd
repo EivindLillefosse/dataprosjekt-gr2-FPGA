@@ -148,10 +148,15 @@ begin
     bias_regs <= layer_0_conv2d_BIAS;
 
     -- Add bias to convolution results before ReLU
+    -- CRITICAL: Convert bias from Q1.6 to Q2.12 before adding to conv results
     biased_results_proc: process(conv_results, bias_regs)
+        variable bias_q212 : signed(15 downto 0);
     begin
         for i in 0 to NUM_FILTERS-1 loop
-            biased_results(i) <= std_logic_vector(signed(conv_results(i)) + bias_regs(i));
+            -- Convert bias from Q1.6 to Q2.12 by shifting left 6 bits
+            bias_q212 := resize(bias_regs(i), 16) sll 6;
+            -- Add bias in Q2.12 format
+            biased_results(i) <= std_logic_vector(signed(conv_results(i)) + bias_q212);
         end loop;
     end process;
 

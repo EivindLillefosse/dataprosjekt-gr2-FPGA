@@ -3,8 +3,8 @@
 -- Engineer: Eivind Lillefosse
 -- 
 -- Create Date: 14.09.2025 15:20:31
--- Design Name: Multiplier
--- Module Name: MAC - Behavioral
+-- Design Name: Multiplier and Accumulate Unit
+-- Module Name: MAC - RTL
 -- Project Name: CNN Accelerator
 -- Target Devices: Xilinx FPGA
 -- Tool Versions: 
@@ -13,126 +13,75 @@
 -- Dependencies: 
 -- 
 -- Revision:
--- Revision 0.01 - File Created
+-- Revision 0.02 - File Created
 -- Additional Comments:
 -- 
 ----------------------------------------------------------------------------------
 
-library IEEE;
-use IEEE.STD_LOGIC_1164.ALL;
-
-Library UNISIM;
-use UNISIM.vcomponents.all;
-
-Library UNIMACRO;
-use UNIMACRO.vcomponents.all;
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
 
 entity MAC is
    generic (
-      width_a : integer := 8;
-      width_b : integer := 8;
-      width_p : integer := 16
+      WIDTH_A : integer := 8;
+      WIDTH_B : integer := 8;
+      WIDTH_P : integer := 16
    );
    Port (
-       clk      : in  STD_LOGIC;
-       rst      : in  STD_LOGIC;
-       pixel_in : in  STD_LOGIC_VECTOR (width_a-1 downto 0);
-       weights  : in  STD_LOGIC_VECTOR (width_b-1 downto 0);
-       valid    : in  STD_LOGIC;
-       clear    : in  STD_LOGIC;
-       result   : out STD_LOGIC_VECTOR (width_p-1 downto 0);
-       done     : out STD_LOGIC  
+       clk, load, ce, clear  : in  STD_LOGIC;
+       pixel_in              : in  signed (WIDTH_A-1 downto 0);
+       weights               : in  signed (WIDTH_B-1 downto 0);
+       result                : out signed (WIDTH_P-1 downto 0)
        );
 end MAC;
 
-architecture Behavioral of MAC is
-   signal macc_result : std_logic_vector(width_p-1 downto 0);
-   signal macc_result_prev : std_logic_vector(width_p-1 downto 0);
-   signal valid_d : std_logic := '0';
-   signal valid_d2 : std_logic := '0';
-   signal valid_d3 : std_logic := '0';
-   signal valid_d4 : std_logic := '0';
-    -- Extended valid signal to cover the entire transaction
-   signal valid_extended : std_logic := '0';
-   signal output_changed : std_logic := '0';
-   signal timeout_done : std_logic := '0';
-
-   signal temp_ce : std_logic;
-   -- internal done signal (avoid reading/writing the 'out' port 'done' inside the process)
-   signal done_internal : std_logic := '0';
-   signal done_next : std_logic := '0';
+architecture RTL of MAC is
+   signal reg_pixel_in   : signed(WIDTH_A-1 downto 0);
+   signal reg_weights    : signed(WIDTH_B-1 downto 0);
+   -- register controlling accumulator clear (sload_reg in UG901 example)
+   signal reg_load       : STD_LOGIC := '0';
+   signal reg_mult       : signed((WIDTH_A+WIDTH_B)-1 downto 0);
+   signal adder_out      : signed(WIDTH_P-1 downto 0);
+   signal old_result     : signed(WIDTH_P-1 downto 0);
 
 begin
+   process(adder_out, reg_load)
+   begin
+      if reg_load = '1' then
+         old_result <= (others => '0');
+      else
+         old_result <= adder_out;
+      end if;
+   end process;
+
    process(clk)
    begin
       if rising_edge(clk) then
-         if rst = '1' or clear = '1' then
-            valid_extended <= '0';
-            valid_d <= '0';
-            valid_d2 <= '0';
-            valid_d3 <= '0';
-            macc_result_prev <= (others => '0');
+         if clear = '1' then
+            -- synchronous clear: reset operand registers and indicate clear to combinational driver
+            reg_pixel_in    <= (others => '0');
+            reg_weights     <= (others => '0');
+            reg_mult        <= (others => '0');
+            reg_load        <= '1';
+            adder_out       <= (others => '0');
          else
-            valid_d  <= valid;
-            valid_d2 <= valid_d;
-            valid_d3 <= valid_d2;
-            valid_d4 <= valid_d3;
-            macc_result_prev <= macc_result;
-            if valid = '1' then
-               valid_extended <= '1';
+            if ce = '1' then
+               -- sample inputs into registers
+               reg_pixel_in <= pixel_in;
+               reg_weights  <= weights;
+               -- multiplier uses previously registered operands (pipelined)
+               reg_mult <= reg_pixel_in * reg_weights;
+               -- capture load (synchronous)
+               reg_load <= load;
+               -- compute next adder output; old_result is supplied by combinational process
+               adder_out <= old_result + reg_mult;
             end if;
-
-            if valid = '1' then
-               valid_extended <= '1';
-            end if;
-
-            -- If done_internal from previous cycle is high, clear transaction flags
-            if done_internal = '1' then
-               valid_extended <= '0';
-               valid_d3 <= '0';
-               valid_d2 <= '0';
-               valid_d <= '0';
-            end if;
-
          end if;
       end if;
    end process;
 
-   -- Combinatorial output change detection (reacts immediately)
-   output_changed <= '1' when (macc_result /= macc_result_prev) else '0';
-   
-   -- Timeout after 3 cycles (2 extra cycles)
-   timeout_done <= valid_d4;
-   
-   -- Done when either output changes or timeout (combinational next value)
-   done_internal <= output_changed or timeout_done;
+   -- Output the result
+   result <= adder_out;
 
-   -- CE: enable when transaction active and not done
-   temp_ce <= valid_extended and not done_internal;
-
-   MACC_MACRO_inst : MACC_MACRO
-   generic map (
-      DEVICE => "7SERIES",
-      LATENCY => 1,
-      WIDTH_A => width_a,
-      WIDTH_B => width_b,
-      WIDTH_P => width_p)
-   port map (
-      P         => macc_result,
-      A         => pixel_in,
-      ADDSUB    => '1',           -- Always add
-      B         => weights,
-      CARRYIN   => '0',           -- No carry
-      CE        => temp_ce, -- CE low when done is high
-      CLK       => clk,
-      LOAD      => '0',           -- Never load
-      LOAD_DATA => (others => '0'),
-      RST       => clear or rst   -- Reset on clear or rst
-   );
-
-   result <= macc_result;
-
-      -- Drive the output port from the internal registered done signal
-      done <= done_internal;
-
-end Behavioral;
+end RTL;
