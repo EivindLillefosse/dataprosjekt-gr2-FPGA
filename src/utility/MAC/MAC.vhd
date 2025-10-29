@@ -24,26 +24,31 @@ use ieee.numeric_std.all;
 
 entity MAC is
    generic (
+      USE_CONTROLLER : boolean := false;
       WIDTH_A : integer := 8;
       WIDTH_B : integer := 8;
       WIDTH_P : integer := 16
    );
    Port (
-       clk, load, ce, clear  : in  STD_LOGIC;
-       pixel_in              : in  signed (WIDTH_A-1 downto 0);
-       weights               : in  signed (WIDTH_B-1 downto 0);
-       result                : out signed (WIDTH_P-1 downto 0)
-       );
+      clk                : in  STD_LOGIC;
+      start              : in  STD_LOGIC := '0';
+      clear              : in  STD_LOGIC := '0';
+      pixel_in           : in  signed (WIDTH_A-1 downto 0);
+      weights            : in  signed (WIDTH_B-1 downto 0);
+      done               : out STD_LOGIC := '0';
+      result             : out signed (WIDTH_P-1 downto 0)
+      );
 end MAC;
 
 architecture RTL of MAC is
-   signal reg_pixel_in   : signed(WIDTH_A-1 downto 0);
-   signal reg_weights    : signed(WIDTH_B-1 downto 0);
-   -- register controlling accumulator clear (sload_reg in UG901 example)
-   signal reg_load       : STD_LOGIC := '0';
-   signal reg_mult       : signed((WIDTH_A+WIDTH_B)-1 downto 0);
-   signal adder_out      : signed(WIDTH_P-1 downto 0);
-   signal old_result     : signed(WIDTH_P-1 downto 0);
+   signal reg_pixel_in   : signed(WIDTH_A-1 downto 0) := (others => '0');
+   signal reg_weights    : signed(WIDTH_B-1 downto 0) := (others => '0');
+   signal reg_mult       : signed((WIDTH_A+WIDTH_B)-1 downto 0) := (others => '0');
+   signal adder_out      : signed(WIDTH_P-1 downto 0) := (others => '0');
+   signal old_result     : signed(WIDTH_P-1 downto 0) := (others => '0');
+   signal running        : STD_LOGIC := '0';
+   signal reg_load       : std_logic := '0';
+   signal cycle_count    : integer range 0 to 3 := 0;
 
 begin
    process(adder_out, reg_load)
@@ -58,29 +63,45 @@ begin
    process(clk)
    begin
       if rising_edge(clk) then
+         -- Always sample clear signal
+         reg_load <= clear;
+         
+         -- Clear adder_out when clear is asserted
          if clear = '1' then
-            -- synchronous clear: reset operand registers and indicate clear to combinational driver
-            reg_pixel_in    <= (others => '0');
-            reg_weights     <= (others => '0');
-            reg_mult        <= (others => '0');
-            reg_load        <= '1';
-            adder_out       <= (others => '0');
-         else
-            if ce = '1' then
-               -- sample inputs into registers
-               reg_pixel_in <= pixel_in;
-               reg_weights  <= weights;
-               -- multiplier uses previously registered operands (pipelined)
-               reg_mult <= reg_pixel_in * reg_weights;
-               -- capture load (synchronous)
-               reg_load <= load;
-               -- compute next adder output; old_result is supplied by combinational process
-               adder_out <= old_result + reg_mult;
-            end if;
+            adder_out <= (others => '0');
+         end if;
+         
+         if start = '1' then
+            running <= '1';
+            done <= '0';
+            cycle_count <= 0;
+         end if;
+         
+         if running = '1' then
+            cycle_count <= cycle_count + 1;
+            
+            case cycle_count is
+               when 0 =>
+                  -- Cycle 0: sample inputs into registers
+                  reg_pixel_in <= pixel_in;
+                  reg_weights  <= weights;
+               
+               when 1 =>
+                  -- Cycle 1: multiply (using registered operands from cycle 0)
+                  reg_mult <= reg_pixel_in * reg_weights;
+               
+               when 2 =>
+                  -- Cycle 2: accumulate (using multiply result from cycle 1)
+                  adder_out <= old_result + reg_mult;
+                  running <= '0';
+                  done <= '1';
+               
+               when others =>
+                  running <= '0';
+            end case;
          end if;
       end if;
    end process;
-
    -- Output the result
    result <= adder_out;
 

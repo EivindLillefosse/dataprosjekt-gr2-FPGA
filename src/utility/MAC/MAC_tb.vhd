@@ -15,17 +15,18 @@ architecture Behavioral of MAC_tb is
     -- Component declaration matching MAC.vhd
     component MAC is
         generic (
+            USE_CONTROLLER : boolean := false;
             WIDTH_A : integer := 8;
             WIDTH_B : integer := 8;
             WIDTH_P : integer := 16
         );
         Port (
             clk      : in  STD_LOGIC;
-            load     : in  STD_LOGIC;
-            ce       : in  STD_LOGIC;
-            clear    : in  STD_LOGIC;
+            start    : in  STD_LOGIC := '0';
+            clear    : in  STD_LOGIC := '0';
             pixel_in : in  signed (WIDTH_A-1 downto 0);
             weights  : in  signed (WIDTH_B-1 downto 0);
+            done     : out STD_LOGIC := '0';
             result   : out signed (WIDTH_P-1 downto 0)
         );
     end component;
@@ -35,9 +36,9 @@ architecture Behavioral of MAC_tb is
 
     -- Signals (Q1.6 encoding with 8-bit inputs and 16-bit accumulator result)
     signal clk : std_logic := '0';
-    signal load : std_logic := '0';
-    signal ce   : std_logic := '0';
     signal clear : std_logic := '0';
+    signal start : std_logic := '0';
+    signal done : std_logic := '0';
     signal pixel_in : signed(7 downto 0) := (others => '0'); -- WIDTH_A = 8 (Q1.6)
     signal weights : signed(7 downto 0) := (others => '0');  -- WIDTH_B = 8 (Q1.6)
     signal result : signed(15 downto 0) := (others => '0');   -- WIDTH_P = 16 (Q2.12)
@@ -73,17 +74,18 @@ begin
     -- DUT instantiation (use 8/8/16 to match Q1.6 inputs and Q2.12 output)
     dut: MAC
         generic map (
+            USE_CONTROLLER => false,
             WIDTH_A => 8,
             WIDTH_B => 8,
             WIDTH_P => 16
         )
         port map (
             clk => clk,
-            load => load,
-            ce => ce,
+            start => start,
             clear => clear,
             pixel_in => pixel_in,
             weights => weights,
+            done => done,
             result => result
         );
 
@@ -103,15 +105,21 @@ begin
 
         -- Test 1: Single multiplication
         report "--- Test 1: Single multiplication ---";
-    -- For single product, set load=1 so accumulator is cleared and we get product
-    load <= '1';
-    pixel_in <= int_to_q16(pixels_tb(0)); -- 1
-    weights <= int_to_q16(filt_tb(0));    -- 1
-    -- Assert CE for three clock cycles (required by DUT)
-    ce <= '1';
-    wait for CLK_PERIOD*3; -- keep CE high for 3 cycles
-    ce <= '0';
-    wait for CLK_PERIOD; -- let outputs settle and allow load to be sampled
+        -- Clear accumulator first
+        clear <= '1';
+        wait for CLK_PERIOD;
+        clear <= '0';
+        -- Present inputs and pulse start
+        pixel_in <= int_to_q16(pixels_tb(0)); -- 1
+        weights <= int_to_q16(filt_tb(0));    -- 1
+        wait for CLK_PERIOD;
+        -- Pulse start to trigger MAC operation
+        start <= '1';
+        wait for CLK_PERIOD;
+        start <= '0';
+        -- Wait for done signal (should pulse within 2 cycles due to 1-cycle multiply pipeline)
+        wait until done = '1' for CLK_PERIOD * 3;
+        wait for CLK_PERIOD;
 
         -- Read DUT output and compare with expected values
         result_int := to_integer(result);
@@ -133,31 +141,41 @@ begin
 
         -- Test 2: Accumulation of 3 products
         report "--- Test 2: Accumulation of 3 products ---";
+        -- Clear accumulator first
         clear <= '1';
         wait for CLK_PERIOD;
         clear <= '0';
-
-    load <= '0';
-
-        -- Product 1: pixels_tb(1) * filt_tb(1)
-    pixel_in <= int_to_q16(pixels_tb(1));
-    weights <= int_to_q16(filt_tb(1));
-    load <= '0';
-    ce <= '1'; wait for CLK_PERIOD*3; ce <= '0'; wait for CLK_PERIOD;
+        -- Product 1
+        pixel_in <= int_to_q16(pixels_tb(1));
+        weights <= int_to_q16(filt_tb(1));
+        wait for CLK_PERIOD;
+        start <= '1';
+        wait for CLK_PERIOD;
+        start <= '0';
+        wait until done = '1' for CLK_PERIOD * 3;
+        wait for CLK_PERIOD;
         result_int := to_integer(result); report "After product 1: " & integer'image(result_int);
 
-        -- Product 2: 3 * 14
-    pixel_in <= int_to_q16(pixels_tb(2));
-    weights <= int_to_q16(filt_tb(2));
-    load <= '0';
-    ce <= '1'; wait for CLK_PERIOD*3; ce <= '0'; wait for CLK_PERIOD;
+        -- Product 2 (accumulate, clear='0')
+        pixel_in <= int_to_q16(pixels_tb(2));
+        weights <= int_to_q16(filt_tb(2));
+        wait for CLK_PERIOD;
+        start <= '1';
+        wait for CLK_PERIOD;
+        start <= '0';
+        wait until done = '1' for CLK_PERIOD * 3;
+        wait for CLK_PERIOD;
         result_int := to_integer(result); report "After product 2: " & integer'image(result_int);
 
-        -- Product 3: 4 * -8
-    pixel_in <= int_to_q16(pixels_tb(3));
-    weights <= int_to_q16(filt_tb(3));
-    load <= '1';
-    ce <= '1'; wait for CLK_PERIOD*3; ce <= '0'; wait for CLK_PERIOD;
+        -- Product 3 (accumulate, clear='0')
+        pixel_in <= int_to_q16(pixels_tb(3));
+        weights <= int_to_q16(filt_tb(3));
+        wait for CLK_PERIOD;
+        start <= '1';
+        wait for CLK_PERIOD;
+        start <= '0';
+        wait until done = '1' for CLK_PERIOD * 3;
+        wait for CLK_PERIOD;
         result_int := to_integer(result); report "After product 3: " & integer'image(result_int);
 
     -- Test 2 expected values (3 products) in Q2.12
@@ -175,20 +193,34 @@ begin
         wait for CLK_PERIOD * 2;
 
         -- Test 3: Full 3x3 convolution (position [0,1], Filter 1)
-    report "--- Test 3: Full 3x3 convolution ---";
-    clear <= '1'; wait for CLK_PERIOD; clear <= '0';
-    load <= '0'; -- start accumulation
-
-        for i in 0 to 8 loop
+        report "--- Test 3: Full 3x3 convolution ---";
+        
+        -- Clear accumulator first
+        clear <= '1';
+        wait for CLK_PERIOD;
+        clear <= '0';
+        
+        -- First product
+        pixel_in <= int_to_q16(pixels_tb(0));
+        weights <= int_to_q16(filt_tb(0));
+        wait for CLK_PERIOD;
+        start <= '1';
+        wait for CLK_PERIOD;
+        start <= '0';
+        wait until done = '1' for CLK_PERIOD * 3;
+        wait for CLK_PERIOD;
+        
+        -- Remaining products (accumulate)
+        for i in 1 to 8 loop
             pixel_in <= int_to_q16(pixels_tb(i));
             weights <= int_to_q16(filt_tb(i));
-            load <= '0';
-            ce <= '1'; wait for CLK_PERIOD*3; ce <= '0'; wait for CLK_PERIOD;
+            wait for CLK_PERIOD;
+            start <= '1';
+            wait for CLK_PERIOD;
+            start <= '0';
+            wait until done = '1' for CLK_PERIOD * 3;
+            wait for CLK_PERIOD;
         end loop;
-        -- after finishing the 3x3 inputs, assert load to stop accumulation (pulse)
-        load <= '1';
-        -- sample load with one CE cycle to update reg_load in DUT
-        ce <= '1'; wait for CLK_PERIOD*1; ce <= '0'; wait for CLK_PERIOD;
 
         result_int := to_integer(result);
         report "Final accumulated result: " & integer'image(result_int);
