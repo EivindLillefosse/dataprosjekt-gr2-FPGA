@@ -62,9 +62,16 @@ begin
     );
 
     -- Convert 64-bit BRAM output into WORD_ARRAY elements (8 bits per filter)
-    -- Each byte in the 64-bit output corresponds to one filter's weight
+    -- Each byte in the 64-bit output corresponds to one filter's weight.
+    -- NOTE: Many BRAM initializations and memory generators pack the first
+    -- stored byte into the MSB of the 64-bit word. The previous unpacking
+    -- assumed LSB-first ordering which produced reversed filter ordering and
+    -- caused many filters to read as zero in the design's expected mapping.
+    -- To match the model's expected ordering, unpack bytes MSB-first so that
+    -- weight_data(0) receives the top byte (bits 63 downto 56) and
+    -- weight_data(NUM_FILTERS-1) receives the bottom byte (7 downto 0).
     gen_unpack_weights : for i in 0 to NUM_FILTERS-1 generate
-        weight_data(i) <= weight_dout((i+1)*8 - 1 downto i*8);
+        weight_data(i) <= weight_dout((NUM_FILTERS - i)*8 - 1 downto (NUM_FILTERS - i - 1)*8);
     end generate;
 
     -- Calculate weight address based on kernel position

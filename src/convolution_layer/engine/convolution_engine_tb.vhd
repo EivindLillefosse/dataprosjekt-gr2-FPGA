@@ -87,31 +87,32 @@ begin
         clear <= '0';
         compute_en <= '0';
         pixel_data <= (others => '0');
-        
+
         -- Initialize weight data
         for i in 0 to NUM_FILTERS-1 loop
             weight_data(i) <= std_logic_vector(to_unsigned(i + 1, MAC_DATA_WIDTH)); -- Weights: 1, 2, 3, ...
         end loop;
-        
+
         wait for CLK_PERIOD * 2;
         rst <= '0';
-        
+
         wait for CLK_PERIOD * 2;
-        
+
         report "Starting convolution engine test...";
-        
+
+        -- Helper: pulse compute_en for one clock
         -- Test case 1: Single computation
         report "Test 1: Single MAC computation";
         pixel_data <= std_logic_vector(to_unsigned(10, MAC_DATA_WIDTH)); -- Pixel value = 10
         compute_en <= '1';
         wait for CLK_PERIOD;
         compute_en <= '0';
-        
-        -- Wait for MAC computation to complete
-        wait until compute_done = (compute_done'range => '1');
 
-        wait for CLK_PERIOD;
-        
+        -- Wait until all MACs assert done
+        wait until compute_done = (compute_done'range => '1');
+        -- Sample results half a clock period after done
+        wait for CLK_PERIOD/2;
+
         report "MAC computation completed";
         for i in 0 to NUM_FILTERS-1 loop
             report "Filter " & integer'image(i) & " result: " & 
@@ -122,20 +123,19 @@ begin
                        ", expected " & integer'image(10 * (i + 1)) & " but got " & integer'image(to_integer(unsigned(results(i))))
                 severity error;
         end loop;
-        
+
         wait for CLK_PERIOD * 3;
-        
+
         -- Test case 2: Multiple accumulations
         report "Test 2: Multiple accumulations";
-        
-        -- Second computation (should accumulate)
         pixel_data <= std_logic_vector(to_unsigned(5, MAC_DATA_WIDTH)); -- Pixel value = 5
         compute_en <= '1';
         wait for CLK_PERIOD;
         compute_en <= '0';
-        
+
         wait until compute_done = (compute_done'range => '1');
-        
+        wait for CLK_PERIOD;
+
         report "Second MAC computation completed";
         for i in 0 to NUM_FILTERS-1 loop
             report "Filter " & integer'image(i) & " accumulated result: " & 
@@ -146,25 +146,26 @@ begin
                        ", expected " & integer'image(15 * (i + 1)) & " but got " & integer'image(to_integer(unsigned(results(i))))
                 severity error;
         end loop;
-        
+
         wait for CLK_PERIOD * 3;
-        
+
         -- Test case 3: Clear and restart
         report "Test 3: Clear and restart";
         clear <= '1';
         wait for CLK_PERIOD;
         clear <= '0';
-        
+
         wait for CLK_PERIOD * 2;
-        
+
         -- New computation after clear
         pixel_data <= std_logic_vector(to_unsigned(3, MAC_DATA_WIDTH)); -- Pixel value = 3
         compute_en <= '1';
         wait for CLK_PERIOD;
         compute_en <= '0';
-        
+
         wait until compute_done = (compute_done'range => '1');
-        
+        wait for CLK_PERIOD/2;
+
         report "Computation after clear completed";
         for i in 0 to NUM_FILTERS-1 loop
             report "Filter " & integer'image(i) & " result after clear: " & 
@@ -175,18 +176,19 @@ begin
                        ", expected " & integer'image(3 * (i + 1)) & " but got " & integer'image(to_integer(unsigned(results(i))))
                 severity error;
         end loop;
-        
+
         wait for CLK_PERIOD * 3;
-        
+
         -- Test case 4: Zero pixel
         report "Test 4: Zero pixel value";
         pixel_data <= (others => '0'); -- Pixel value = 0
         compute_en <= '1';
         wait for CLK_PERIOD;
         compute_en <= '0';
-        
+
         wait until compute_done = (compute_done'range => '1');
-        
+        wait for CLK_PERIOD/2;
+
         report "Zero pixel computation completed";
         for i in 0 to NUM_FILTERS-1 loop
             report "Filter " & integer'image(i) & " result with zero pixel: " & 
@@ -197,61 +199,61 @@ begin
                        ", expected " & integer'image(3 * (i + 1)) & " but got " & integer'image(to_integer(unsigned(results(i))))
                 severity error;
         end loop;
-        
-     wait for CLK_PERIOD * 3;
 
-     -- Test case 5: Signed Q1.6 inputs and Q1.6-formatted output
-     report "Test 5: Signed Q1.6 input and Q1.6-format output check";
-    -- Ensure accumulators are cleared first
-    clear <= '1';
-    wait for CLK_PERIOD;
-    clear <= '0';
-    wait for CLK_PERIOD * 2;
+        wait for CLK_PERIOD * 3;
 
-    -- Use pixel = -0.5 (Q1.6 => -0.5 * 64 = -32) and weight = +1.0 (Q1.6 => 64)
-     pixel_data <= std_logic_vector(to_signed(-32, MAC_DATA_WIDTH)); -- -0.5 in Q1.6
-     for i in 0 to NUM_FILTERS-1 loop
-         weight_data(i) <= std_logic_vector(to_signed(64, MAC_DATA_WIDTH)); -- 1.0 in Q1.6
-     end loop;
-     compute_en <= '1';
-     wait for CLK_PERIOD;
-     compute_en <= '0';
+        -- Test case 5: Signed Q1.6 inputs and Q1.6-formatted output
+        report "Test 5: Signed Q1.6 input and Q1.6-format output check";
+        -- Ensure accumulators are cleared first
+        clear <= '1';
+        wait for CLK_PERIOD;
+        clear <= '0';
+        wait for CLK_PERIOD * 2;
 
-     -- Wait for MAC computation to complete
-     wait until compute_done = (compute_done'range => '1');
+        -- Use pixel = -0.5 (Q1.6 => -0.5 * 64 = -32) and weight = +1.0 (Q1.6 => 64)
+        pixel_data <= std_logic_vector(to_signed(-32, MAC_DATA_WIDTH)); -- -0.5 in Q1.6
+        for i in 0 to NUM_FILTERS-1 loop
+            weight_data(i) <= std_logic_vector(to_signed(64, MAC_DATA_WIDTH)); -- 1.0 in Q1.6
+        end loop;
+        compute_en <= '1';
+        wait for CLK_PERIOD;
+        compute_en <= '0';
 
-     wait for CLK_PERIOD;
+        -- Wait for MAC computation to complete
+        wait until compute_done = (compute_done'range => '1');
+        -- Sample results half a clock period after done
+        wait for CLK_PERIOD/2;
 
-     report "Q1.6 MAC computation completed";
-     for i in 0 to NUM_FILTERS-1 loop
-         -- Interpret results as signed integer
-         res_signed := to_integer(signed(results(i)));
-         -- Compute raw product (full-width) and expected Q1.6 scaled value
-         raw_prod := to_integer(signed(pixel_data)) * to_integer(signed(weight_data(i)));
-         expected_q := raw_prod / 64; -- Q1.6 expected (arithmetic shift)
-         -- If DUT returned raw product (Q2.12), scaled_from_raw equals expected_q
-         scaled_from_raw := res_signed / 64;
+        report "Q1.6 MAC computation completed";
+        for i in 0 to NUM_FILTERS-1 loop
+            -- Interpret results as signed integer
+            res_signed := to_integer(signed(results(i)));
+            -- Compute raw product (full-width) and expected Q1.6 scaled value
+            raw_prod := to_integer(signed(pixel_data)) * to_integer(signed(weight_data(i)));
+            expected_q := raw_prod / 64; -- Q1.6 expected (arithmetic shift)
+            -- If DUT returned raw product (Q2.12), scaled_from_raw equals expected_q
+            scaled_from_raw := res_signed / 64;
 
-         if res_signed = expected_q then
-             report "  Filter " & integer'image(i) & " result matches Q1.6 expected: " & integer'image(res_signed);
-         elsif res_signed = raw_prod then
-             report "  Filter " & integer'image(i) & " DUT returned raw product: " & integer'image(res_signed) &
-                    " (scaled -> " & integer'image(scaled_from_raw) & ")";
-         else
-             report "  Filter " & integer'image(i) & " result (signed int) : " & integer'image(res_signed) &
-                    " expected Q1.6: " & integer'image(expected_q) & " raw_prod: " & integer'image(raw_prod);
-             assert false
-                 report "Error: At " & integer'image(now / 1 ns) & " ns: Q1.6 mismatch for filter " & integer'image(i) &
-                        ", expected Q1.6=" & integer'image(expected_q) & ", raw_prod=" & integer'image(raw_prod) &
-                        " but got " & integer'image(res_signed)
-                 severity error;
-         end if;
-     end loop;
-        
+            if res_signed = expected_q then
+                report "  Filter " & integer'image(i) & " result matches Q1.6 expected: " & integer'image(res_signed);
+            elsif res_signed = raw_prod then
+                report "  Filter " & integer'image(i) & " DUT returned raw product: " & integer'image(res_signed) &
+                       " (scaled -> " & integer'image(scaled_from_raw) & ")";
+            else
+          report "  Filter " & integer'image(i) & " result (signed int) : " & integer'image(res_signed) &
+              " expected Q1.6: " & integer'image(expected_q) & " raw_prod: " & integer'image(raw_prod);
+                assert false
+                    report "Error: At " & integer'image(now / 1 ns) & " ns: Q1.6 mismatch for filter " & integer'image(i) &
+                           ", expected Q1.6=" & integer'image(expected_q) & ", raw_prod=" & integer'image(raw_prod) &
+                           " but got " & integer'image(res_signed)
+                    severity error;
+            end if;
+        end loop;
+
         report "Convolution engine test completed successfully!";
-        
+
         wait for CLK_PERIOD * 10;
-        
+
         test_done <= true;
         wait;
     end process;

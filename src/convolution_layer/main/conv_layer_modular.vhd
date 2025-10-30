@@ -98,13 +98,17 @@ begin
     weight_mem_ctrl : entity work.weight_memory_controller
         port map (
             clk        => clk,
-            rst        => rst,
             load_req   => weight_load_req,
             kernel_row => weight_kernel_row,
             kernel_col => weight_kernel_col,
-            weight_data=> weight_data,
-            data_valid => weight_data_valid
+            weight_data=> weight_data
         );
+
+    -- The weight memory controller does not provide an explicit data_valid
+    -- output. Use the load_req signal as an indicator that new weight_data
+    -- is available (this is conservative; adjust if you later add a
+    -- dedicated valid output to the controller).
+    weight_data_valid <= weight_load_req;
 
     -- Position Calculator
     pos_calc : entity work.position_calculator
