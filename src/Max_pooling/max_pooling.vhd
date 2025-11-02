@@ -32,7 +32,7 @@ entity max_pooling is
     );
     port ( 
         clk             : in  std_logic;
-        rst_n           : in  std_logic;
+        rst             : in  std_logic;
         pixel_in_valid  : in  std_logic;                              -- New pixel available
         pixel_in_ready  : out std_logic;                              -- Ready to accept new pixel
         pixel_in        : in  WORD_ARRAY(0 to INPUT_CHANNELS-1);      -- Input pixel
@@ -51,7 +51,7 @@ architecture Behavioral of max_pooling is
 
     -- State machine
     type state_type is (IDLE, RECEIVING, DONE);
-    signal state : state_type;
+    signal state : state_type := IDLE;  -- Initialize to IDLE
 
     -- Store largest pixel in 2x2 window
     signal curr_largest : WORD_ARRAY(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
@@ -67,55 +67,46 @@ begin
     process(clk)
     begin
         if rising_edge(clk) then
-            if rst_n = '0' then
+            if rst = '1' then
                 state <= IDLE;
                 pixel_count <= (others => '0');
                 pixel_out_ready <= '0';
                 pixel_in_ready <= '0';
                 curr_largest <= (others => (others => '0'));
             else
+                -- Default values (overridden by state-specific logic below)
+                pixel_in_ready <= '0';
+                pixel_out_ready <= '0';
+                
                 case state is
                     when IDLE =>
-                        pixel_in_ready <= '1';
-                        if pixel_in_valid = '1' and pixel_in_ready = '1' then
+                        if pixel_in_valid = '1' then
+                            pixel_in_ready <= '1'; 
                             state <= RECEIVING;
-                            pixel_in_ready <= '1';
-                            pixel_count <= pixel_count + 1;
-                            curr_largest <= pixel_in;
-                            pixel_out_ready <= '0';
                         end if;
                     
                     when RECEIVING =>
-                        pixel_in_ready <= '0';
-                        if pixel_in_valid = '1' then
-                            pixel_in_ready <= '1';
-
-                            -- Update largest pixel for each channel
-                            for ch in 0 to INPUT_CHANNELS-1 loop
-                                if pixel_in(ch) > curr_largest(ch) then
-                                    curr_largest(ch) <= pixel_in(ch);
-                                end if;
-                            end loop;
-
-                            -- Update counters
-                            if pixel_count = to_unsigned(BLOCK_SIZE*BLOCK_SIZE - 1, pixel_count'length) then
-                                pixel_count <= (others => '0');
-                                
-                                -- Finished 2x2 block
-                                pixel_out_ready <= '1';
-                                pixel_in_ready <= '0';
-                                state <= DONE;
-                            else
-                                pixel_count <= pixel_count + 1;
+                        -- Update largest pixel for each channel
+                        for ch in 0 to INPUT_CHANNELS-1 loop
+                            if pixel_in(ch) > curr_largest(ch) then
+                                curr_largest(ch) <= pixel_in(ch);
                             end if;
-                        end if;
-                    when DONE =>
-                        pixel_out <= curr_largest;
-                        if pixel_out_ready = '1' then
+                        end loop;
+                        -- Update counters
+                        if pixel_count = to_unsigned(BLOCK_SIZE*BLOCK_SIZE - 1, pixel_count'length) then
+                            pixel_out_ready <= '1';
+                            pixel_out <= curr_largest;
+                            state <= DONE;
+                        else
+                            pixel_count <= pixel_count + 1;
                             state <= IDLE;
-                            pixel_out_ready <= '0';
-                            pixel_in_ready <= '1';
                         end if;
+
+                    when DONE =>
+                        pixel_out_ready <= '1';
+                        pixel_count <= (others => '0');
+                        pixel_out <= curr_largest;
+                        state <= IDLE;  -- Return to IDLE immediately
                 end case;
             end if;
         end if;

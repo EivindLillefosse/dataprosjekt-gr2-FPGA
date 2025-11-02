@@ -57,7 +57,6 @@ architecture Behavioral of conv_layer_modular is
     signal weight_kernel_row : integer range 0 to KERNEL_SIZE-1;
     signal weight_kernel_col : integer range 0 to KERNEL_SIZE-1;
     signal weight_channel    : integer range 0 to INPUT_CHANNELS-1 := 0;
-    signal weight_data_valid : std_logic;
     signal weight_data       : WORD_ARRAY(0 to NUM_FILTERS-1);
     
     -- Position calculator signals
@@ -231,10 +230,16 @@ begin
             clk => clk,
             rst => rst,
             enable => enable,
+
+            -- Weight memory controller
             weight_load_req => weight_load_req,
             weight_kernel_row => weight_kernel_row,
             weight_kernel_col => weight_kernel_col,
             weight_channel => weight_channel,
+
+            -- Input interface
+            input_ready => input_ready,
+            input_valid => input_valid,
 
             -- bias ports removed (bias stored in registers)
             pos_advance => pos_advance,
@@ -245,11 +250,14 @@ begin
             compute_en => compute_en,
             compute_clear => compute_clear,
             compute_done => compute_done,
-            input_ready => input_ready,
-            input_valid => input_valid,
-            output_valid => scaler_valid_in,
-            output_ready => output_ready,
-            scaled_done  => scaler_valid_out
+
+            -- Scaler 
+            scaled_ready => scaler_valid_in,
+            scaled_done  => scaler_valid_out,
+
+            -- Output interface
+            output_valid => output_valid,
+            output_ready => output_ready
         );
 
     -- Connect position information
@@ -260,7 +268,6 @@ begin
     output_pixel <= relu_data_out;
     output_row <= current_row;
     output_col <= current_col;
-    output_valid <= relu_valid_out;
     layer_done <= pos_layer_done;
 
 end Behavioral;

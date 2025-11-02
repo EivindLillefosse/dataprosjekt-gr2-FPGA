@@ -109,11 +109,15 @@ begin
             clk            => clk,
             rst            => rst,
             enable         => enable,
+
+            -- Input interface
             input_valid    => input_valid,
             input_pixel    => input_pixel,
             input_row      => input_row,
             input_col      => input_col,
             input_ready    => input_ready,
+
+            -- Output interface
             output_valid   => conv1_output_valid,
             output_pixel   => conv1_output_pixel,
             output_row     => conv1_output_row,
@@ -129,7 +133,7 @@ begin
         )
         port map (
             clk             => clk,
-            rst_n           => rst,
+            rst           => rst,
             pixel_in_valid  => conv1_output_valid,
             pixel_in_ready  => conv1_output_ready,
             pixel_in        => conv1_output_pixel,
@@ -176,7 +180,7 @@ begin
         )
         port map (
             clk             => clk,
-            rst_n           => rst,
+            rst           => rst,
             pixel_in_valid  => conv2_output_valid,
             pixel_in_ready  => conv2_output_ready,
             pixel_in        => conv2_output_pixel,

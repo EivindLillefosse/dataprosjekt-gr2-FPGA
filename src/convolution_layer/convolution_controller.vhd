@@ -45,14 +45,16 @@ entity convolution_controller is
         compute_en    : out std_logic;
         compute_clear : out std_logic;
         compute_done  : in  std_logic_vector(NUM_FILTERS-1 downto 0);
-        
+
+        -- Indicates that scaling (and any pre-output processing) has completed
+        scaled_ready  : out std_logic;
+        scaled_done   : in  std_logic;
+
         -- I/O control
         input_ready   : out std_logic;
         input_valid   : in  std_logic;
         output_valid  : out std_logic;
-        output_ready  : in  std_logic;
-        -- Indicates that scaling (and any pre-output processing) has completed
-        scaled_done   : in  std_logic
+        output_ready  : in  std_logic
     );
 end convolution_controller;
 
@@ -64,11 +66,13 @@ architecture Behavioral of convolution_controller is
     signal next_state_sig    : state_type := IDLE;
     -- Registered outputs next-value signals
     signal weight_load_req_n : std_logic := '0';
+    signal weight_channel_n  : integer range 0 to NUM_FILTERS-1 := 0;
     signal pos_advance_n     : std_logic := '0';
     signal compute_en_n      : std_logic := '0';
     signal compute_clear_n   : std_logic := '0';
     signal input_ready_n     : std_logic := '0';
     signal output_valid_n    : std_logic := '0';
+    signal scaled_ready_n    : std_logic := '0';
 
     -- Helper: return true when all bits in a std_logic_vector are '1'
     function all_ones(vec : std_logic_vector) return boolean is
@@ -103,6 +107,7 @@ begin
         variable v_compute_clear   : std_logic := '0';
         variable v_input_ready     : std_logic := '0';
         variable v_output_valid    : std_logic := '0';
+        variable v_scaled_ready    : std_logic := '0';
         variable v_current_channel : integer range 0 to NUM_FILTERS-1 := 0;
     begin
 
@@ -150,7 +155,7 @@ begin
                 -- request downstream processing (scaling/ReLU)
                 v_pos_advance  := '0';
                 if region_done = '1' then
-                    v_output_valid := '1';
+                    v_scaled_ready := '1';
                     next_state := PIXEL_DONE;
                 else
                     -- continue current region
@@ -158,30 +163,27 @@ begin
                 end if;
 
             when PIXEL_DONE =>
+                v_scaled_ready := '1';
                 -- Pulse compute_clear and advance position for one cycle, then move to next region or layer
                 v_compute_clear := '1';
                 v_output_valid := '0';
-                if output_ready = '1' then
-                    if scaled_done = '1' then
-                        v_compute_clear := '0';
-                        -- Decide next state after the pixel-clear: if layer is done, go IDLE, else load next weights
-                        if layer_done = '1' then
-                            next_state := IDLE;
-                        else
-                            next_state := LOAD_WEIGHTS;
-                        end if;
+                if scaled_done = '1' then
+                    v_scaled_ready := '0';
+                    v_compute_clear := '0';
+                    -- Decide next state after the pixel-clear: if layer is done, go IDLE, else load next weights
+                    if layer_done = '1' then
+                        next_state := IDLE;
+                    else
+                        next_state := OUTPUT_WAIT;
                     end if;
-                else
-                 next_state := OUTPUT_WAIT;
                 end if;
                         
 
             when OUTPUT_WAIT =>
                 v_output_valid := '1';
-                if output_ready = '1' and scaled_done = '1' then
-                    -- downstream finished, move to PIXEL_DONE to perform per-pixel clear
+                if output_ready = '1' then
                     v_output_valid := '0';
-                    next_state := PIXEL_DONE;
+                    next_state := LOAD_WEIGHTS;
                 end if;
 
             when others =>
@@ -192,12 +194,13 @@ begin
         next_state_sig <= next_state;
 
         -- Commit combinational next-values to registered next signals
-        weight_channel    <= v_current_channel;
-        pos_advance       <= v_pos_advance;
+        weight_channel_n  <= v_current_channel;
+        pos_advance_n     <= v_pos_advance;
         compute_en_n      <= v_compute_en;
         compute_clear_n   <= v_compute_clear;
         input_ready_n     <= v_input_ready;
         output_valid_n    <= v_output_valid;
+        scaled_ready_n    <= v_scaled_ready;
     end process;
 
     -- Output register: latch outputs on clock edge to remove combinational drivers
@@ -205,16 +208,22 @@ begin
     begin
         if rst = '1' then
             weight_load_req <= '0';
+            weight_channel  <= 0;
+            pos_advance     <= '0';
             compute_en      <= '0';
             compute_clear   <= '0';
             input_ready     <= '0';
             output_valid    <= '0';
+            scaled_ready    <= '0';
         elsif rising_edge(clk) then
             weight_load_req <= weight_load_req_n;
+            weight_channel  <= weight_channel_n;
+            pos_advance     <= pos_advance_n;
             compute_en      <= compute_en_n;
             compute_clear   <= compute_clear_n;
             input_ready     <= input_ready_n;
             output_valid    <= output_valid_n;
+            scaled_ready    <= scaled_ready_n;
         end if;
     end process;
 
