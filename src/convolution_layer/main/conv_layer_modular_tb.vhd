@@ -50,7 +50,7 @@ architecture Behavioral of conv_layer_modular_tb is
     signal enable : STD_LOGIC := '0';
     
     signal input_valid : std_logic := '0';
-    signal input_pixel : WORD := (others => '0');
+    signal input_pixel : WORD_ARRAY(0 to INPUT_CHANNELS-1);
     signal input_row : integer := 0;
     signal input_col : integer := 0;
     signal input_ready : std_logic;
@@ -368,13 +368,14 @@ begin
     begin
         if input_ready = '1' then
             -- Check if the requested coordinates are valid
-            if input_row >= 0 and input_row < IMAGE_SIZE and 
+                if input_row >= 0 and input_row < IMAGE_SIZE and 
                input_col >= 0 and input_col < IMAGE_SIZE then
-                input_pixel <= std_logic_vector(to_unsigned(test_image(input_row, input_col), 8));
+                -- Assign into channel 0 (INPUT_CHANNELS=1 in this TB)
+                input_pixel(0) <= std_logic_vector(to_unsigned(test_image(input_row, input_col), 8));
                 input_valid <= '1';
             else
                 -- Provide zero for out-of-bounds pixels (padding)
-                input_pixel <= (others => '0');
+                input_pixel <= (others => (others => '0'));
                 input_valid <= '1';
             end if;
         else
@@ -421,7 +422,7 @@ begin
                 write(debug_line, ',');
                 write(debug_line, input_col);
                 write(debug_line, string'("] "));
-                write(debug_line, to_integer(signed(input_pixel)));
+                write(debug_line, to_integer(signed(input_pixel(0))));
                 writeline(debug_file, debug_line);
             end if;
             

@@ -1,6 +1,7 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use work.types_pkg.all;
 
 entity max_pooling_tb is
 end max_pooling_tb;
@@ -9,19 +10,19 @@ architecture sim of max_pooling_tb is
     -- Test parameters
     constant INPUT_WIDTH  : integer := 8;   -- 8x8 input matrix
     constant INPUT_HEIGHT : integer := 8;
-    constant PIXEL_WIDTH  : integer := 16;  -- 16-bit pixels
+    constant INPUT_CHANNELS : integer := 8; -- Number of channels
     constant CLK_PERIOD   : time := 10 ns;
     
     -- Test signals
     signal clk         : std_logic := '0';
     signal rst_n       : std_logic := '0';
-    signal start       : std_logic := '0';
-    signal pixel_valid : std_logic := '0';
-    signal pixel_in    : std_logic_vector(PIXEL_WIDTH-1 downto 0) := (others => '0');
-    
-    signal pixel_out   : std_logic_vector(PIXEL_WIDTH-1 downto 0);
-    signal pixel_ready : std_logic;
-    signal frame_done  : std_logic;
+    signal pixel_in_valid : std_logic := '0';
+    signal pixel_in    : WORD_ARRAY(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
+    signal pixel_out   : WORD_ARRAY(0 to INPUT_CHANNELS-1);
+    signal pixel_out_ready : std_logic;
+    signal pixel_in_ready : std_logic;
+    signal pixel_in_row : integer := 0;
+    signal pixel_in_col : integer := 0;
     
     -- Test data - 8x8 input matrix with known values
     type test_matrix_type is array (0 to INPUT_HEIGHT-1, 0 to INPUT_WIDTH-1) of integer;
@@ -65,31 +66,32 @@ begin
     -- DUT instantiation  
     dut: entity work.max_pooling
         generic map (
-            INPUT_WIDTH  => INPUT_WIDTH,
-            INPUT_HEIGHT => INPUT_HEIGHT,
-            PIXEL_WIDTH  => PIXEL_WIDTH
+            INPUT_SIZE     => INPUT_WIDTH,
+            INPUT_CHANNELS => INPUT_CHANNELS,
+            BLOCK_SIZE     => 2
         )
         port map (
             clk         => clk,
-            rst_n       => rst_n,
-            start       => start,
-            pixel_valid => pixel_valid,
-            pixel_in    => pixel_in,
-            pixel_out   => pixel_out,
-            pixel_ready => pixel_ready,
-            frame_done  => frame_done
+            rst_n           => rst_n,
+            pixel_in_valid  => pixel_in_valid,
+            pixel_in_ready  => pixel_in_ready,
+            pixel_in        => pixel_in,
+            pixel_in_row    => pixel_in_row,
+            pixel_in_col    => pixel_in_col,
+            pixel_out       => pixel_out,
+            pixel_out_ready => pixel_out_ready
         );
 
-    -- Output monitor process
+    -- Output monitor process (monitors channel 0 for simplicity)
     output_monitor: process(clk)
     begin
         if rising_edge(clk) then
             if rst_n = '0' then
                 output_count <= 0;
                 received_outputs <= (others => 0);
-            elsif pixel_ready = '1' then
+            elsif pixel_out_ready = '1' then
                 assert false report "Output pixel received" severity note;
-                received_outputs(output_count) <= to_integer(unsigned(pixel_out));
+                received_outputs(output_count) <= to_integer(signed(pixel_out(0)));
                 output_count <= output_count + 1;
             end if;
         end if;
@@ -101,12 +103,13 @@ begin
         variable expected_col : integer;
         variable expected_val : integer;
         variable received_val : integer;
+        variable br : integer;
+        variable bc : integer;
     begin
         -- Initial reset
         rst_n <= '0';
-        start <= '0';
-        pixel_valid <= '0';
-        pixel_in <= (others => '0');
+        pixel_in_valid <= '0';
+        pixel_in <= (others => (others => '0'));
         wait for 5*CLK_PERIOD;
         
         rst_n <= '1';
@@ -115,31 +118,70 @@ begin
         assert false report "=== Starting Max Pooling Test ===" severity note;
         assert false report "Sending 8x8 matrix, expecting 4x4 output" severity note;
         
-        -- Start the frame
-        start <= '1';
-        wait for CLK_PERIOD;
-        start <= '0';
-        wait for CLK_PERIOD;
-        
-        -- Send the 8x8 matrix row by row (64 pixels total)
-        for row in 0 to INPUT_HEIGHT-1 loop
-            for col in 0 to INPUT_WIDTH-1 loop
-                -- Send pixel
-                pixel_in <= std_logic_vector(to_unsigned(TEST_MATRIX(row, col), PIXEL_WIDTH));
-                pixel_valid <= '1';
+    -- Send the 8x8 matrix in 2x2 block order: (r,c),(r,c+1),(r+1,c),(r+1,c+1)
+    -- Use stepping by 2 using while loops (works for even INPUT_WIDTH/HEIGHT)
+
+    br := 0;
+        while br < INPUT_HEIGHT loop
+            bc := 0;
+            while bc < INPUT_WIDTH loop
+                -- (br, bc)
+                pixel_in_row <= br;
+                pixel_in_col <= bc;
+                for ch in 0 to INPUT_CHANNELS-1 loop
+                    -- Give each channel a distinct value: base + channel index
+                    pixel_in(ch) <= std_logic_vector(to_signed(TEST_MATRIX(br, bc) + ch, WORD'length));
+                end loop;
+                pixel_in_valid <= '1';
                 wait for CLK_PERIOD;
-                pixel_valid <= '0';
-                
-                -- Small gap between pixels
+                pixel_in_valid <= '0';
                 wait for CLK_PERIOD;
+
+                -- (br, bc+1)
+                pixel_in_row <= br;
+                pixel_in_col <= bc + 1;
+                for ch in 0 to INPUT_CHANNELS-1 loop
+                    pixel_in(ch) <= std_logic_vector(to_signed(TEST_MATRIX(br, bc+1) + ch, WORD'length));
+                end loop;
+                pixel_in_valid <= '1';
+                wait for CLK_PERIOD;
+                pixel_in_valid <= '0';
+                wait for CLK_PERIOD;
+
+                -- (br+1, bc)
+                pixel_in_row <= br + 1;
+                pixel_in_col <= bc;
+                for ch in 0 to INPUT_CHANNELS-1 loop
+                    pixel_in(ch) <= std_logic_vector(to_signed(TEST_MATRIX(br+1, bc) + ch, WORD'length));
+                end loop;
+                pixel_in_valid <= '1';
+                wait for CLK_PERIOD;
+                pixel_in_valid <= '0';
+                wait for CLK_PERIOD;
+
+                -- (br+1, bc+1)
+                pixel_in_row <= br + 1;
+                pixel_in_col <= bc + 1;
+                for ch in 0 to INPUT_CHANNELS-1 loop
+                    pixel_in(ch) <= std_logic_vector(to_signed(TEST_MATRIX(br+1, bc+1) + ch, WORD'length));
+                end loop;
+                pixel_in_valid <= '1';
+                wait for CLK_PERIOD;
+                pixel_in_valid <= '0';
+                wait for CLK_PERIOD;
+
+                -- small gap after finishing one 2x2 block
+                wait for CLK_PERIOD;
+
+                bc := bc + 2;
             end loop;
-            
-            -- Gap between rows
+            -- gap after finishing a row of blocks
             wait for 2*CLK_PERIOD;
+            br := br + 2;
         end loop;
-        
-        -- Wait for processing to complete
-        wait until frame_done = '1';
+
+        -- Wait until all 16 outputs have been produced
+        wait until output_count = 16;
         wait for 5*CLK_PERIOD;
         
         -- Verify results
@@ -163,21 +205,21 @@ begin
         
         -- Test reset during operation
         assert false report "=== Testing Reset During Operation ===" severity note;
-        
-        start <= '1';
-        wait for CLK_PERIOD;
-        start <= '0';
-        
-        -- Send a few pixels then reset
+
+        -- Start sending a new short frame (a few pixels)
         for i in 0 to 10 loop
-            pixel_in <= std_logic_vector(to_unsigned(100 + i, PIXEL_WIDTH));
-            pixel_valid <= '1';
+            pixel_in_row <= i / INPUT_WIDTH;
+            pixel_in_col <= i mod INPUT_WIDTH;
+            for ch in 0 to INPUT_CHANNELS-1 loop
+                pixel_in(ch) <= std_logic_vector(to_signed(100 + i + ch, WORD'length));
+            end loop;
+            pixel_in_valid <= '1';
             wait for CLK_PERIOD;
-            pixel_valid <= '0';
+            pixel_in_valid <= '0';
             wait for CLK_PERIOD;
         end loop;
-        
-        -- Apply reset
+
+        -- Apply reset in the middle of operation
         rst_n <= '0';
         wait for 3*CLK_PERIOD;
         rst_n <= '1';

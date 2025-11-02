@@ -30,8 +30,9 @@ entity convolution_controller is
         weight_load_req   : out std_logic;
         weight_kernel_row : out integer range 0 to KERNEL_SIZE-1;
         weight_kernel_col : out integer range 0 to KERNEL_SIZE-1;
-        weight_data_valid : in  std_logic;
-    -- (bias handled locally in top module)
+        weight_channel    : out integer range 0 to NUM_FILTERS-1;
+         
+        -- (bias handled locally in conv top module)
                 
         -- Position calculator interface  
         pos_advance   : out std_logic;
@@ -57,135 +58,166 @@ end convolution_controller;
 
 architecture Behavioral of convolution_controller is
 
-    type state_type is (IDLE, LOAD_WEIGHTS, WAIT_WEIGHTS, LOAD_DATA, COMPUTE, POST_COMPUTE, OUTPUT_WAIT);
+    -- Add PIXEL_DONE state to generate a one-cycle compute_clear and pos_advance pulse
+    type state_type is (IDLE, LOAD_WEIGHTS, WAIT_WEIGHTS, LOAD_DATA, COMPUTE, PIXEL_DONE, POST_COMPUTE, OUTPUT_WAIT);
     signal current_state : state_type := IDLE;
-    
+    signal next_state_sig    : state_type := IDLE;
+    -- Registered outputs next-value signals
+    signal weight_load_req_n : std_logic := '0';
+    signal pos_advance_n     : std_logic := '0';
+    signal compute_en_n      : std_logic := '0';
+    signal compute_clear_n   : std_logic := '0';
+    signal input_ready_n     : std_logic := '0';
+    signal output_valid_n    : std_logic := '0';
+
+    -- Helper: return true when all bits in a std_logic_vector are '1'
+    function all_ones(vec : std_logic_vector) return boolean is
+    begin
+        for i in vec'range loop
+            if vec(i) /= '1' then
+                return false;
+            end if;
+        end loop;
+        return true;
+    end function;
+
 begin
 
-    fsm_proc: process(clk, rst)
+    -- Synchronous state register
+    state_reg : process(clk, rst)
     begin
         if rst = '1' then
             current_state <= IDLE;
-            weight_load_req <= '0';
-            pos_advance <= '0';
-            compute_en <= '0';
-            compute_clear <= '0';
-            input_ready <= '0';
-            output_valid <= '0';
-            
         elsif rising_edge(clk) then
-            case current_state is
-                when IDLE =>
-                    compute_clear <= '0';
-                    output_valid <= '0';
-                    input_ready <= '0';
-                    pos_advance <= '0';
-                    
-                    if enable = '1' then
-                        current_state <= LOAD_WEIGHTS;
-                    end if;
-
-                when LOAD_WEIGHTS =>
-                    -- request weight stream for current kernel position (all filters arrive together)
-                    weight_load_req <= '1';
-                    compute_en <= '0';
-                    compute_clear <= '0';
-                    input_ready <= '0';
-                    output_valid <= '0';
-                    pos_advance <= '0';
-
-                    -- transition once the weight bundle for all filters is valid
-                    if weight_data_valid = '1' then
-                        weight_load_req <= '0';
-                        current_state <= LOAD_DATA;
-                    end if;
-
-                when LOAD_DATA =>
-                    weight_load_req <= '0';
-                    compute_en <= '0';
-                    compute_clear <= '0';
-                    pos_advance <= '0';
-                    output_valid <= '0';
-                    
-                    -- Signal ready to accept input pixel data
-                    input_ready <= '1';
-                    
-                    if input_valid = '1' then
-                        input_ready <= '0';
-                        current_state <= COMPUTE;
-                    end if;
-                    
-                when COMPUTE =>
-                    compute_en <= '1';
-                    -- Wait for MAC computation to complete
-                    if compute_done = (compute_done'range => '1') then
-                        compute_en <= '0';
-                        -- move to post-compute bookkeeping (decide whether to output now or wait)
-                        current_state <= POST_COMPUTE;
-                    end if;
-
-                when POST_COMPUTE =>
-                    -- After compute completes: request output/scaling by asserting output_valid
-                    compute_en <= '0';
-                    input_ready <= '0';
-                    -- set output_valid to request downstream scaling/processing
-                    output_valid <= '1';
-                    -- do not clear or advance yet; wait for scaled_done
-                    compute_clear <= '0';
-                    pos_advance <= '0';
-
-                    if region_done = '1' then
-                        -- If downstream is already ready, remain in POST_COMPUTE and wait for scaled_done
-                        -- Otherwise, move to OUTPUT_WAIT to wait for ready & scaled_done
-                        if output_ready = '1' then
-                            -- keep asserting output_valid while waiting for scaled_done
-                            if scaled_done = '1' then
-                                -- now it's safe to clear and advance
-                                compute_clear <= '1';
-                                pos_advance <= '1';
-                                output_valid <= '0';
-                                if layer_done = '1' then
-                                    current_state <= IDLE;
-                                else
-                                    current_state <= LOAD_WEIGHTS;
-                                end if;
-                            end if;
-                        else
-                            current_state <= OUTPUT_WAIT;
-                        end if;
-                    else
-                        -- Continue processing current region immediately
-                        output_valid <= '0';
-                        pos_advance <= '1';
-                        current_state <= LOAD_WEIGHTS;
-                    end if;
-
-                when OUTPUT_WAIT =>
-                    -- Wait for downstream readiness and scaled_done
-                    compute_en <= '0';
-                    input_ready <= '0';
-                    output_valid <= '1'; -- keep requesting output/scaling
-                    compute_clear <= '0';
-                    pos_advance <= '0';
-                    if output_ready = '1' and scaled_done = '1' then
-                        -- scaling finished and consumer ready: finalize output
-                        compute_clear <= '1';
-                        pos_advance <= '1';
-                        output_valid <= '0';
-
-                        if layer_done = '1' then
-                            current_state <= IDLE;
-                        else
-                            current_state <= LOAD_WEIGHTS;
-                        end if;
-                    end if;
-        
-                when others =>
-                    current_state <= IDLE;
-            end case;
+            current_state <= next_state_sig;
         end if;
     end process;
-    
+
+    -- Combinational next-state and output logic (Moore-style outputs assigned here)
+    fsm_comb : process(current_state, enable, input_valid, compute_done, region_done, output_ready, scaled_done, layer_done)
+        -- Local variable for next state (named 'next_state')
+        variable next_state : state_type := IDLE;
+        -- Local combinational next-values for outputs
+        variable v_pos_advance     : std_logic := '0';
+        variable v_compute_en      : std_logic := '0';
+        variable v_compute_clear   : std_logic := '0';
+        variable v_input_ready     : std_logic := '0';
+        variable v_output_valid    : std_logic := '0';
+        variable v_current_channel : integer range 0 to NUM_FILTERS-1 := 0;
+    begin
+
+        -- Default next state is to remain; capture current state into variable
+        next_state := current_state;
+
+        -- Default outputs (variables) already '0'
+
+    case current_state is
+            when IDLE =>
+                -- stay idle until enabled
+                if enable = '1' then
+                    next_state := LOAD_WEIGHTS;
+                end if;
+
+            when LOAD_WEIGHTS =>
+                -- request weight bundle
+                next_state    := LOAD_DATA;
+
+            when LOAD_DATA =>
+                -- wait for input pixel
+                v_input_ready := '1';
+                if input_valid = '1' then
+                    v_input_ready := '0';
+                    v_compute_en := '1';
+                    next_state := COMPUTE;
+                end if;
+
+            when COMPUTE =>
+                -- compute_en is pulsed on the transition into COMPUTE (from LOAD_DATA)
+                -- wait for the MAC/engine to assert compute_done, then proceed to POST_COMPUTE
+                v_compute_en := '0';
+                if all_ones(compute_done) then
+                    if weight_channel < NUM_FILTERS-1 then
+                        v_current_channel := 0;
+                        v_pos_advance := '1';
+                        next_state := POST_COMPUTE;
+                    else
+                        v_current_channel := v_current_channel + 1;
+                        next_state := LOAD_WEIGHTS;
+                    end if;
+                end if;
+
+            when POST_COMPUTE =>
+                -- request downstream processing (scaling/ReLU)
+                v_pos_advance  := '0';
+                if region_done = '1' then
+                    v_output_valid := '1';
+                    next_state := PIXEL_DONE;
+                else
+                    -- continue current region
+                    next_state := LOAD_WEIGHTS;
+                end if;
+
+            when PIXEL_DONE =>
+                -- Pulse compute_clear and advance position for one cycle, then move to next region or layer
+                v_compute_clear := '1';
+                v_output_valid := '0';
+                if output_ready = '1' then
+                    if scaled_done = '1' then
+                        v_compute_clear := '0';
+                        -- Decide next state after the pixel-clear: if layer is done, go IDLE, else load next weights
+                        if layer_done = '1' then
+                            next_state := IDLE;
+                        else
+                            next_state := LOAD_WEIGHTS;
+                        end if;
+                    end if;
+                else
+                 next_state := OUTPUT_WAIT;
+                end if;
+                        
+
+            when OUTPUT_WAIT =>
+                v_output_valid := '1';
+                if output_ready = '1' and scaled_done = '1' then
+                    -- downstream finished, move to PIXEL_DONE to perform per-pixel clear
+                    v_output_valid := '0';
+                    next_state := PIXEL_DONE;
+                end if;
+
+            when others =>
+                next_state := IDLE;
+        end case;
+
+        -- Commit local next-state variable to the signal
+        next_state_sig <= next_state;
+
+        -- Commit combinational next-values to registered next signals
+        weight_channel    <= v_current_channel;
+        pos_advance       <= v_pos_advance;
+        compute_en_n      <= v_compute_en;
+        compute_clear_n   <= v_compute_clear;
+        input_ready_n     <= v_input_ready;
+        output_valid_n    <= v_output_valid;
+    end process;
+
+    -- Output register: latch outputs on clock edge to remove combinational drivers
+    outputs_reg : process(clk, rst)
+    begin
+        if rst = '1' then
+            weight_load_req <= '0';
+            compute_en      <= '0';
+            compute_clear   <= '0';
+            input_ready     <= '0';
+            output_valid    <= '0';
+        elsif rising_edge(clk) then
+            weight_load_req <= weight_load_req_n;
+            compute_en      <= compute_en_n;
+            compute_clear   <= compute_clear_n;
+            input_ready     <= input_ready_n;
+            output_valid    <= output_valid_n;
+        end if;
+    end process;
+
     -- Connect position to weight controller
     weight_kernel_row <= region_row;
     weight_kernel_col <= region_col;
