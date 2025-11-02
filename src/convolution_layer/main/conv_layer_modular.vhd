@@ -172,7 +172,6 @@ begin
         assert NUM_FILTERS = layer_0_conv2d_BIAS'length
             report "conv_layer_modular: NUM_FILTERS must equal layer_0_conv2d_BIAS length when LAYER_ID=0" severity failure;
     end generate;
-
     gen_check_layer2 : if LAYER_ID = 1 generate
     begin
         assert NUM_FILTERS = layer_2_conv2d_1_BIAS'length

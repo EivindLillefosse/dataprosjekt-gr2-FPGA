@@ -378,6 +378,29 @@ puts "\n=== Creating/Adding IP Cores ==="
 # Track which IPs have been created by name (to avoid duplicates)
 set created_ips [dict create]
 
+# Cleanup existing ip_repo contents to avoid stale/old IP cores being reused.
+# This deletes files and directories inside ./ip_repo but does not delete the ip_repo
+# directory itself. We print what we removed for traceability.
+set ip_repo_dir "./ip_repo"
+if {[file isdirectory $ip_repo_dir]} {
+    puts "\n=== Cleaning existing IP repository: $ip_repo_dir ==="
+    # Collect entries first to avoid modifying the list while iterating
+    set entries [glob -nocomplain -directory $ip_repo_dir "*"]
+    if {[llength $entries] == 0} {
+        puts "  (no files to remove)"
+    } else {
+        foreach e $entries {
+            set full [file normalize $e]
+            if {[catch {file delete -force $full} delerr]} {
+                puts "  Warning: failed to remove $full : $delerr"
+            } else {
+                puts "  Removed: $full"
+            }
+        }
+    }
+    puts "=== IP repository cleanup complete ===\n"
+}
+
 # Check for existing IPs first
 if {[file isdirectory $memory_dir]} {
     set ip_files [glob -nocomplain "$memory_dir/*/*.xci"]
