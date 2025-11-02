@@ -289,8 +289,15 @@ def evaluate_model(model, x, y, categories):
 def export_model(model):
     """Export model to SavedModel format."""
     print("Exporting model...")
-    model.export("model/saved_model")
-    print("✓ Model exported as SavedModel.")
+    # TensorFlow Keras models should be saved with tf.saved_model.save or model.save
+    try:
+        # Prefer the SavedModel format for further conversion/quantization
+        tf.saved_model.save(model, "model/saved_model")
+        print("✓ Model exported as SavedModel at 'model/saved_model'.")
+    except Exception:
+        # Fallback to the Keras HDF5/`model.save` which also works for many tools
+        model.save("model/saved_model_h5.h5")
+        print("✓ Model exported with fallback to Keras H5 at 'model/saved_model_h5.h5'.")
 
 def create_test_dataset_for_quantization(x, categories):
     """Create a small test dataset for quantization validation."""
@@ -349,10 +356,23 @@ def test_quantized_model(quantized_model, x_test_quant, y_test_quant):
     correct_predictions = 0
     
     for i in range(len(x_test_quant)):
-        # Convert input to int8 properly (range -128 to 127)
-        test_input = (x_test_quant[i:i+1] * 255).astype(np.float32)
-        test_input = np.clip(test_input - 128, -128, 127).astype(np.int8)
-        interpreter.set_tensor(input_details[0]['index'], test_input)
+        # Prepare input according to interpreter quantization parameters if available
+        test_input = x_test_quant[i:i+1].astype(np.float32)
+        # If input is already in [0,255] raw pixel range, keep as is; otherwise assume 0-1
+        # Use scale and zero_point from the interpreter if present
+        in_detail = input_details[0]
+        if 'quantization' in in_detail and in_detail['quantization'] is not None:
+            scale, zero_point = in_detail['quantization']
+            if scale and zero_point is not None:
+                # Map float input to int8 using (x / scale) + zero_point
+                q = np.round(test_input / scale + zero_point).astype(in_detail['dtype'])
+            else:
+                # Fallback: center around zero for uint8/int8 mapping
+                q = np.clip(test_input - 128, -128, 127).astype(in_detail['dtype'])
+        else:
+            # No quantization info; attempt a reasonable mapping: center and clip
+            q = np.clip(test_input - 128, -128, 127).astype(in_detail['dtype'])
+        interpreter.set_tensor(in_detail['index'], q)
         interpreter.invoke()
         
         quantized_output = interpreter.get_tensor(output_details[0]['index'])
@@ -446,11 +466,15 @@ def export_to_FPGA(model, q_format="Q1.6"):
     
     def int8_to_hex(value):
         """Convert signed int8 to 2-character hex string"""
-        if value < 0:
-            # Two's complement for negative numbers
-            return f"{(256 + value):02X}"
+        # Ensure we operate on Python ints (handle numpy types)
+        try:
+            iv = int(value)
+        except Exception:
+            iv = 0
+        if iv < 0:
+            return f"{(256 + iv) & 0xFF:02X}"
         else:
-            return f"{value:02X}"
+            return f"{iv & 0xFF:02X}"
     
     # Create output directory
     output_dir = "model/fpga_weights_and_bias"

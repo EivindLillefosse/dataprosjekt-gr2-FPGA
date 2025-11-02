@@ -23,6 +23,7 @@ architecture Behavioral of convolution_engine_tb is
 
     -- Test parameters
     constant NUM_FILTERS     : integer := 8;
+    constant INPUT_CHANNELS  : integer := 4;
     constant MAC_DATA_WIDTH  : integer := 8;
     constant MAC_RESULT_WIDTH: integer := 16;
     
@@ -33,7 +34,8 @@ architecture Behavioral of convolution_engine_tb is
     signal clk          : std_logic := '0';
     signal rst          : std_logic := '0';
     signal clear        : std_logic := '0';
-    signal pixel_data   : std_logic_vector(MAC_DATA_WIDTH-1 downto 0) := (others => '0');
+    signal pixel_data   : WORD_ARRAY(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
+    signal channel_index: integer range 0 to INPUT_CHANNELS-1 := 0;
     signal weight_data  : WORD_ARRAY(0 to NUM_FILTERS-1);
     signal compute_en   : std_logic := '0';
     signal results      : WORD_ARRAY_16(0 to NUM_FILTERS-1);
@@ -48,6 +50,7 @@ begin
     uut: entity work.convolution_engine
         generic map (
             NUM_FILTERS => NUM_FILTERS,
+            INPUT_CHANNELS => INPUT_CHANNELS,
             MAC_DATA_WIDTH => MAC_DATA_WIDTH,
             MAC_RESULT_WIDTH => MAC_RESULT_WIDTH
         )
@@ -55,9 +58,10 @@ begin
             clk => clk,
             rst => rst,
             clear => clear,
-            pixel_data => pixel_data,
-            weight_data => weight_data,
             compute_en => compute_en,
+            pixel_data => pixel_data,
+            channel_index => channel_index,
+            weight_data => weight_data,
             results => results,
             compute_done => compute_done
         );
@@ -81,12 +85,13 @@ begin
         variable expected_q : integer;
         variable raw_prod : integer;
         variable scaled_from_raw : integer;
+        variable sum_pixels : integer;
     begin
-        -- Initialize
-        rst <= '1';
-        clear <= '0';
-        compute_en <= '0';
-        pixel_data <= (others => '0');
+    -- Initialize
+    rst <= '1';
+    clear <= '0';
+    compute_en <= '0';
+    pixel_data <= (others => (others => '0'));
 
         -- Initialize weight data
         for i in 0 to NUM_FILTERS-1 loop
@@ -103,8 +108,11 @@ begin
         -- Helper: pulse compute_en for one clock
         -- Test case 1: Single computation
         report "Test 1: Single MAC computation";
-        pixel_data <= std_logic_vector(to_unsigned(10, MAC_DATA_WIDTH)); -- Pixel value = 10
-        compute_en <= '1';
+    -- Use channel 0 for the single-channel style tests
+    pixel_data <= (others => (others => '0'));
+    pixel_data(0) <= std_logic_vector(to_unsigned(10, MAC_DATA_WIDTH)); -- Pixel value = 10 on channel 0
+    channel_index <= 0;
+    compute_en <= '1';
         wait for CLK_PERIOD;
         compute_en <= '0';
 
@@ -128,8 +136,10 @@ begin
 
         -- Test case 2: Multiple accumulations
         report "Test 2: Multiple accumulations";
-        pixel_data <= std_logic_vector(to_unsigned(5, MAC_DATA_WIDTH)); -- Pixel value = 5
-        compute_en <= '1';
+    pixel_data <= (others => (others => '0'));
+    pixel_data(0) <= std_logic_vector(to_unsigned(5, MAC_DATA_WIDTH)); -- Pixel value = 5 on channel 0
+    channel_index <= 0;
+    compute_en <= '1';
         wait for CLK_PERIOD;
         compute_en <= '0';
 
@@ -157,9 +167,11 @@ begin
 
         wait for CLK_PERIOD * 2;
 
-        -- New computation after clear
-        pixel_data <= std_logic_vector(to_unsigned(3, MAC_DATA_WIDTH)); -- Pixel value = 3
-        compute_en <= '1';
+    -- New computation after clear (channel 0)
+    pixel_data <= (others => (others => '0'));
+    pixel_data(0) <= std_logic_vector(to_unsigned(3, MAC_DATA_WIDTH)); -- Pixel value = 3 on channel 0
+    channel_index <= 0;
+    compute_en <= '1';
         wait for CLK_PERIOD;
         compute_en <= '0';
 
@@ -181,8 +193,8 @@ begin
 
         -- Test case 4: Zero pixel
         report "Test 4: Zero pixel value";
-        pixel_data <= (others => '0'); -- Pixel value = 0
-        compute_en <= '1';
+    pixel_data <= (others => (others => '0')); -- Pixel value = 0 on all channels
+    compute_en <= '1';
         wait for CLK_PERIOD;
         compute_en <= '0';
 
@@ -211,7 +223,9 @@ begin
         wait for CLK_PERIOD * 2;
 
         -- Use pixel = -0.5 (Q1.6 => -0.5 * 64 = -32) and weight = +1.0 (Q1.6 => 64)
-        pixel_data <= std_logic_vector(to_signed(-32, MAC_DATA_WIDTH)); -- -0.5 in Q1.6
+        pixel_data <= (others => (others => '0'));
+        pixel_data(0) <= std_logic_vector(to_signed(-32, MAC_DATA_WIDTH)); -- -0.5 in Q1.6 on channel 0
+        channel_index <= 0;
         for i in 0 to NUM_FILTERS-1 loop
             weight_data(i) <= std_logic_vector(to_signed(64, MAC_DATA_WIDTH)); -- 1.0 in Q1.6
         end loop;
@@ -229,7 +243,7 @@ begin
             -- Interpret results as signed integer
             res_signed := to_integer(signed(results(i)));
             -- Compute raw product (full-width) and expected Q1.6 scaled value
-            raw_prod := to_integer(signed(pixel_data)) * to_integer(signed(weight_data(i)));
+            raw_prod := to_integer(signed(pixel_data(channel_index))) * to_integer(signed(weight_data(i)));
             expected_q := raw_prod / 64; -- Q1.6 expected (arithmetic shift)
             -- If DUT returned raw product (Q2.12), scaled_from_raw equals expected_q
             scaled_from_raw := res_signed / 64;
@@ -253,6 +267,39 @@ begin
         report "Convolution engine test completed successfully!";
 
         wait for CLK_PERIOD * 10;
+        -- Additional Test: multi-channel accumulation
+        report "Test 6: Multi-channel accumulation across INPUT_CHANNELS";
+        -- Clear accumulators
+        clear <= '1';
+        wait for CLK_PERIOD;
+        clear <= '0';
+        wait for CLK_PERIOD * 2;
+
+        -- Set weights to (i+1) and pixels per channel to distinct values 1..INPUT_CHANNELS
+        for i in 0 to NUM_FILTERS-1 loop
+            weight_data(i) <= std_logic_vector(to_signed(i + 1, MAC_DATA_WIDTH));
+        end loop;
+        for ch in 0 to INPUT_CHANNELS-1 loop
+            pixel_data(ch) <= std_logic_vector(to_signed(ch + 1, MAC_DATA_WIDTH));
+        end loop;
+        -- Stream through channels, issuing a compute for each
+        for ch in 0 to INPUT_CHANNELS-1 loop
+            channel_index <= ch;
+            compute_en <= '1';
+            wait for CLK_PERIOD;
+            compute_en <= '0';
+            wait until compute_done = (compute_done'range => '1');
+            wait for CLK_PERIOD/2;
+        end loop;
+
+        -- Verify accumulated result: sum_{ch}(ch+1) * (i+1) = (INPUT_CHANNELS*(INPUT_CHANNELS+1)/2) * (i+1)
+        sum_pixels := (INPUT_CHANNELS * (INPUT_CHANNELS + 1)) / 2;
+        for i in 0 to NUM_FILTERS-1 loop
+            assert to_integer(unsigned(results(i))) = sum_pixels * (i + 1)
+                report "Error: Multi-channel accumulation mismatch for filter " & integer'image(i) &
+                       ", expected " & integer'image(sum_pixels * (i + 1)) & " but got " & integer'image(to_integer(unsigned(results(i))))
+                severity error;
+        end loop;
 
         test_done <= true;
         wait;

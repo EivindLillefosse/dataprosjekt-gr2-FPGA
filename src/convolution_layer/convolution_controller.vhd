@@ -30,8 +30,9 @@ entity convolution_controller is
         weight_load_req   : out std_logic;
         weight_kernel_row : out integer range 0 to KERNEL_SIZE-1;
         weight_kernel_col : out integer range 0 to KERNEL_SIZE-1;
-        weight_data_valid : in  std_logic;
-    -- (bias handled locally in top module)
+        weight_channel    : out integer range 0 to NUM_FILTERS-1;
+         
+        -- (bias handled locally in conv top module)
                 
         -- Position calculator interface  
         pos_advance   : out std_logic;
@@ -57,7 +58,8 @@ end convolution_controller;
 
 architecture Behavioral of convolution_controller is
 
-    type state_type is (IDLE, LOAD_WEIGHTS, WAIT_WEIGHTS, LOAD_DATA, COMPUTE, POST_COMPUTE, OUTPUT_WAIT);
+    -- Add PIXEL_DONE state to generate a one-cycle compute_clear and pos_advance pulse
+    type state_type is (IDLE, LOAD_WEIGHTS, WAIT_WEIGHTS, LOAD_DATA, COMPUTE, PIXEL_DONE, POST_COMPUTE, OUTPUT_WAIT);
     signal current_state : state_type := IDLE;
     signal next_state_sig    : state_type := IDLE;
     -- Registered outputs next-value signals
@@ -92,16 +94,16 @@ begin
     end process;
 
     -- Combinational next-state and output logic (Moore-style outputs assigned here)
-    fsm_comb : process(current_state, enable, weight_data_valid, input_valid, compute_done, region_done, output_ready, scaled_done, layer_done)
+    fsm_comb : process(current_state, enable, input_valid, compute_done, region_done, output_ready, scaled_done, layer_done)
         -- Local variable for next state (named 'next_state')
         variable next_state : state_type := IDLE;
         -- Local combinational next-values for outputs
-        variable v_weight_load_req : std_logic := '0';
         variable v_pos_advance     : std_logic := '0';
         variable v_compute_en      : std_logic := '0';
         variable v_compute_clear   : std_logic := '0';
         variable v_input_ready     : std_logic := '0';
         variable v_output_valid    : std_logic := '0';
+        variable v_current_channel : integer range 0 to NUM_FILTERS-1 := 0;
     begin
 
         -- Default next state is to remain; capture current state into variable
@@ -109,7 +111,7 @@ begin
 
         -- Default outputs (variables) already '0'
 
-        case current_state is
+    case current_state is
             when IDLE =>
                 -- stay idle until enabled
                 if enable = '1' then
@@ -118,60 +120,67 @@ begin
 
             when LOAD_WEIGHTS =>
                 -- request weight bundle
-                v_weight_load_req := '1';
-                if weight_data_valid = '1' then
-                    next_state := LOAD_DATA;
-                end if;
+                next_state    := LOAD_DATA;
 
             when LOAD_DATA =>
                 -- wait for input pixel
                 v_input_ready := '1';
                 if input_valid = '1' then
                     next_state := COMPUTE;
+                    v_compute_en := '1';
                 end if;
 
             when COMPUTE =>
-                v_compute_en := '1';
+                -- compute_en is pulsed on the transition into COMPUTE (from LOAD_DATA)
+                -- wait for the MAC/engine to assert compute_done, then proceed to POST_COMPUTE
+                v_compute_en := '0';
                 if all_ones(compute_done) then
-                    next_state := POST_COMPUTE;
+                    if weight_channel < NUM_FILTERS-1 then
+                        v_current_channel := 0;
+                        v_pos_advance := '1';
+                        next_state := POST_COMPUTE;
+                    else
+                        v_current_channel := v_current_channel + 1;
+                        next_state := LOAD_WEIGHTS;
+                    end if;
                 end if;
 
             when POST_COMPUTE =>
                 -- request downstream processing (scaling/ReLU)
-                v_output_valid := '1';
+                v_pos_advance  := '0';
                 if region_done = '1' then
-                    if output_ready = '1' then
-                        if scaled_done = '1' then
-                            v_compute_clear := '1';
-                            v_pos_advance := '1';
-                            v_output_valid := '0';
-                            if layer_done = '1' then
-                                next_state := IDLE;
-                            else
-                                next_state := LOAD_WEIGHTS;
-                            end if;
-                        end if;
-                    else
-                        next_state := OUTPUT_WAIT;
-                    end if;
+                    v_output_valid := '1';
+                    next_state := PIXEL_DONE;
                 else
                     -- continue current region
-                    v_output_valid := '0';
-                    v_pos_advance := '1';
                     next_state := LOAD_WEIGHTS;
                 end if;
+
+            when PIXEL_DONE =>
+                -- Pulse compute_clear and advance position for one cycle, then move to next region or layer
+                v_compute_clear := '1';
+                v_output_valid := '0';
+                if output_ready = '1' then
+                    if scaled_done = '1' then
+                        v_compute_clear := '0';
+                        -- Decide next state after the pixel-clear: if layer is done, go IDLE, else load next weights
+                        if layer_done = '1' then
+                            next_state := IDLE;
+                        else
+                            next_state := LOAD_WEIGHTS;
+                        end if;
+                    end if;
+                else
+                 next_state := OUTPUT_WAIT;
+                end if;
+                        
 
             when OUTPUT_WAIT =>
                 v_output_valid := '1';
                 if output_ready = '1' and scaled_done = '1' then
-                    v_compute_clear := '1';
-                    v_pos_advance := '1';
+                    -- downstream finished, move to PIXEL_DONE to perform per-pixel clear
                     v_output_valid := '0';
-                    if layer_done = '1' then
-                        next_state := IDLE;
-                    else
-                        next_state := LOAD_WEIGHTS;
-                    end if;
+                    next_state := PIXEL_DONE;
                 end if;
 
             when others =>
@@ -182,8 +191,8 @@ begin
         next_state_sig <= next_state;
 
         -- Commit combinational next-values to registered next signals
-        weight_load_req_n <= v_weight_load_req;
-        pos_advance_n     <= v_pos_advance;
+        weight_channel    <= v_current_channel;
+        pos_advance       <= v_pos_advance;
         compute_en_n      <= v_compute_en;
         compute_clear_n   <= v_compute_clear;
         input_ready_n     <= v_input_ready;
@@ -195,14 +204,12 @@ begin
     begin
         if rst = '1' then
             weight_load_req <= '0';
-            pos_advance     <= '0';
             compute_en      <= '0';
             compute_clear   <= '0';
             input_ready     <= '0';
             output_valid    <= '0';
         elsif rising_edge(clk) then
             weight_load_req <= weight_load_req_n;
-            pos_advance     <= pos_advance_n;
             compute_en      <= compute_en_n;
             compute_clear   <= compute_clear_n;
             input_ready     <= input_ready_n;

@@ -17,6 +17,11 @@
 -- Additional Comments:
 -- 
 ----------------------------------------------------------------------------------
+-- The MAC unit performs a multiply-accumulate operation over multiple clock cycles.
+-- Start it by pulsing 'start'. The multiplication takes 1 cycle, and accumulation takes another cycle.
+-- When the MAC is done with the operation, it pulses 'done' high for 1 cycle.
+-- Clear the accumulator by pulsing 'clear' high for 1 cycle.
+--------------------------------------------------------------------------------
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -66,6 +71,9 @@ begin
          -- Always sample clear signal
          reg_load <= clear;
          
+         -- default: done is low unless set later in this clock
+         done <= '0';
+         
          -- Clear adder_out when clear is asserted
          if clear = '1' then
             adder_out <= (others => '0');
@@ -98,6 +106,7 @@ begin
                
                when others =>
                   running <= '0';
+                  done <= '0';
             end case;
          end if;
       end if;

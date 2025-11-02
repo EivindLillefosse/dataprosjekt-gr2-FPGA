@@ -137,6 +137,32 @@ begin
             report "FAIL: Test 1 - unexpected result: " & integer'image(result_int) & ", expected Q2.12=" & integer'image(expected_q212);
         end if;
 
+        -- Test 1b: ff x 1 (pixel = -1 (0xFF Q1.6), weight = 1)
+        report "--- Test 1b: ff x 1 ---";
+        -- Clear accumulator first
+        clear <= '1';
+        wait for CLK_PERIOD;
+        clear <= '0';
+        -- Apply raw byte values: pixel = 0xFF (-1), weight = 0x01 (1)
+        pixel_in <= to_signed(-1, 8); -- raw byte 0xFF
+        weights <= to_signed(1, 8);   -- raw byte 0x01
+        wait for CLK_PERIOD;
+        start <= '1';
+        wait for CLK_PERIOD;
+        start <= '0';
+        wait until done = '1' for CLK_PERIOD * 3;
+        wait for CLK_PERIOD;
+        result_int := to_integer(result);
+        report "Result (ff x 1): " & integer'image(result_int);
+        -- Expected (raw bytes): -1 * 1 => -1 (no Q-scaling since inputs were raw)
+        expected_q16 := -1; -- reuse variable for raw product
+        expected_q212 := expected_q16; -- compare directly to DUT output
+        if result_int = expected_q212 then
+            report "PASS: Test 1b - ff x 1 matches raw expected value (" & integer'image(expected_q212) & ")";
+        else
+            report "FAIL: Test 1b - unexpected result: " & integer'image(result_int) & ", expected raw=" & integer'image(expected_q212);
+        end if;
+
         wait for CLK_PERIOD * 2;
 
         -- Test 2: Accumulation of 3 products

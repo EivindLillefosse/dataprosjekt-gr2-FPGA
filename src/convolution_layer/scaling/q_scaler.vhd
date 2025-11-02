@@ -23,7 +23,8 @@ entity q_scaler is
         NUM_CHANNELS : integer := 8;        -- Number of parallel channels to scale
         INPUT_WIDTH  : integer := 16;       -- Q2.12 width
         OUTPUT_WIDTH : integer := 8;        -- Q1.6 width
-        SHIFT_AMOUNT : integer := 6         -- Bits to shift (12 - 6 = 6)
+        SHIFT_AMOUNT : integer := 6;        -- Bits to shift (12 - 6 = 6)
+        SKIP_SHIFT   : boolean := TRUE     -- If true, bypass rounding and right shift (pass-through)
     );
     Port (
         clk        : in STD_LOGIC;
@@ -73,18 +74,24 @@ begin
                         -- read input
                         input_s := signed(data_in(i));
 
-                        -- symmetric round-to-nearest: add ROUND for non-negative, subtract ROUND for negative
-                        if input_s >= 0 then
-                            in_signed := input_s + to_signed(ROUND_INT, INPUT_WIDTH);
+                        if SKIP_SHIFT then
+                            -- Bypass scaling: treat input as already in target Q-format
+                            -- Direct conversion to integer (no rounding or shift)
+                            shifted_int := to_integer(input_s);
                         else
-                            in_signed := input_s - to_signed(ROUND_INT, INPUT_WIDTH);
+                            -- symmetric round-to-nearest: add ROUND for non-negative, subtract ROUND for negative
+                            if input_s >= 0 then
+                                in_signed := input_s + to_signed(ROUND_INT, INPUT_WIDTH);
+                            else
+                                in_signed := input_s - to_signed(ROUND_INT, INPUT_WIDTH);
+                            end if;
+
+                            -- arithmetic right shift by SHIFT_AMOUNT
+                            shifted_s := shift_right(in_signed, SHIFT_AMOUNT);
+
+                            -- convert to integer for easy clamping
+                            shifted_int := to_integer(shifted_s);
                         end if;
-
-                        -- arithmetic right shift by SHIFT_AMOUNT
-                        shifted_s := shift_right(in_signed, SHIFT_AMOUNT);
-
-                        -- convert to integer for easy clamping
-                        shifted_int := to_integer(shifted_s);
 
                         -- clamp to 8-bit signed range
                         if shifted_int > MAX_INT then

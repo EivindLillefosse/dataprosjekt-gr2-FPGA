@@ -19,6 +19,7 @@ use work.types_pkg.all;
 entity convolution_engine is
     generic (
         NUM_FILTERS     : integer := 8;
+        INPUT_CHANNELS  : integer := 1;
         MAC_DATA_WIDTH  : integer := 8;
         MAC_RESULT_WIDTH: integer := 16
     );
@@ -26,10 +27,13 @@ entity convolution_engine is
         clk          : in  std_logic;
         rst          : in  std_logic;
         clear        : in  std_logic;
-        -- Input data
-        pixel_data   : in  std_logic_vector(MAC_DATA_WIDTH-1 downto 0);
-        weight_data  : in  WORD_ARRAY(0 to NUM_FILTERS-1);
         compute_en   : in  std_logic;
+        
+        -- Input data (multi-channel input bus)
+        pixel_data   : in  WORD_ARRAY(0 to INPUT_CHANNELS-1);
+        channel_index: in  integer range 0 to INPUT_CHANNELS-1;
+        weight_data  : in  WORD_ARRAY(0 to NUM_FILTERS-1);
+        
         -- Results
         results      : out WORD_ARRAY_16(0 to NUM_FILTERS-1);
         compute_done : out std_logic_vector(NUM_FILTERS-1 downto 0)
@@ -47,9 +51,6 @@ architecture Behavioral of convolution_engine is
     signal results_s    : signed_result_array(0 to NUM_FILTERS-1);
 begin
 
-    -- Convert input pixel to signed once
-    pixel_data_s <= signed(pixel_data);
-
     -- Generate MAC instances for each filter
     mac_gen : for i in 0 to NUM_FILTERS-1 generate
         mac_inst : entity work.MAC
@@ -62,7 +63,7 @@ begin
                 clk      => clk,
                 clear    => clear,
                 start    => compute_en,
-                pixel_in => pixel_data_s,
+                pixel_in => signed(pixel_data(channel_index)),
                 weights  => signed(weight_data(i)),
                 done     => compute_done(i),
                 result   => results_s(i)

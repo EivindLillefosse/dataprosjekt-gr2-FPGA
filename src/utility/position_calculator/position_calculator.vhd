@@ -42,7 +42,8 @@ architecture Behavioral of position_calculator is
     signal current_col : integer := 0;
     signal current_region_row : integer range 0 to KERNEL_SIZE-1 := 0;
     signal current_region_col : integer range 0 to KERNEL_SIZE-1 := 0;
-    signal position_counter : integer := 1;
+    signal position_counter : integer := 0;  -- zero-based index into output positions
+    constant OUT_SIZE : integer := IMAGE_SIZE - KERNEL_SIZE + 1;
 
 begin
 
@@ -86,25 +87,26 @@ begin
                     region_done <= '1';
                     current_region_row <= 0;
                     current_region_col <= 0;
-                    
-                    -- Calculate next position using block pattern
-                    position_counter <= position_counter + 1;
-                    
-                    -- Generic block pattern calculation
-                    block_index := (position_counter) / (BLOCK_SIZE * BLOCK_SIZE);
-                    within_row := ((position_counter) mod (BLOCK_SIZE * BLOCK_SIZE)) / BLOCK_SIZE;
-                    within_col := (position_counter) mod BLOCK_SIZE;
-                    
-                    block_row := block_index / (IMAGE_SIZE / BLOCK_SIZE);
-                    block_col := block_index mod (IMAGE_SIZE / BLOCK_SIZE);
-                    
+                    -- Calculate current position using zero-based position_counter and OUT_SIZE
+                    -- Compute row/col from the current position_counter (before increment)
+                    block_index := position_counter / (BLOCK_SIZE * BLOCK_SIZE);
+                    within_row := (position_counter mod (BLOCK_SIZE * BLOCK_SIZE)) / BLOCK_SIZE;
+                    within_col := (position_counter mod (BLOCK_SIZE * BLOCK_SIZE)) mod BLOCK_SIZE;
+
+                    -- Use OUT_SIZE for block calculations to stay within valid output range
+                    block_row := block_index / (OUT_SIZE / BLOCK_SIZE);
+                    block_col := block_index mod (OUT_SIZE / BLOCK_SIZE);
+
                     current_row <= block_row * BLOCK_SIZE + within_row;
                     current_col <= block_col * BLOCK_SIZE + within_col;
+
+                    -- Advance position counter for next activation
+                    position_counter <= position_counter + 1;
                     
-                    -- Check if we've processed all positions
-                    if position_counter >= (IMAGE_SIZE * IMAGE_SIZE) then
+                    -- Check if we've processed all valid OUT_SIZE*OUT_SIZE positions
+                    if position_counter >= (OUT_SIZE * OUT_SIZE - 1) then
                         layer_done <= '1';
-                        position_counter <= 1;
+                        position_counter <= 0;
                         current_row <= 0;
                         current_col <= 0;
                     else
