@@ -126,8 +126,9 @@ begin
                 -- wait for input pixel
                 v_input_ready := '1';
                 if input_valid = '1' then
-                    next_state := COMPUTE;
+                    v_input_ready := '0';
                     v_compute_en := '1';
+                    next_state := COMPUTE;
                 end if;
 
             when COMPUTE =>
