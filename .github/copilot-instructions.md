@@ -5,12 +5,14 @@ These instructions give an AI coding assistant focused, actionable context for m
 ## 1. Big-picture architecture
 
 This is a VHDL-based CNN accelerator targeting Xilinx Artix-7 (7-series FPGAs). The design implements a modular CNN with:
+
 - **CNN Pipeline**: Conv1 (28×28×1 → 26×26×8) → Pool1 (13×13×8) → Conv2 (13×13×8 → 11×11×16) → Pool2 (5×5×16)
 - **Fixed-Point Arithmetic**: Q1.6 format (8-bit) for weights/activations, Q2.12 (16-bit) for MAC results
 - **Memory**: Block RAM IPs store weights (MSB-first packing), bias constants in `bias_pkg.vhd`
 - **Processing Model**: Time-multiplexed convolution (one MAC per filter, channels streamed sequentially)
 
 ### Key folders:
+
 - `src/` — VHDL sources organized by component (CNN/, convolution_layer/, Max_pooling/, activation/, memory/, utility/)
 - `src/utility/types.vhd` — Core type definitions: `WORD`, `WORD_ARRAY`, `WORD_ARRAY_16`
 - `src/convolution_layer/bias_pkg.vhd` — Generated bias constants (layer_0_conv2d_BIAS, layer_2_conv2d_1_BIAS, etc.)
@@ -23,6 +25,7 @@ This is a VHDL-based CNN accelerator targeting Xilinx Artix-7 (7-series FPGAs). 
 ## 2. Developer workflows (how to build/run/test)
 
 ### Model training and FPGA export (Python):
+
 ```powershell
 # From repo root
 python -m venv .venv
@@ -30,9 +33,11 @@ python -m venv .venv
 pip install -r requirements.txt
 python model/CNN.py
 ```
+
 This generates COE files in `model/fpga_weights_and_bias/` and `intermediate_values.npz` for verification.
 
 ### Create Vivado project:
+
 ```powershell
 # Batch mode (discovers COE files, creates BRAM IPs, sets up project)
 vivado -mode batch -source ./scripts/create-project.tcl
@@ -42,6 +47,7 @@ vivado -mode batch -source ./scripts/create-project.tcl
 ```
 
 ### Run testbenches:
+
 ```powershell
 # All testbenches
 vivado -mode batch -source ./scripts/run-all-testbenches.tcl 2>&1 | Select-String -Pattern "^(?!#)" -CaseSensitive
@@ -56,6 +62,7 @@ vivado -mode batch -source ./scripts/run-single-testbench.tcl -tclargs MAC
 Test artifacts: `testbench_logs/<test>_<timestamp>/` (simulator logs, `pass_trace.log`, `root_errors.log`, aggregated report)
 
 ### Environment variables for testing:
+
 - `VIVADO_TEST_ISOLATE=1` — Re-open project for each test (fresh context, slower)
 - `VIVADO_TEST_CLEAN=1` — Force clean simulation (delete xsim folders)
 - `VIVADO_TEST_TIMEOUT_NS` — Override default simulation timeout (nanoseconds)
@@ -63,6 +70,7 @@ Test artifacts: `testbench_logs/<test>_<timestamp>/` (simulator logs, `pass_trac
 ## 3. Project-specific conventions and patterns
 
 ### Type system (src/utility/types.vhd):
+
 - `WORD` = `std_logic_vector(7 downto 0)` (8-bit Q1.6 format)
 - `WORD_ARRAY` = `array (natural range <>) of WORD` (unconstrained, index `0 to N-1`)
 - `OUTPUT_WORD` = `std_logic_vector(15 downto 0)` (16-bit Q2.12 MAC results)
@@ -71,12 +79,14 @@ Test artifacts: `testbench_logs/<test>_<timestamp>/` (simulator logs, `pass_trac
 - **CRITICAL**: Use nested aggregates for multi-dimensional initialization: `(others => (others => '0'))`
 
 ### Bias package (src/convolution_layer/bias_pkg.vhd):
+
 - Generated from Python export, provides layer-specific bias constants
 - `layer_0_conv2d_t` (8 filters), `layer_2_conv2d_1_t` (16 filters), `layer_5_dense_t` (64), `layer_6_dense_1_t` (10)
 - Each element is `signed(7 downto 0)` in Q1.6 format
 - **Usage pattern**: Declare local flexible array `type bias_local_t is array (natural range <>) of signed(7 downto 0)`, then use generate blocks to copy from package constants (see conv_layer_modular.vhd)
 
 ### LAYER_ID generic pattern:
+
 - Used in `conv_layer_modular.vhd` and `weight_memory_controller.vhd`
 - Selects layer-specific BRAM IP and bias constants at elaboration time using generate blocks
 - Layer 0: `layer0_conv2d_weights` IP, `layer_0_conv2d_BIAS`
@@ -85,17 +95,20 @@ Test artifacts: `testbench_logs/<test>_<timestamp>/` (simulator logs, `pass_trac
 - **Validation**: Add elaboration-time assertions to check NUM_FILTERS matches bias array length
 
 ### Memory layout (BRAM packing):
+
 - **Weights**: MSB-first packing. For N filters: `douta(W*N-1 downto W*(N-1))` = filter 0, `douta(W-1 downto 0)` = filter N-1
 - **Address calculation**: `addr = ((kernel_row * K) + kernel_col) * C + channel` (K=kernel size, C=input channels)
 - **Unpacking**: Use generate blocks: `weight_data(i) <= weight_dout(W*N-1-i*W downto W*N-(i+1)*W)`
 - **Helper**: `clog2` function in weight_memory_controller.vhd computes address width
 
 ### File discovery and naming:
+
 - Testbenches **MUST** end with `_tb.vhd` to be discovered by automation
 - COE files **MUST** include header comments: `; Layer X:`, `; Original shape:` (weights) or `; Shape:` (biases)
 - BRAM IPs auto-named: `layerX_conv2d_weights`, `layerX_conv2d_biases` (X from COE header)
 
 ### Single-driver accumulator pattern (UG901-like):
+
 ```vhdl
 -- Synchronous sample of load/clear
 process(clk)
@@ -120,15 +133,18 @@ begin
     end if;
 end process;
 ```
+
 See `src/utility/MAC/MAC.vhd` for canonical example.
 
 ### Start/done handshake:
+
 - Many modules use `start` input pulse and `done` output pulse (single-cycle assertions)
 - **Pattern**: Default outputs low each clock, assert in the specific cycle you want the agent to see the event
 - **Synchronous**: Both start and done must be generated/sampled in clocked processes
 - **Example**: Convolution controller FSM asserts `compute_clear` for one cycle, then `compute_en`, then waits for `compute_done`
 
 ### FSM controller pattern:
+
 - **Two-process FSM**: Combinational `fsm_comb` (next-state logic) + synchronous `state_reg` (state transition)
 - **Three-process outputs**: Combinational compute next-values (`v_output_valid`, etc.), synchronous `outputs_reg` to drive actual outputs
 - **CRITICAL**: Do not read registered outputs in combinational logic (causes oscillation/latches)
@@ -138,25 +154,30 @@ See `src/utility/MAC/MAC.vhd` for canonical example.
 ## 4. Common pitfalls to avoid
 
 ### Type errors:
+
 - **Scalar vs. array**: `input_pixel` is `WORD_ARRAY(0 to C-1)`, not `WORD`. Use `input_pixel(0)` to access individual channels
 - **Type conversion order**: Index first, then convert: `signed(weight_data(i))` NOT `signed(weight_data)(i)`
 - **Generate block types**: Declare local flexible array types when copying from package constants with different sizes
 
 ### Signal initialization:
+
 - **Never rely on X (uninitialized) behavior**. Initialize all signals explicitly: `signal reg_mult : signed(...) := (others=>'0');`
 - **Reset logic**: Ensure all state/accumulator signals have synchronous reset branches
 
 ### Concurrent vs. sequential:
+
 - **Illegal**: Concurrent `if`/`elsif` outside process (VRFC 10-91 error). Use generate blocks with `if`/`elsif` instead.
 - **Single-driver rule**: Do not drive an output from both combinational and sequential processes
 - **Solution**: Use `v_*` next-value signals in combinational, register them synchronously
 
 ### Pipeline timing:
+
 - When changing MAC latency or convolution timing, update testbenches to wait for correct `done` timing
 - **MAC latency**: Typically 1 cycle multiply + 1 cycle accumulate (2 total)
 - **Convolution latency**: Kernel_size² × input_channels cycles per output pixel
 
 ### Testbench patterns:
+
 - Initialize clock and reset correctly (reset active for 2-3 cycles minimum)
 - Use `wait for <time>` NOT `wait until <condition>` for timeout safety
 - Check `valid` signals before sampling outputs
@@ -165,6 +186,7 @@ See `src/utility/MAC/MAC.vhd` for canonical example.
 ## 5. Important files to inspect when editing
 
 ### Core VHDL modules:
+
 - `src/utility/types.vhd` — All custom types, read this first
 - `src/convolution_layer/bias_pkg.vhd` — Generated bias constants (updated after retraining)
 - `src/utility/MAC/MAC.vhd` — MAC timing, accumulator pattern, start/done handshake
@@ -175,16 +197,19 @@ See `src/utility/MAC/MAC.vhd` for canonical example.
 - `src/CNN/cnn.vhd` — Top-level CNN, layer chaining, signal routing
 
 ### Automation scripts:
+
 - `scripts/create-project.tcl` — Project creation, file discovery, BRAM IP generation
 - `scripts/run-all-testbenches.tcl` — Batch test runner, environment variable handling
 - `scripts/run-single-testbench.tcl` — Single test runner for quick iteration
 - `scripts/create-memory-ips.tcl` — Standalone BRAM IP regeneration from COE files
 
 ### Python model:
+
 - `model/CNN.py` — Training, quantization, COE export, intermediate value generation
 - `model/fpga_weights_and_bias/` — Output COE files consumed by Vivado
 
 ### Testbenches (canonical examples):
+
 - `src/utility/MAC/MAC_tb.vhd` — Basic MAC test with clear/accumulate
 - `src/convolution_layer/engine/convolution_engine_tb.vhd` — Multi-channel convolution, array handling
 - `src/memory/weight_memory_controller_tb.vhd` — LAYER_ID testing, address validation
@@ -193,6 +218,7 @@ See `src/utility/MAC/MAC.vhd` for canonical example.
 ## 6. How to run targeted checks locally (recommended quick loop)
 
 ### Fast iteration cycle:
+
 1. Edit VHDL file
 2. Run single testbench: `vivado -mode batch -source ./scripts/run-single-testbench.tcl -tclargs <entity_name>`
 3. Inspect `testbench_logs/<entity>_<timestamp>/simulate.log` for immediate failures
@@ -200,6 +226,7 @@ See `src/utility/MAC/MAC.vhd` for canonical example.
 5. If pass, run full test suite before commit
 
 ### Quick verification:
+
 ```powershell
 # Check syntax/elaboration only (no simulation)
 vivado -mode batch -source scripts/create-project.tcl  # Recreates project, checks compile order
@@ -209,6 +236,7 @@ vivado -mode batch -source ./scripts/run-all-testbenches.tcl -tclargs MAC
 ```
 
 ### Debugging tips:
+
 - Use `report` statements in VHDL for runtime debug: `report "Value: " & integer'image(my_signal) severity note;`
 - Enable waveform capture in testbench: `open_wave_config`, `log_wave`, `add_wave`
 - Check compile order: scripts use `update_compile_order` to handle packages first
@@ -217,11 +245,13 @@ vivado -mode batch -source ./scripts/run-all-testbenches.tcl -tclargs MAC
 ## 7. When to open a PR vs. direct edits
 
 ### Direct commits to feature branch:
+
 - Small, local-only fixes to testbenches (typos, timing adjustments)
 - Single-file timing adjustments (e.g., wait statement changes)
 - Documentation updates
 
 ### PR required:
+
 - Design or API changes (interfaces, generics, signal polarity)
 - New components or modules
 - Changes affecting multiple files or modules
@@ -229,6 +259,7 @@ vivado -mode batch -source ./scripts/run-all-testbenches.tcl -tclargs MAC
 - **MUST include**: Updated testbenches and passing test run artifacts in `testbench_logs/`
 
 ### Before submitting PR:
+
 1. Run full testbench suite: `vivado -mode batch -source ./scripts/run-all-testbenches.tcl`
 2. Check `testbench_logs/` for any failures
 3. Commit test logs with PR (shows evidence of testing)
@@ -237,16 +268,20 @@ vivado -mode batch -source ./scripts/run-all-testbenches.tcl -tclargs MAC
 ## 8. Python model workflow
 
 ### Training and export:
+
 ```powershell
 cd model
 python CNN.py
 ```
+
 This generates:
+
 - `fpga_weights_and_bias/*.coe` — BRAM initialization files
 - `intermediate_values.npz` — Layer outputs for VHDL verification
 - `saved_model/`, `quantized_model.tflite` — TensorFlow artifacts
 
 ### COE file format (required header):
+
 ```coe
 ; Layer 0: conv2d weights (Q1.6 format)
 ; Original shape: (3, 3, 1, 8)
@@ -257,6 +292,7 @@ memory_initialization_vector=<hex_data>;
 ```
 
 ### Regenerate BRAM IPs after retraining:
+
 ```powershell
 # Update COE files, then:
 vivado -mode batch -source scripts/create-memory-ips.tcl
@@ -268,17 +304,20 @@ vivado -mode batch -source scripts/create-project.tcl
 ## 9. If you need more info
 
 ### Ask maintainer for:
+
 - Vivado version (tested with 2024.1, version compatibility critical)
 - Target part used in nightly runs (default: XC7A35TICSG324-1L)
 - Status of CI/CD pipeline (if applicable)
 - Specific layer timing requirements or resource constraints
 
 ### Useful Xilinx documentation:
+
 - UG901 (Vivado Synthesis Guide) — Single-driver patterns, accumulator design
 - UG953 (Vivado Design Suite Tcl Command Reference) — TCL scripting
 - PG058 (Block Memory Generator) — BRAM IP configuration
 
 ### Debug resources:
+
 - `testbench_logs/<test>_<timestamp>/simulate.log` — Full simulation transcript
 - `testbench_logs/<test>_<timestamp>/root_errors.log` — Aggregated errors/assertions
 - Vivado GUI: Open `vivado_project/CNN.xpr` for interactive debug (waveforms, elaborated design browser)
