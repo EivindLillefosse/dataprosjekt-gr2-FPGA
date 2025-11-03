@@ -34,8 +34,8 @@ def simulate_q_format_inference(model, x_test, q_format="Q3.4", verbose=True):
     
     for i, layer_weights in enumerate(original_weights):
         # Quantize to Q format
-        q_weights = np.round(layer_weights * q_scale)
-        q_weights = np.clip(q_weights, min_q_value, max_q_value)
+        q_weights = np.round(layer_weights * q_scale).astype(int)
+        q_weights = np.clip(q_weights, min_q_value, max_q_value).astype(int)
         
         # Convert back to float for simulation
         simulated_weights = q_weights / q_scale
@@ -44,6 +44,48 @@ def simulate_q_format_inference(model, x_test, q_format="Q3.4", verbose=True):
         if verbose:
             print(f"Layer {i}: Original range [{np.min(layer_weights):.6f}, {np.max(layer_weights):.6f}]")
             print(f"Layer {i}: Quantized range [{np.min(simulated_weights):.6f}, {np.max(simulated_weights):.6f}]")
+
+        # Helpful VHDL-style debug output: hex, binary and signed Q-format for some weights
+        def _to_unsigned_twos(val, bits):
+            # val is signed integer in range [min_q_value, max_q_value]
+            if val < 0:
+                return (1 << bits) + int(val)
+            return int(val)
+
+        def _int_to_hex(val, bits):
+            u = _to_unsigned_twos(val, bits)
+            nibbles = (bits + 3) // 4
+            fmt = '0x{:0' + str(nibbles) + 'X}'
+            return fmt.format(u)
+
+        def _int_to_bin(val, bits):
+            u = _to_unsigned_twos(val, bits)
+            return format(u, '0{}b'.format(bits))
+
+        def _int_to_q_decimal(val, frac_bits):
+            # interpret val as signed integer (already signed), convert to real
+            realv = float(val) / (2 ** frac_bits)
+            return f"{realv:.3f}"
+
+        if verbose:
+            bits = total_bits
+            sample = q_weights.flatten()[:8]
+            print(f"Layer {i} sample (int -> hex bin q{fractional_bits}):")
+            for v in sample:
+                print(f"  {int(v):4d} -> {_int_to_hex(int(v), bits)} {_int_to_bin(int(v), bits)} {_int_to_q_decimal(int(v), fractional_bits)}")
+
+            # Also write a per-layer debug file matching VHDL format (one value per line)
+            try:
+                fname = f"model/vhdl_debug_layer_{i}.txt"
+                with open(fname, 'w') as fh:
+                    fh.write("# val hex bin q_decimal\n")
+                    for v in q_weights.flatten():
+                        fh.write(f"{int(v)} {_int_to_hex(int(v), bits)} {_int_to_bin(int(v), bits)} {_int_to_q_decimal(int(v), fractional_bits)}\n")
+                if verbose:
+                    print(f"Wrote VHDL-style debug file: {fname}")
+            except Exception as e:
+                if verbose:
+                    print(f"Warning: could not write VHDL debug file for layer {i}: {e}")
         
         # Calculate quantization error
         mse_error = np.mean((layer_weights - simulated_weights)**2)

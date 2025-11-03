@@ -50,7 +50,6 @@ ip_repo/*
 *.bak
 *.orig
 *.swp
-.vscode
 *.npy
 *~
 
