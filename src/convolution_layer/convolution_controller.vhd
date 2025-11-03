@@ -115,6 +115,7 @@ begin
         next_state := current_state;
 
         -- Default outputs (variables) already '0'
+        v_pos_advance := '0';
 
     case current_state is
             when IDLE =>
@@ -134,6 +135,7 @@ begin
                     v_input_ready := '0';
                     v_compute_en := '1';
                     next_state := COMPUTE;
+                    v_pos_advance := '1';
                 end if;
 
             when COMPUTE =>
@@ -143,7 +145,6 @@ begin
                 if all_ones(compute_done) then
                     if weight_channel < NUM_FILTERS-1 then
                         v_current_channel := 0;
-                        v_pos_advance := '1';
                         next_state := POST_COMPUTE;
                     else
                         v_current_channel := v_current_channel + 1;

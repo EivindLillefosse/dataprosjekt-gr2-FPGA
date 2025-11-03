@@ -57,13 +57,14 @@ begin
         variable block_row, block_col : integer := 0;
         variable within_row, within_col : integer := 0;
         variable block_index : integer := 0;
+        variable next_pos_index : integer := 0;
     begin
         if rst = '1' then
             current_row <= 0;
             current_col <= 0;
             current_region_row <= 0;
             current_region_col <= 0;
-            position_counter <= 1;
+            position_counter <= 0;  -- start from first position (index 0)
             region_done <= '0';
             layer_done <= '0';
             block_row := 0;
@@ -71,46 +72,61 @@ begin
             within_row := 0;
             within_col := 0;
             block_index := 0;
-            
+            next_pos_index := 0;
+
         elsif rising_edge(clk) then
             if advance = '1' then
-                -- Advance within current kernel region
-                if current_region_col < KERNEL_SIZE - 1 then
-                    current_region_col <= current_region_col + 1;
+                -- If we previously signalled region_done, this pulse advances to the next position
+                if region_done = '1' then
+                    -- Clear the region_done pulse
                     region_done <= '0';
-                elsif current_region_row < KERNEL_SIZE - 1 then
-                    current_region_row <= current_region_row + 1;
-                    current_region_col <= 0;
-                    region_done <= '0';
-                else
-                    -- Region complete, move to next position
-                    region_done <= '1';
-                    current_region_row <= 0;
-                    current_region_col <= 0;
-                    -- Calculate current position using zero-based position_counter and OUT_SIZE
-                    -- Compute row/col from the current position_counter (before increment)
-                    block_index := position_counter / (BLOCK_SIZE * BLOCK_SIZE);
-                    within_row := (position_counter mod (BLOCK_SIZE * BLOCK_SIZE)) / BLOCK_SIZE;
-                    within_col := (position_counter mod (BLOCK_SIZE * BLOCK_SIZE)) mod BLOCK_SIZE;
-
-                    -- Use OUT_SIZE for block calculations to stay within valid output range
-                    block_row := block_index / (OUT_SIZE / BLOCK_SIZE);
-                    block_col := block_index mod (OUT_SIZE / BLOCK_SIZE);
-
-                    current_row <= block_row * BLOCK_SIZE + within_row;
-                    current_col <= block_col * BLOCK_SIZE + within_col;
-
-                    -- Advance position counter for next activation
-                    position_counter <= position_counter + 1;
-                    
-                    -- Check if we've processed all valid OUT_SIZE*OUT_SIZE positions
-                    if position_counter >= (OUT_SIZE * OUT_SIZE - 1) then
-                        layer_done <= '1';
+                    -- If layer was completed at the last region_done, clear layer_done and reset to start
+                    if layer_done = '1' then
+                        layer_done <= '0';
                         position_counter <= 0;
                         current_row <= 0;
                         current_col <= 0;
+                        current_region_row <= 0;
+                        current_region_col <= 0;
                     else
-                        layer_done <= '0';
+                        -- Advance to next position index and compute its row/col
+                        next_pos_index := position_counter + 1;
+                        -- compute block/within indexes for the next position
+                        block_index := next_pos_index / (BLOCK_SIZE * BLOCK_SIZE);
+                        within_row := (next_pos_index mod (BLOCK_SIZE * BLOCK_SIZE)) / BLOCK_SIZE;
+                        within_col := (next_pos_index mod (BLOCK_SIZE * BLOCK_SIZE)) mod BLOCK_SIZE;
+                        block_row := block_index / (OUT_SIZE / BLOCK_SIZE);
+                        block_col := block_index mod (OUT_SIZE / BLOCK_SIZE);
+
+                        current_row <= block_row * BLOCK_SIZE + within_row;
+                        current_col <= block_col * BLOCK_SIZE + within_col;
+
+                        position_counter <= next_pos_index;
+                        -- keep region indices at start for the new position
+                        current_region_row <= 0;
+                        current_region_col <= 0;
+                    end if;
+
+                else
+                    -- Normal within-region stepping for the current position
+                    if current_region_col < KERNEL_SIZE - 1 then
+                        current_region_col <= current_region_col + 1;
+                        region_done <= '0';
+                    elsif current_region_row < KERNEL_SIZE - 1 then
+                        current_region_row <= current_region_row + 1;
+                        current_region_col <= 0;
+                        region_done <= '0';
+                    else
+                        -- Region complete for the CURRENT position: assert region_done
+                        region_done <= '1';
+                        -- If this was the last valid output position, assert layer_done now
+                        if position_counter = (OUT_SIZE * OUT_SIZE - 1) then
+                            layer_done <= '1';
+                        else
+                            layer_done <= '0';
+                        end if;
+                        -- Do NOT advance position_counter or change current_row/current_col here;
+                        -- the next advance pulse will perform the move to the next position.
                     end if;
                 end if;
             end if;

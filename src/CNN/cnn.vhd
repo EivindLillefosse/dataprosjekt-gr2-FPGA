@@ -48,9 +48,9 @@ entity cnn_top is
         rst          : in  std_logic;
         enable       : in  std_logic;
 
-    -- Input interface
-    input_valid  : in  std_logic;
-    input_pixel  : in  WORD_ARRAY(0 to CONV_1_INPUT_CHANNELS-1);
+        -- Input interface
+        input_valid  : in  std_logic;
+        input_pixel  : in  WORD_ARRAY(0 to CONV_1_INPUT_CHANNELS-1);
         input_row    : out integer;
         input_col    : out integer;
         input_ready  : out std_logic;

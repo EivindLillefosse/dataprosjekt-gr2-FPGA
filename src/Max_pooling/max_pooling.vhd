@@ -33,12 +33,15 @@ entity max_pooling is
     port ( 
         clk             : in  std_logic;
         rst             : in  std_logic;
+
+        -- Input interface
         pixel_in_valid  : in  std_logic;                              -- New pixel available
         pixel_in_ready  : out std_logic;                              -- Ready to accept new pixel
         pixel_in        : in  WORD_ARRAY(0 to INPUT_CHANNELS-1);      -- Input pixel
         pixel_in_row    : in integer;                                 -- Input pixel row
         pixel_in_col    : in integer;                                 -- Input pixel column
 
+        -- Output interface
         pixel_out       : out WORD_ARRAY(0 to INPUT_CHANNELS-1);      -- Output pixel
         pixel_out_ready : out std_logic                               -- Output pixel valid
     );
