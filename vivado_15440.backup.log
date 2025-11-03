@@ -1,0 +1,52 @@
+#-----------------------------------------------------------
+# Vivado v2024.1 (64-bit)
+# SW Build 5076996 on Wed May 22 18:37:14 MDT 2024
+# IP Build 5075265 on Wed May 22 21:45:21 MDT 2024
+# SharedData Build 5076995 on Wed May 22 18:29:18 MDT 2024
+# Start of session at: Tue Oct 14 12:11:01 2025
+# Process ID: 15440
+# Current directory: C:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt
+# Command line: vivado.exe -mode batch -source create_clk_wiz.tcl
+# Log file: C:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt/vivado.log
+# Journal file: C:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt\vivado.jou
+# Running On        :NN-14
+# Platform          :Windows Server 2016 or Windows 10
+# Operating System  :26100
+# Processor Detail  :AMD Ryzen 9 8945HS w/ Radeon 780M Graphics
+# CPU Frequency     :3992 MHz
+# CPU Physical cores:8
+# CPU Logical cores :16
+# Host memory       :33601 MB
+# Swap memory       :2147 MB
+# Total Virtual     :35749 MB
+# Available Virtual :14211 MB
+#-----------------------------------------------------------
+source create_clk_wiz.tcl
+# open_project VGA_prosjekt.xpr
+INFO: [filemgmt 56-3] Default IP Output Path : Could not find the directory 'C:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt/VGA_prosjekt.gen/sources_1'.
+Scanning sources...
+Finished scanning sources
+open_project: Time (s): cpu = 00:00:08 ; elapsed = 00:00:09 . Memory (MB): peak = 628.227 ; gain = 201.191
+# create_ip -name clk_wiz -vendor xilinx.com -library ip -version 6.0 -module_name clk_wiz_0
+INFO: [IP_Flow 19-234] Refreshing IP repositories
+INFO: [IP_Flow 19-1704] No user IP repositories specified
+INFO: [IP_Flow 19-2313] Loaded Vivado IP repository 'C:/Xilinx/Vivado/2024.1/data/ip'.
+INFO: [Device 21-403] Loading part xc7a35tcsg324-1
+INFO: [Device 21-9227] Part: xc7a35tcsg324-1 does not have CEAM library.
+create_ip: Time (s): cpu = 00:00:06 ; elapsed = 00:00:08 . Memory (MB): peak = 1074.453 ; gain = 446.227
+# set_property -dict [list \
+#     CONFIG.PRIM_IN_FREQ {100.000} \
+#     CONFIG.CLKOUT1_USED {true} \
+#     CONFIG.CLKOUT1_REQUESTED_OUT_FREQ {25.000} \
+#     CONFIG.RESET_TYPE {ACTIVE_LOW} \
+#     CONFIG.RESET_PORT {resetn} \
+# ] [get_ips clk_wiz_0]
+# generate_target all [get_files *.xci]
+INFO: [IP_Flow 19-1686] Generating 'Instantiation Template' target for IP 'clk_wiz_0'...
+INFO: [IP_Flow 19-1686] Generating 'Synthesis' target for IP 'clk_wiz_0'...
+INFO: [IP_Flow 19-1686] Generating 'Simulation' target for IP 'clk_wiz_0'...
+INFO: [IP_Flow 19-1686] Generating 'Implementation' target for IP 'clk_wiz_0'...
+INFO: [IP_Flow 19-1686] Generating 'Change Log' target for IP 'clk_wiz_0'...
+# save_project
+ERROR: [Common 17-163] Missing value for option 'name', please type 'save_project_as -help' for usage info.
+INFO: [Common 17-206] Exiting Vivado at Tue Oct 14 12:11:25 2025...

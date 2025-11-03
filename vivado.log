@@ -1,0 +1,46 @@
+#-----------------------------------------------------------
+# Vivado v2024.1 (64-bit)
+# SW Build 5076996 on Wed May 22 18:37:14 MDT 2024
+# IP Build 5075265 on Wed May 22 21:45:21 MDT 2024
+# SharedData Build 5076995 on Wed May 22 18:29:18 MDT 2024
+# Start of session at: Tue Oct 14 12:26:07 2025
+# Process ID: 3784
+# Current directory: C:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt
+# Command line: vivado.exe -mode batch -source add_ip_simple.tcl
+# Log file: C:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt/vivado.log
+# Journal file: C:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt\vivado.jou
+# Running On        :NN-14
+# Platform          :Windows Server 2016 or Windows 10
+# Operating System  :26100
+# Processor Detail  :AMD Ryzen 9 8945HS w/ Radeon 780M Graphics
+# CPU Frequency     :3992 MHz
+# CPU Physical cores:8
+# CPU Logical cores :16
+# Host memory       :33601 MB
+# Swap memory       :2147 MB
+# Total Virtual     :35749 MB
+# Available Virtual :14559 MB
+#-----------------------------------------------------------
+source add_ip_simple.tcl
+# open_project VGA_prosjekt.xpr
+Scanning sources...
+Finished scanning sources
+INFO: [IP_Flow 19-234] Refreshing IP repositories
+INFO: [IP_Flow 19-1704] No user IP repositories specified
+INFO: [IP_Flow 19-2313] Loaded Vivado IP repository 'C:/Xilinx/Vivado/2024.1/data/ip'.
+WARNING: [IP_Flow 19-3664] IP 'clk_wiz_0' generated file not found 'c:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt/VGA_prosjekt.gen/sources_1/ip/clk_wiz_0/clk_wiz_0.dcp'. Please regenerate to continue.
+WARNING: [IP_Flow 19-3664] IP 'clk_wiz_0' generated file not found 'c:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt/VGA_prosjekt.gen/sources_1/ip/clk_wiz_0/clk_wiz_0_stub.v'. Please regenerate to continue.
+WARNING: [IP_Flow 19-3664] IP 'clk_wiz_0' generated file not found 'c:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt/VGA_prosjekt.gen/sources_1/ip/clk_wiz_0/clk_wiz_0_stub.vhdl'. Please regenerate to continue.
+WARNING: [IP_Flow 19-3664] IP 'clk_wiz_0' generated file not found 'c:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt/VGA_prosjekt.gen/sources_1/ip/clk_wiz_0/clk_wiz_0_sim_netlist.v'. Please regenerate to continue.
+WARNING: [IP_Flow 19-3664] IP 'clk_wiz_0' generated file not found 'c:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt/VGA_prosjekt.gen/sources_1/ip/clk_wiz_0/clk_wiz_0_sim_netlist.vhdl'. Please regenerate to continue.
+open_project: Time (s): cpu = 00:00:09 ; elapsed = 00:00:10 . Memory (MB): peak = 640.758 ; gain = 209.844
+# set ip_file "VGA_prosjekt.srcs/sources_1/ip/clk_wiz_0/clk_wiz_0.xci"
+# add_files -fileset sources_1 $ip_file
+CRITICAL WARNING: [IP_Flow 19-3389] Failed to import IP file 'C:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt/VGA_prosjekt.srcs/sources_1/ip/clk_wiz_0/clk_wiz_0.xci': IP name 'clk_wiz_0' is already in use in this project.  Please choose a different name.
+
+CRITICAL WARNING: [Vivado 12-1464] The source file 'C:/Users/nikno/Documents/DATAPROSJEKT/VGA_prosjekt/VGA_prosjekt.srcs/sources_1/ip/clk_wiz_0/clk_wiz_0.xci' cannot be added to the fileset 'sources_1'.
+# set_property used_in_synthesis true [get_files $ip_file]
+# set_property used_in_implementation true [get_files $ip_file]
+# save_project
+ERROR: [Common 17-163] Missing value for option 'name', please type 'save_project_as -help' for usage info.
+INFO: [Common 17-206] Exiting Vivado at Tue Oct 14 12:26:22 2025...
