@@ -1,1 +1,1 @@
-create_clock -name "TS_CLK" -period 20.0 [ get_ports clk ]
+
