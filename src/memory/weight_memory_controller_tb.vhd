@@ -22,21 +22,27 @@ end weight_memory_controller_tb;
 architecture Behavioral of weight_memory_controller_tb is
 
     -- Test parameters
-    constant NUM_FILTERS : integer := 8;
     constant KERNEL_SIZE : integer := 3;
-    constant ADDR_WIDTH  : integer := 7;
-    
+    -- Layer 0 has 8 filters, Layer 1 has 16 filters in this test
+    constant NUM_FILTERS_0 : integer := 8;
+    constant NUM_FILTERS_1 : integer := 16;
+    -- Input channel counts for each layer
+    constant NUM_INPUT_CHANNELS_0 : integer := 1;
+    constant NUM_INPUT_CHANNELS_1 : integer := 8;
+
     -- Clock period
     constant CLK_PERIOD : time := 10 ns;
     
     -- UUT signals
     signal clk         : std_logic := '0';
     signal rst         : std_logic := '0';
-    signal load_req    : std_logic := '0';
     signal kernel_row  : integer range 0 to KERNEL_SIZE-1 := 0;
     signal kernel_col  : integer range 0 to KERNEL_SIZE-1 := 0;
-    signal weight_data : WORD_ARRAY(0 to NUM_FILTERS-1);
-    signal data_valid  : std_logic;
+    -- Separate channel signals for each UUT to avoid range conflicts
+    signal channel_0   : integer range 0 to NUM_INPUT_CHANNELS_0-1 := 0; -- for layer0
+    signal channel_1   : integer range 0 to NUM_INPUT_CHANNELS_1-1 := 0; -- for layer1
+    signal weight_data : WORD_ARRAY(0 to NUM_FILTERS_0-1);
+    signal weight_data_1 : WORD_ARRAY(0 to NUM_FILTERS_1-1);
     
     -- Test control
     signal test_done : boolean := false;
@@ -48,18 +54,33 @@ begin
     -- Unit Under Test
     uut: entity work.weight_memory_controller
         generic map (
-            NUM_FILTERS => NUM_FILTERS,
+            NUM_FILTERS => NUM_FILTERS_0,
+            NUM_INPUT_CHANNELS => NUM_INPUT_CHANNELS_0,
             KERNEL_SIZE => KERNEL_SIZE,
-            ADDR_WIDTH => ADDR_WIDTH
+            LAYER_ID    => 0
         )
         port map (
             clk => clk,
-            rst => rst,
-            load_req => load_req,
             kernel_row => kernel_row,
             kernel_col => kernel_col,
-            weight_data => weight_data,
-            data_valid => data_valid
+            channel => channel_0,
+            weight_data => weight_data
+        );
+
+    -- Second instance to test alternative layer memory (LAYER_ID = 1)
+    uut_layer1: entity work.weight_memory_controller
+        generic map (
+            NUM_FILTERS => NUM_FILTERS_1,
+            NUM_INPUT_CHANNELS => NUM_INPUT_CHANNELS_1,
+            KERNEL_SIZE => KERNEL_SIZE,
+            LAYER_ID    => 1
+        )
+        port map (
+            clk => clk,
+            kernel_row => kernel_row,
+            kernel_col => kernel_col,
+            channel => channel_1,
+            weight_data => weight_data_1
         );
 
     -- Clock process
@@ -89,55 +110,82 @@ begin
         variable hist : hist_type := (others => 0);
         variable start_cycle : integer := 0;
         variable latency : integer := 0;
+        -- Threshold above which we consider BRAM latency a failure (assumption)
+        constant LATENCY_FAIL_THRESHOLD : integer := 4;
+
+        -- Helper: detect unknown/invalid bits in a std_logic_vector
+        function has_unknown(slv : std_logic_vector) return boolean is
+        begin
+            for i in slv'range loop
+                if slv(i) = 'U' or slv(i) = 'X' or slv(i) = 'Z' or slv(i) = '-' then
+                    return true;
+                end if;
+            end loop;
+            return false;
+        end function;
 
     begin
-        -- Initialize
-        rst <= '1';
-        load_req <= '0';
+    -- Initialize
+    rst <= '1';
         
-        wait for CLK_PERIOD * 2;
-        rst <= '0';
+    wait for CLK_PERIOD * 2;
+    rst <= '0';
         
-        wait for CLK_PERIOD * 2;
+    wait for CLK_PERIOD * 2;
         
         report "Starting weight memory controller test...";
         
         -- Test loading weights for different kernel positions and measure latency
 
-        -- Each load brings all 8 filter weights for that position
+        -- Each load brings all filter weights for that position and channel
         for row in 0 to KERNEL_SIZE-1 loop
             for col in 0 to KERNEL_SIZE-1 loop
-                -- Set up request
-                kernel_row <= row;
-                kernel_col <= col;
+                -- Iterate channels for layer1 (layer0 has only channel 0)
+                for ch in 0 to NUM_INPUT_CHANNELS_1-1 loop
+                    -- Set up request
+                    kernel_row <= row;
+                    kernel_col <= col;
+                    channel_0 <= 0;
+                    channel_1 <= ch;
 
-                -- Issue load request (pulse)
-                start_cycle := sim_cycle;
-                load_req <= '1';
-                wait for CLK_PERIOD;
-                load_req <= '0';
+                    -- Apply address and wait fixed 2 cycles (controller/BRAM synchronous read)
+                    start_cycle := sim_cycle;
+                    wait for CLK_PERIOD * 2;
+                    latency := sim_cycle - start_cycle;
+                    if latency < 0 then
+                        latency := 0;
+                    end if;
+                    if latency > MAX_LATENCY then
+                        hist(MAX_LATENCY) := hist(MAX_LATENCY) + 1;
+                    else
+                        hist(latency) := hist(latency) + 1;
+                    end if;
 
-                -- Wait for data_valid and measure latency
-                wait until data_valid = '1';
-                latency := sim_cycle - start_cycle;
-                if latency < 0 then
-                    latency := 0;
-                end if;
-                if latency > MAX_LATENCY then
-                    hist(MAX_LATENCY) := hist(MAX_LATENCY) + 1;
-                else
-                    hist(latency) := hist(latency) + 1;
-                end if;
+                    report "Loaded weights for kernel position [" & integer'image(row) & "," & integer'image(col) & "] channel=" & integer'image(ch) & " (latency=" & integer'image(latency) & " cycles)";
 
-                report "Loaded weights for kernel position [" & integer'image(row) & "," & integer'image(col) & "] (latency=" & integer'image(latency) & " cycles)";
+                    -- Display filter weights for Layer 0 (NUM_FILTERS_0)
+                    for filter in 0 to NUM_FILTERS_0-1 loop
+                        report "  L0 Filter " & integer'image(filter) & " weight = " & integer'image(to_integer(signed(weight_data(filter))));
+                        if has_unknown(weight_data(filter)) then
+                            report "ERROR: weight_data(" & integer'image(filter) & ") contains unknown bits at kernel position [" & integer'image(row) & "," & integer'image(col) & "] channel=" & integer'image(ch) severity failure;
+                        end if;
+                    end loop;
 
-                -- Display all 8 filter weights
-                for filter in 0 to NUM_FILTERS-1 loop
-                    report "  Filter " & integer'image(filter) & " weight = " & 
-                           integer'image(to_integer(signed(weight_data(filter))));
+                    -- Display filter weights for Layer 1 (NUM_FILTERS_1)
+                    for filter in 0 to NUM_FILTERS_1-1 loop
+                        report "  L1 Filter " & integer'image(filter) & " weight = " & integer'image(to_integer(signed(weight_data_1(filter))));
+                        if has_unknown(weight_data_1(filter)) then
+                            report "ERROR: weight_data_1(" & integer'image(filter) & ") contains unknown bits at kernel position [" & integer'image(row) & "," & integer'image(col) & "] channel=" & integer'image(ch) severity failure;
+                        end if;
+                    end loop;
+
+                    -- Fail on excessive latency (likely BRAM handshake/timing bug)
+                    if latency > LATENCY_FAIL_THRESHOLD then
+                        report "ERROR: BRAM read latency too long (" & integer'image(latency) & " cycles) for kernel position [" & integer'image(row) & "," & integer'image(col) & "] channel=" & integer'image(ch) severity failure;
+                    end if;
+
+                    wait for CLK_PERIOD;
                 end loop;
-
-                wait for CLK_PERIOD;
             end loop;
         end loop;
 
@@ -147,6 +195,13 @@ begin
             report "  cycles=" & integer'image(i) & " -> " & integer'image(hist(i));
         end loop;
         
+        -- If any histogram bucket beyond our threshold has entries, fail the test
+        for i in LATENCY_FAIL_THRESHOLD+1 to MAX_LATENCY loop
+            if hist(i) > 0 then
+                report "ERROR: Observed BRAM latency > " & integer'image(LATENCY_FAIL_THRESHOLD) & " cycles (hist bucket " & integer'image(i) & ")" severity failure;
+            end if;
+        end loop;
+
         report "Weight memory controller test completed successfully!";
         
         wait for CLK_PERIOD * 10;

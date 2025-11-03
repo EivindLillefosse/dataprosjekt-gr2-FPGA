@@ -1,6 +1,6 @@
 ----------------------------------------------------------------------------------
 -- Company: NTNU
--- Engineer: Eivind Lillefosse/Nikolai Nore
+-- Engineer: Eivind Lillefosse, Nikolai Nore
 -- 
 -- Create Date: 05.10.2025
 -- Design Name: ReLU Activation Layer

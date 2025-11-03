@@ -24,7 +24,8 @@ entity conv_layer_modular is
         INPUT_CHANNELS : integer := 1;
         NUM_FILTERS    : integer := 8;
         STRIDE         : integer := 1;
-        BLOCK_SIZE     : integer := 2
+        BLOCK_SIZE     : integer := 2;
+        LAYER_ID       : integer := 0
     );
     Port ( 
         clk            : in STD_LOGIC;
@@ -32,7 +33,7 @@ entity conv_layer_modular is
         enable         : in STD_LOGIC;
 
         input_valid    : in std_logic;
-        input_pixel    : in WORD;
+        input_pixel    : in WORD_ARRAY(0 to INPUT_CHANNELS-1);
         input_row      : out integer;
         input_col      : out integer;
         input_ready    : out std_logic;
@@ -55,7 +56,7 @@ architecture Behavioral of conv_layer_modular is
     signal weight_load_req   : std_logic;
     signal weight_kernel_row : integer range 0 to KERNEL_SIZE-1;
     signal weight_kernel_col : integer range 0 to KERNEL_SIZE-1;
-    signal weight_data_valid : std_logic;
+    signal weight_channel    : integer range 0 to INPUT_CHANNELS-1 := 0;
     signal weight_data       : WORD_ARRAY(0 to NUM_FILTERS-1);
     
     -- Position calculator signals
@@ -78,8 +79,9 @@ architecture Behavioral of conv_layer_modular is
     signal relu_data_out : WORD_ARRAY(0 to NUM_FILTERS-1); 
     signal relu_valid_out : std_logic;
 
-    -- Bias registers and biased result signals (use package-provided type)
-    signal bias_regs : layer_0_conv2d_t;
+    -- Bias registers and biased result signals (local flexible type sized by NUM_FILTERS)
+    type bias_local_t is array (natural range <>) of signed(7 downto 0);
+    signal bias_regs : bias_local_t(0 to NUM_FILTERS-1);
     signal biased_results : WORD_ARRAY_16(0 to NUM_FILTERS-1);
     
     -- Q-format scaling signals (Q2.12 -> Q1.6)
@@ -96,14 +98,18 @@ begin
     -- and explicitly map the ports. This avoids parser confusion in some
     -- tool versions when mixing generic/port maps across files.
     weight_mem_ctrl : entity work.weight_memory_controller
+        generic map (
+            NUM_FILTERS => NUM_FILTERS,
+            NUM_INPUT_CHANNELS => INPUT_CHANNELS,
+            KERNEL_SIZE => KERNEL_SIZE,
+            LAYER_ID    => LAYER_ID
+        )
         port map (
             clk        => clk,
-            rst        => rst,
-            load_req   => weight_load_req,
             kernel_row => weight_kernel_row,
             kernel_col => weight_kernel_col,
-            weight_data=> weight_data,
-            data_valid => weight_data_valid
+            channel    => weight_channel,
+            weight_data=> weight_data
         );
 
     -- Position Calculator
@@ -129,6 +135,7 @@ begin
     conv_engine : entity work.convolution_engine
         generic map (
             NUM_FILTERS => NUM_FILTERS,
+            INPUT_CHANNELS => INPUT_CHANNELS,
             MAC_DATA_WIDTH => 8,
             MAC_RESULT_WIDTH => 16
         )
@@ -137,6 +144,7 @@ begin
             rst => rst,
             clear => compute_clear,
             pixel_data => input_pixel,
+            channel_index => weight_channel,
             weight_data => weight_data,
             compute_en => compute_en,
             results => conv_results,
@@ -144,14 +152,38 @@ begin
         );
 
 
-    -- Drive bias_regs directly from generated bias package constant
-    bias_regs <= layer_0_conv2d_BIAS;
+    -- Drive bias_regs from the appropriate package constant using generate (handles differing sizes)
+    gen_bias_layer0 : if LAYER_ID = 0 generate
+        bias_assign0 : for i in 0 to NUM_FILTERS-1 generate
+            bias_regs(i) <= resize(layer_0_conv2d_BIAS(i), 8);
+        end generate;
+    end generate;
+
+    gen_bias_layer2 : if LAYER_ID = 1 generate
+        bias_assign2 : for i in 0 to NUM_FILTERS-1 generate
+            bias_regs(i) <= resize(layer_2_conv2d_1_BIAS(i), 8);
+        end generate;
+    end generate;
+
+    -- Elaboration-time checks: ensure NUM_FILTERS matches package bias sizes for chosen LAYER_ID
+    gen_check_layer0 : if LAYER_ID = 0 generate
+    begin
+        assert NUM_FILTERS = layer_0_conv2d_BIAS'length
+            report "conv_layer_modular: NUM_FILTERS must equal layer_0_conv2d_BIAS length when LAYER_ID=0" severity failure;
+    end generate;
+    gen_check_layer2 : if LAYER_ID = 1 generate
+    begin
+        assert NUM_FILTERS = layer_2_conv2d_1_BIAS'length
+            report "conv_layer_modular: NUM_FILTERS must equal layer_2_conv2d_1_BIAS length when LAYER_ID=1" severity failure;
+    end generate;
 
     -- Add bias to convolution results before ReLU
+    -- CRITICAL: Convert bias from Q1.6 to Q2.12 before adding to conv results
     biased_results_proc: process(conv_results, bias_regs)
     begin
         for i in 0 to NUM_FILTERS-1 loop
-            biased_results(i) <= std_logic_vector(signed(conv_results(i)) + bias_regs(i));
+            -- Add bias in Q2.12 format to conv_results (which are Q2.12)
+            biased_results(i) <= std_logic_vector(signed(conv_results(i)) + resize(bias_regs(i), 16));
         end loop;
     end process;
 
@@ -198,10 +230,17 @@ begin
             clk => clk,
             rst => rst,
             enable => enable,
+
+            -- Weight memory controller
             weight_load_req => weight_load_req,
             weight_kernel_row => weight_kernel_row,
             weight_kernel_col => weight_kernel_col,
-            weight_data_valid => weight_data_valid,
+            weight_channel => weight_channel,
+
+            -- Input interface
+            input_ready => input_ready,
+            input_valid => input_valid,
+
             -- bias ports removed (bias stored in registers)
             pos_advance => pos_advance,
             region_row => region_row,
@@ -211,11 +250,14 @@ begin
             compute_en => compute_en,
             compute_clear => compute_clear,
             compute_done => compute_done,
-            input_ready => input_ready,
-            input_valid => input_valid,
-            output_valid => scaler_valid_in,  -- Changed: now triggers scaler instead of ReLU
-            output_ready => output_ready,
-            scaled_done  => scaler_valid_out
+
+            -- Scaler 
+            scaled_ready => scaler_valid_in,
+            scaled_done  => scaler_valid_out,
+
+            -- Output interface
+            output_valid => output_valid,
+            output_ready => output_ready
         );
 
     -- Connect position information
@@ -226,7 +268,6 @@ begin
     output_pixel <= relu_data_out;
     output_row <= current_row;
     output_col <= current_col;
-    output_valid <= relu_valid_out;
     layer_done <= pos_layer_done;
 
 end Behavioral;
