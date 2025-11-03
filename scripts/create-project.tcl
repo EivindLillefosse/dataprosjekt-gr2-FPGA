@@ -7,7 +7,7 @@
 # Set default values
 set project_name "CNN"
 set project_dir "./vivado_project"
-set part_number "XC7A35TICSG324-1L"
+set part_number "XC7A100TCSG324-1"
 set top_module "top"
 set_param general.maxThreads 8
 
