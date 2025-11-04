@@ -37,6 +37,9 @@ entity calculation is
 end calculation;
 
 architecture Structural of calculation is
+    -- Intermediate signals for type conversion
+    type MAC_RESULT_ARRAY is array (0 to NODES-1) of signed(MAC_RESULT_WIDTH-1 downto 0);
+    signal mac_results : MAC_RESULT_ARRAY;
 
 begin
 
@@ -50,14 +53,16 @@ begin
             )
             port map (
                 clk      => clk,
-                rst      => rst,
-                pixel_in => pixel_data,
-                weights  => weight_data(i),
-                valid    => compute_en,
+                start    => compute_en,
                 clear    => clear,
-                result   => results(i),
-                done     => compute_done(i)
+                pixel_in => signed(pixel_data),
+                weights  => signed(weight_data(i)),
+                done     => compute_done(i),
+                result   => mac_results(i)
             );
+            
+        -- Convert signed MAC output to std_logic_vector for output port
+        results(i) <= std_logic_vector(mac_results(i));
     end generate;
 
 end Structural;

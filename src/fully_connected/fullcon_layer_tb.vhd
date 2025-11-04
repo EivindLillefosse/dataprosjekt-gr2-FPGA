@@ -35,8 +35,8 @@ architecture Behavioral of fullcon_layer_tb is
     constant FC2_OUTPUTS : integer := 10;
     
     -- Use reduced input count for faster testing
-    constant TEST_FC1_INPUTS : integer := 20;  -- Can be set to 400 for full test
-    constant TEST_FC2_INPUTS : integer := 10;  -- Can be set to 64 for full test
+    constant TEST_FC1_INPUTS : integer := 400;  -- MUST match FC1_INPUTS for controller to work!
+    constant TEST_FC2_INPUTS : integer := 64;   -- MUST match FC2_INPUTS for controller to work!
     
     -- Clock period
     constant CLK_PERIOD : time := 10 ns;
@@ -126,6 +126,7 @@ begin
     -- Clock process (shared for both layers)
     clk_process: process
     begin
+        report "Clock process starting...";
         while not test_done loop
             clk_fc1 <= '0';
             clk_fc2 <= '0';
@@ -134,6 +135,7 @@ begin
             clk_fc2 <= '1';
             wait for CLK_PERIOD/2;
         end loop;
+        report "Clock process stopped (test_done = true)";
         wait;
     end process;
 
@@ -214,24 +216,36 @@ begin
         report "========================================";
         
         enable_fc1 <= '1';
+        wait for CLK_PERIOD;  -- Let enable propagate
         
         report "Sending " & integer'image(TEST_FC1_INPUTS) & " pixels to FC1...";
+        report "input_ready_fc1 = " & std_logic'image(input_ready_fc1);
         
         -- Send input pixels
         for i in 0 to TEST_FC1_INPUTS-1 loop
-            -- Wait for ready
-            wait until input_ready_fc1 = '1';
-            wait until rising_edge(clk_fc1);
+            report "Loop iteration " & integer'image(i) & " starting...";
             
+            -- Wait for ready (should already be '1', but check anyway)
+            if input_ready_fc1 /= '1' then
+                wait until input_ready_fc1 = '1';
+            end if;
+            report "  Ready signal confirmed";
+            
+            -- Set inputs and wait for next clock edge
+            wait until rising_edge(clk_fc1);
             input_index_fc1 <= i;
             input_pixel_fc1 <= gen_pixel_value(i);
             input_valid_fc1 <= '1';
+            report "  Signals set: index=" & integer'image(i) & " pixel=" & integer'image(to_integer(unsigned(gen_pixel_value(i))));
             
-            wait for CLK_PERIOD;
+            -- Hold for one clock cycle
+            wait until rising_edge(clk_fc1);
             input_valid_fc1 <= '0';
+            report "  Valid deasserted";
+
             
             if i mod 50 = 0 then
-                report "  Sent pixel " & integer'image(i);
+                report "  Sent pixel " & integer'image(i) & " = " & integer'image(to_integer(unsigned(gen_pixel_value(i))));
             end if;
         end loop;
         
@@ -252,21 +266,32 @@ begin
         report "========================================";
         
         enable_fc2 <= '1';
+        wait for CLK_PERIOD;  -- Let enable propagate
         
         report "Sending " & integer'image(TEST_FC2_INPUTS) & " pixels to FC2...";
+        report "input_ready_fc2 = " & std_logic'image(input_ready_fc2);
         
         -- Send input pixels
         for i in 0 to TEST_FC2_INPUTS-1 loop
-            -- Wait for ready
-            wait until input_ready_fc2 = '1';
-            wait until rising_edge(clk_fc2);
+            report "FC2 Loop iteration " & integer'image(i) & " starting...";
             
+            -- Wait for ready (should already be '1', but check anyway)
+            if input_ready_fc2 /= '1' then
+                wait until input_ready_fc2 = '1';
+            end if;
+            report "  FC2 Ready signal confirmed";
+            
+            -- Set inputs and wait for next clock edge
+            wait until rising_edge(clk_fc2);
             input_index_fc2 <= i;
             input_pixel_fc2 <= gen_pixel_value(i + 100);  -- Different offset
             input_valid_fc2 <= '1';
+            report "  FC2 Signals set: index=" & integer'image(i) & " pixel=" & integer'image(to_integer(unsigned(gen_pixel_value(i + 100))));
             
-            wait for CLK_PERIOD;
+            -- Hold for one clock cycle
+            wait until rising_edge(clk_fc2);
             input_valid_fc2 <= '0';
+            report "  FC2 Valid deasserted";
         end loop;
         
         report "All FC2 inputs sent, waiting for output...";
@@ -296,13 +321,12 @@ begin
         -- Send inputs again with different values
         for i in 0 to TEST_FC1_INPUTS-1 loop
             wait until input_ready_fc1 = '1';
-            wait until rising_edge(clk_fc1);
             
             input_index_fc1 <= i;
             input_pixel_fc1 <= gen_pixel_value(i + 50);
             input_valid_fc1 <= '1';
             
-            wait for CLK_PERIOD;
+            wait until rising_edge(clk_fc1);
             input_valid_fc1 <= '0';
         end loop;
         

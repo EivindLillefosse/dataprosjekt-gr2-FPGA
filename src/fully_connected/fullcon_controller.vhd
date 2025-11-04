@@ -28,7 +28,7 @@ entity fullcon_controller is
         
         -- Input interface (from previous layer)
         input_valid : in  std_logic;
-        input_index : in  integer range 0 to NUM_INPUTS-1;
+        input_index : in  integer range 0 to NODES_IN-1;
         
         -- Control signals to calculation module
         calc_clear     : out std_logic;
@@ -46,7 +46,8 @@ architecture RTL of fullcon_controller is
     type state_type is (IDLE, PROCESSING, WAITING_MAC, DONE);
     signal state : state_type := IDLE;
     
-    signal input_count : integer range 0 to NUM_INPUTS := 0;
+    signal input_count : integer range 0 to NODES_IN := 0;
+    signal wait_counter : integer range 0 to 10 := 0;
 
 begin
     process(clk,rst)
@@ -54,10 +55,11 @@ begin
         if rst = '1' then
             state <= IDLE;
             input_count <= 0;
-            calc_clear <= 0;
-            calc_compute_en <= 0;
+            calc_clear <= '0';
+            calc_compute_en <= '0';
             output_valid <= '0';
             input_ready <= '1';
+            wait_counter <= 0;
 
         elsif rising_edge(clk) then
             calc_compute_en <= '0';
@@ -80,7 +82,7 @@ begin
                     if input_valid = '1' then
                         calc_compute_en <= '1';
                         
-                        if input_index = NUM_INPUTS - 1 then
+                        if input_index = NODES_IN - 1 then
                             wait_counter <= 0;
                             state <= WAITING_MAC;
                             input_ready <= '0';
@@ -102,9 +104,10 @@ begin
                         output_valid <= '0';
                         state <= IDLE;
                     end if;
+                
+                when others =>
+                    state <= IDLE;
                     
             end case;
         end if;
-    end process;
-
-end RTL;
+    end process;end RTL;

@@ -96,6 +96,7 @@ begin
         )
         port map (
             clk          => clk,
+            rst          => rst,
             clear        => calc_clear,
             pixel_data   => input_pixel,
             weight_data  => weight_data,
