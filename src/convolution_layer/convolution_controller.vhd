@@ -27,12 +27,12 @@ entity convolution_controller is
         rst           : in  std_logic;
         enable        : in  std_logic;
         
-    -- Memory controller interface
-    weight_load_req   : out std_logic;
-    weight_kernel_row : out integer range 0 to KERNEL_SIZE-1;
-    weight_kernel_col : out integer range 0 to KERNEL_SIZE-1;
-    -- Channel index (iterates over input channels, not filters)
-    weight_channel    : out integer range 0 to NUM_INPUT_CHANNELS-1;
+        -- Memory controller interface
+        weight_load_req   : out std_logic;
+        weight_kernel_row : out integer range 0 to KERNEL_SIZE-1;
+        weight_kernel_col : out integer range 0 to KERNEL_SIZE-1;
+        -- Channel index (iterates over input channels, not filters)
+        weight_channel    : out integer range 0 to NUM_INPUT_CHANNELS-1;
          
         -- (bias handled locally in conv top module)
                 
@@ -143,7 +143,6 @@ begin
                     v_input_ready := '0';
                     v_compute_en := '1';
                     next_state := COMPUTE;
-                    v_pos_advance := '1';
                 end if;
 
             when COMPUTE =>
@@ -152,20 +151,21 @@ begin
                 -- load the next input channel or finish the kernel accumulation and post-process
                 v_compute_en := '0';
                 if all_ones(compute_done) then
-                    -- If there are more input channels to process, increment channel and load weights
+                    -- Compute all channels for this kernel position
                     if v_current_channel < NUM_INPUT_CHANNELS - 1 then
                         v_current_channel := v_current_channel + 1;
-                        next_state := LOAD_WEIGHTS;
+                        v_compute_en := '1';
+                        next_state := COMPUTE;
                     else
                         -- All channels processed for this kernel position -> post-compute
                         v_current_channel := 0;
+                        v_pos_advance := '1';
                         next_state := POST_COMPUTE;
                     end if;
                 end if;
 
             when POST_COMPUTE =>
                 -- request downstream processing (scaling/ReLU)
-                v_pos_advance  := '0';
                 if region_done = '1' then
                     v_scaled_ready := '1';
                     next_state := PIXEL_DONE;
@@ -197,7 +197,6 @@ begin
                 if output_ready = '1' then
                     -- Do not clear v_output_valid here; keep it asserted for the current cycle
                     -- The next_state change will move the FSM and leave output_valid deasserted
-                    v_pos_advance := '1';
                     next_state := LOAD_WEIGHTS;
                 end if;
 

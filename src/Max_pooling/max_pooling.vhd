@@ -1,6 +1,6 @@
 ----------------------------------------------------------------------------------
 -- Company: NTNU
--- Engineer: Martin Nilsen
+-- Engineer: Martin Nilsen, Eivind Lillefosse
 -- 
 -- Create Date: 19.09.2025 13:20:31
 -- Design Name: Multiplier
@@ -8,7 +8,7 @@
 -- Project Name: CNN Accelerator
 -- Target Devices: Xilinx FPGA
 -- Tool Versions: 
--- Description: 
+-- Description: Max Pooling module for CNN Accelerator, implements NxN max pooling over input feature maps
 -- 
 -- Dependencies: 
 -- 
@@ -86,15 +86,15 @@ begin
                         if pixel_in_valid = '1' then
                             pixel_in_ready <= '1'; 
                             state <= RECEIVING;
+                            -- Update largest pixel for each channel
+                            for ch in 0 to INPUT_CHANNELS-1 loop
+                                if pixel_in(ch) > curr_largest(ch) then
+                                    curr_largest(ch) <= pixel_in(ch);
+                                end if;
+                            end loop;
                         end if;
                     
                     when RECEIVING =>
-                        -- Update largest pixel for each channel
-                        for ch in 0 to INPUT_CHANNELS-1 loop
-                            if pixel_in(ch) > curr_largest(ch) then
-                                curr_largest(ch) <= pixel_in(ch);
-                            end if;
-                        end loop;
                         -- Update counters
                         if pixel_count = to_unsigned(BLOCK_SIZE*BLOCK_SIZE - 1, pixel_count'length) then
                             pixel_out_ready <= '1';
@@ -106,10 +106,9 @@ begin
                         end if;
 
                     when DONE =>
-                        pixel_out_ready <= '1';
                         pixel_count <= (others => '0');
-                        pixel_out <= curr_largest;
-                        state <= IDLE;  -- Return to IDLE immediately
+                        curr_largest <= (others => (others => '0'));
+                        state <= IDLE; 
                 end case;
             end if;
         end if;

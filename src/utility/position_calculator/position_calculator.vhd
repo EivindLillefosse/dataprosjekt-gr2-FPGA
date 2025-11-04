@@ -76,13 +76,31 @@ begin
 
         elsif rising_edge(clk) then
             if advance = '1' then
-                -- If we previously signalled region_done, this pulse advances to the next position
-                if region_done = '1' then
-                    -- Clear the region_done pulse
+                -- Normal within-region stepping
+                if current_region_col < KERNEL_SIZE - 1 then
+                    current_region_col <= current_region_col + 1;
+                    -- Check if we just reached the last position
+                    if current_region_col + 1 = KERNEL_SIZE - 1 and current_region_row = KERNEL_SIZE - 1 then
+                        region_done <= '1';
+                    else
+                        region_done <= '0';
+                    end if;
+                    layer_done <= '0';
+                elsif current_region_row < KERNEL_SIZE - 1 then
+                    -- Move to next row in region
+                    current_region_row <= current_region_row + 1;
+                    current_region_col <= 0;
                     region_done <= '0';
-                    -- If layer was completed at the last region_done, clear layer_done and reset to start
-                    if layer_done = '1' then
-                        layer_done <= '0';
+                    layer_done <= '0';
+                else
+                    -- We're at the last position in the region (region_row=KERNEL_SIZE-1, region_col=KERNEL_SIZE-1)
+                    -- Advance to next output position
+                    region_done <= '0';  -- Clear region_done as we move to next position
+                    
+                    -- Check if this was the last valid output position
+                    if position_counter = (OUT_SIZE * OUT_SIZE - 1) then
+                        -- Last position - assert layer_done and reset to start
+                        layer_done <= '1';
                         position_counter <= 0;
                         current_row <= 0;
                         current_col <= 0;
@@ -90,8 +108,10 @@ begin
                         current_region_col <= 0;
                     else
                         -- Advance to next position index and compute its row/col
+                        layer_done <= '0';
                         next_pos_index := position_counter + 1;
-                        -- compute block/within indexes for the next position
+                        
+                        -- Compute block/within indexes for the next position
                         block_index := next_pos_index / (BLOCK_SIZE * BLOCK_SIZE);
                         within_row := (next_pos_index mod (BLOCK_SIZE * BLOCK_SIZE)) / BLOCK_SIZE;
                         within_col := (next_pos_index mod (BLOCK_SIZE * BLOCK_SIZE)) mod BLOCK_SIZE;
@@ -102,31 +122,9 @@ begin
                         current_col <= block_col * BLOCK_SIZE + within_col;
 
                         position_counter <= next_pos_index;
-                        -- keep region indices at start for the new position
+                        -- Reset region indices for the new position
                         current_region_row <= 0;
                         current_region_col <= 0;
-                    end if;
-
-                else
-                    -- Normal within-region stepping for the current position
-                    if current_region_col < KERNEL_SIZE - 1 then
-                        current_region_col <= current_region_col + 1;
-                        region_done <= '0';
-                    elsif current_region_row < KERNEL_SIZE - 1 then
-                        current_region_row <= current_region_row + 1;
-                        current_region_col <= 0;
-                        region_done <= '0';
-                    else
-                        -- Region complete for the CURRENT position: assert region_done
-                        region_done <= '1';
-                        -- If this was the last valid output position, assert layer_done now
-                        if position_counter = (OUT_SIZE * OUT_SIZE - 1) then
-                            layer_done <= '1';
-                        else
-                            layer_done <= '0';
-                        end if;
-                        -- Do NOT advance position_counter or change current_row/current_col here;
-                        -- the next advance pulse will perform the move to the next position.
                     end if;
                 end if;
             end if;

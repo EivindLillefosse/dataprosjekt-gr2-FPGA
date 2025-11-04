@@ -104,15 +104,13 @@ begin
 
     -- Convert BRAM output into WORD_ARRAY elements (WORD_SIZE bits per filter)
     -- Each WORD in the output corresponds to one filter's weight.
-    -- NOTE: Many BRAM initializations and memory generators pack the first
-    -- stored element into the MSB of the wide word. To match the model's
-    -- expected ordering, unpack MSB-first so that weight_data(0) receives the
-    -- top WORD (bits WORD_SIZE*NUM_FILTERS-1 downto WORD_SIZE*(NUM_FILTERS-1))
-    -- and weight_data(NUM_FILTERS-1) receives the bottom WORD (bits WORD_SIZE-1 downto 0).
+    -- Python packs LSB-first: filter 0 at bits [7:0], filter 1 at [15:8], etc.
+    -- So weight_data(0) receives the BOTTOM WORD (bits WORD_SIZE-1 downto 0)
+    -- and weight_data(NUM_FILTERS-1) receives the TOP WORD (bits WORD_SIZE*NUM_FILTERS-1 downto WORD_SIZE*(NUM_FILTERS-1)).
     gen_unpack_weights : for i in 0 to NUM_FILTERS-1 generate
-        -- MSB-first ordering: map weight_data(0) to the top WORD, weight_data(1)
-        -- to the next WORD down, etc.
-        weight_data(i) <= weight_dout(WORD_SIZE*NUM_FILTERS - 1 - i*WORD_SIZE downto WORD_SIZE*NUM_FILTERS - (i+1)*WORD_SIZE);
+        -- LSB-first ordering: map weight_data(0) to the bottom WORD, weight_data(1)
+        -- to the next WORD up, etc.
+        weight_data(i) <= weight_dout(i*WORD_SIZE + WORD_SIZE - 1 downto i*WORD_SIZE);
     end generate;
 
     -- Calculate weight address for the kernel position and channel
@@ -127,24 +125,16 @@ begin
     -- Simulation-only debug: print the unpacked weight_data for the first few addresses
     -- This is non-invasive (only reports) and helps check runtime byte-lane/address mapping.
     debug_proc: process(clk)
-        variable out_line : string(1 to 512);
-        variable i        : integer;
         variable idx_int  : integer;
     begin
         if rising_edge(clk) then
             -- only print for the first 4 addresses to avoid huge logs
             idx_int := to_integer(unsigned(weight_addr));
             if idx_int >= 0 and idx_int < 4 then
-                out_line := "WEIGHT_DBG addr=" & integer'image(idx_int) & " weights=[";
-                for i in 0 to NUM_FILTERS-1 loop
-                    -- print raw unsigned byte value for clarity
-                    out_line := out_line & integer'image(to_integer(unsigned(weight_data(i))));
-                    if i < NUM_FILTERS-1 then
-                        out_line := out_line & ",";
-                    end if;
-                end loop;
-                out_line := out_line & "]";
-                report out_line;
+                -- Print simplified debug info to avoid string size issues with large NUM_FILTERS
+                report "WEIGHT_DBG addr=" & integer'image(idx_int) & 
+                       " filter0=" & integer'image(to_integer(unsigned(weight_data(0)))) &
+                       " filterN=" & integer'image(to_integer(unsigned(weight_data(NUM_FILTERS-1))));
             end if;
         end if;
     end process;
