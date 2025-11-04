@@ -89,6 +89,9 @@ architecture Behavioral of conv_layer_modular is
     signal scaler_data_out  : WORD_ARRAY(0 to NUM_FILTERS-1);
     signal scaler_valid_out : std_logic;
 
+    -- Internal signal to capture controller's notion of output_valid (not used to drive module output)
+    signal ctrl_output_valid : std_logic := '0';
+
     -- Biases are provided by bias_pkg (generated from Python export)
 
 begin
@@ -220,11 +223,12 @@ begin
             valid_out => relu_valid_out
         );
 
-    -- Main Controller FSM
     controller : entity work.convolution_controller
         generic map (
             NUM_FILTERS => NUM_FILTERS,
-            KERNEL_SIZE => KERNEL_SIZE
+            KERNEL_SIZE => KERNEL_SIZE,
+            -- provide number of input channels so the controller can iterate channels
+            NUM_INPUT_CHANNELS => INPUT_CHANNELS
         )
         port map (
             clk => clk,
@@ -256,7 +260,7 @@ begin
             scaled_done  => scaler_valid_out,
 
             -- Output interface
-            output_valid => output_valid,
+            output_valid => ctrl_output_valid,
             output_ready => output_ready
         );
 
@@ -266,6 +270,8 @@ begin
     
     -- Connect outputs
     output_pixel <= relu_data_out;
+    -- Drive module output_valid from the ReLU producer (data-valid originates at relu)
+    output_valid <= relu_valid_out;
     output_row <= current_row;
     output_col <= current_col;
     layer_done <= pos_layer_done;

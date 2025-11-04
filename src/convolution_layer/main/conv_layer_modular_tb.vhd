@@ -430,22 +430,29 @@ begin
             if output_valid = '1' and output_ready = '1' then
                 report "Modular Output at position [" & integer'image(output_row) & "," & integer'image(output_col) & "]";
                 
-                -- MODULAR_OUTPUT header
+                -- MODULAR_OUTPUT header (include explicit metadata: scale and bitwidth)
                 write(debug_line, string'("MODULAR_OUTPUT: ["));
                 write(debug_line, output_row);
                 write(debug_line, ',');
                 write(debug_line, output_col);
                 write(debug_line, ']');
                 writeline(debug_file, debug_line);
-                
+
+                -- Output meta: include scale & bitwidth so external parsers know how to interpret values
+                write(debug_line, string'("OUTPUT_META: scale=64 bits=8"));
+                writeline(debug_file, debug_line);
+
                 for i in 0 to NUM_FILTERS-1 loop
-                    report "  Filter " & integer'image(i) & ": " & 
-                        integer'image(to_integer(signed(output_pixel(i))));
-                    -- Write filter output with Q2.12 formatting
+                    -- Human readable report (keeps existing reports for simulator console)
+                    report "  Filter " & integer'image(i) & ": " & integer'image(to_integer(signed(output_pixel(i))));
+
+                    -- Write filter output as hex (MSB-first) and unsigned decimal to avoid signed printing ambiguity
                     write(debug_line, string'("Filter_"));
                     write(debug_line, i);
-                    write(debug_line, string'(": "));
-                    write(debug_line, to_integer(signed(output_pixel(i))));
+                    write(debug_line, string'("_hex: "));
+                    write(debug_line, slv_to_hex(output_pixel(i)));
+                    write(debug_line, string'("  dec: "));
+                    write(debug_line, to_integer(unsigned(output_pixel(i))));
                     writeline(debug_file, debug_line);
                 end loop;
             end if;

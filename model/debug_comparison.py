@@ -28,6 +28,9 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
     cnn_re = re.compile(r'^(?:CNN_OUTPUT|MODULAR_OUTPUT):\s*\[(\d+),(\d+)\]')
     filter_re1 = re.compile(r'^Filter[_ ]?(\d+):\s*([0-9A-Fa-fx\-]+)')
     filter_re2 = re.compile(r'^Filter\s+(\d+)\s*:\s*([0-9A-Fa-fx\-]+)')
+    # New TB format: Filter_<i>_hex: 0x..  dec: N
+    filter_hex_re = re.compile(r'^Filter[_ ]?(\d+)_hex:\s*(0x[0-9A-Fa-f]+)')
+    filter_hex_dec_re = re.compile(r'^Filter[_ ]?(\d+)_hex:.*dec:\s*([0-9]+)')
 
     current = None
     try:
@@ -70,8 +73,29 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
                     outputs.append(current)
                     continue
 
-                # Filter lines following MODULAR_OUTPUT
+                # Filter lines following MODULAR_OUTPUT (support multiple formats)
                 if current is not None:
+                    # New hex format: prefer hex parsing (8-bit values)
+                    m_hex = filter_hex_re.match(line)
+                    if m_hex:
+                        idx = int(m_hex.group(1))
+                        hex_str = m_hex.group(2)
+                        # Interpret as 8-bit two's complement
+                        current['filters'][idx] = parse_int(hex_str, bits=8)
+                        current['raw_lines'].append(line)
+                        continue
+
+                    # If line contains hex but also 'dec: N', prefer hex; fallback to dec if needed
+                    m_hexdec = filter_hex_dec_re.match(line)
+                    if m_hexdec:
+                        idx = int(m_hexdec.group(1))
+                        dec_str = m_hexdec.group(2)
+                        # dec in TB is unsigned decimal; convert to signed 8-bit
+                        current['filters'][idx] = parse_int(dec_str, bits=8)
+                        current['raw_lines'].append(line)
+                        continue
+
+                    # Backwards-compatible formats
                     m3 = filter_re1.match(line) or filter_re2.match(line)
                     if m3:
                         idx = int(m3.group(1))
