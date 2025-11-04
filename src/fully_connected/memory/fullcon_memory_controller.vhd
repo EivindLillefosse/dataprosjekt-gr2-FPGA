@@ -52,13 +52,16 @@ architecture Behavioral of fullcon_memory_controller is
     -- Calculate required address width based on number of inputs
     constant WEIGHT_ADDRESSES : natural := NUM_INPUTS; -- total addresses
     constant ADDR_WIDTH : natural := clog2(WEIGHT_ADDRESSES);
+    
+    -- Calculate data width based on number of nodes
+    constant DATA_WIDTH : natural := WORD_SIZE * NUM_NODES;
 
     COMPONENT layer5_dense_weights
     PORT (
         clka : IN STD_LOGIC;
         ena : IN STD_LOGIC;
-        addra : IN STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0);
-        douta : OUT STD_LOGIC_VECTOR(WORD_SIZE*NUM_NODES-1 DOWNTO 0)
+        addra : IN STD_LOGIC_VECTOR;
+        douta : OUT STD_LOGIC_VECTOR
     );
     END COMPONENT;
 
@@ -66,14 +69,14 @@ architecture Behavioral of fullcon_memory_controller is
     PORT (
         clka : IN STD_LOGIC;
         ena : IN STD_LOGIC;
-        addra : IN STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0);
-        douta : OUT STD_LOGIC_VECTOR(WORD_SIZE*NUM_NODES-1 DOWNTO 0)
+        addra : IN STD_LOGIC_VECTOR;
+        douta : OUT STD_LOGIC_VECTOR
     );
     END COMPONENT;
 
     -- Internal signals
     signal weight_addr : std_logic_vector(ADDR_WIDTH-1 downto 0) := (others => '0');
-    signal weight_dout : std_logic_vector(WORD_SIZE*NUM_NODES-1 downto 0) := (others => '0');
+    signal weight_dout : std_logic_vector(DATA_WIDTH-1 downto 0) := (others => '0');
 
 begin
 
@@ -102,7 +105,7 @@ begin
     -- MSB-first ordering: map weight_data(0) to the top WORD, weight_data(1)
     -- to the next WORD down, etc.
     gen_unpack_weights : for i in 0 to NUM_NODES-1 generate
-        weight_data(i) <= weight_dout(WORD_SIZE*NUM_NODES - 1 - i*WORD_SIZE downto WORD_SIZE*NUM_NODES - (i+1)*WORD_SIZE);
+        weight_data(i) <= weight_dout(DATA_WIDTH - 1 - i*WORD_SIZE downto DATA_WIDTH - (i+1)*WORD_SIZE);
     end generate;
 
     -- Calculate weight address directly from pixel_index
