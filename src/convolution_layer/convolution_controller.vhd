@@ -184,6 +184,7 @@ begin
                 v_output_valid := '1';
                 if output_ready = '1' then
                     v_output_valid := '0';
+                    v_pos_advance := '1';
                     next_state := LOAD_WEIGHTS;
                 end if;
 
