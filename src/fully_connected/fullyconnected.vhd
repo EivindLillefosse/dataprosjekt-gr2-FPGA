@@ -97,8 +97,9 @@ begin
     -- Instantiate controller
     ctrl_inst : entity work.fullcon_controller
         generic map (
-            NUM_INPUTS  => NODES_IN,
-            NUM_OUTPUTS => NODES_OUT
+            NODES_IN   => NODES_IN,
+            NODES_OUT  => NODES_OUT,
+            LAYER_ID   => LAYER_ID
         )
         port map (
             clk           => clk,
