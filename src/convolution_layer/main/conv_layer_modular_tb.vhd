@@ -49,17 +49,27 @@ architecture Behavioral of conv_layer_modular_tb is
     signal rst : STD_LOGIC := '0';
     signal enable : STD_LOGIC := '0';
     
-    signal input_valid : std_logic := '0';
-    signal input_pixel : WORD_ARRAY(0 to INPUT_CHANNELS-1);
-    signal input_row : integer := 0;
-    signal input_col : integer := 0;
-    signal input_ready : std_logic;
+    -- Output request TO DUT (testbench acts as downstream)
+    signal pixel_out_req_row   : integer := 0;
+    signal pixel_out_req_col   : integer := 0;
+    signal pixel_out_req_valid : std_logic := '0';
+    signal pixel_out_req_ready : std_logic;
     
-    signal output_valid : std_logic;
-    signal output_pixel : WORD_ARRAY(0 to NUM_FILTERS-1);
-    signal output_row : integer;
-    signal output_col : integer;
-    signal output_ready : std_logic := '1';
+    -- Input request FROM DUT (testbench acts as upstream)
+    signal pixel_in_req_row    : integer;
+    signal pixel_in_req_col    : integer;
+    signal pixel_in_req_valid  : std_logic;
+    signal pixel_in_req_ready  : std_logic := '0';
+    
+    -- Input data TO DUT
+    signal pixel_in            : WORD_ARRAY(0 to INPUT_CHANNELS-1);
+    signal pixel_in_valid      : std_logic := '0';
+    signal pixel_in_ready      : std_logic;
+    
+    -- Output data FROM DUT
+    signal pixel_out           : WORD_ARRAY(0 to NUM_FILTERS-1);
+    signal pixel_out_valid     : std_logic;
+    signal pixel_out_ready     : std_logic := '0';
     
     signal layer_done : STD_LOGIC;
     
@@ -335,20 +345,24 @@ begin
             BLOCK_SIZE => BLOCK_SIZE
         )
         port map (
-            clk => clk,
-            rst => rst,
-            enable => enable,
-            input_valid => input_valid,
-            input_pixel => input_pixel,
-            input_row => input_row,
-            input_col => input_col,
-            input_ready => input_ready,
-            output_valid => output_valid,
-            output_pixel => output_pixel,
-            output_row => output_row,
-            output_col => output_col,
-            output_ready => output_ready,
-            layer_done => layer_done
+            clk                 => clk,
+            rst                 => rst,
+            enable              => enable,
+            pixel_out_req_row   => pixel_out_req_row,
+            pixel_out_req_col   => pixel_out_req_col,
+            pixel_out_req_valid => pixel_out_req_valid,
+            pixel_out_req_ready => pixel_out_req_ready,
+            pixel_in_req_row    => pixel_in_req_row,
+            pixel_in_req_col    => pixel_in_req_col,
+            pixel_in_req_valid  => pixel_in_req_valid,
+            pixel_in_req_ready  => pixel_in_req_ready,
+            pixel_in            => pixel_in,
+            pixel_in_valid      => pixel_in_valid,
+            pixel_in_ready      => pixel_in_ready,
+            pixel_out           => pixel_out,
+            pixel_out_valid     => pixel_out_valid,
+            pixel_out_ready     => pixel_out_ready,
+            layer_done          => layer_done
         );
 
     -- Clock process
@@ -363,37 +377,53 @@ begin
         wait;
     end process;
 
-    -- Input pixel provider process (combinatorial for same-cycle response)
-    input_provider: process(input_ready, input_row, input_col)
-    begin
-        if input_ready = '1' then
-            -- Check if the requested coordinates are valid
-                if input_row >= 0 and input_row < IMAGE_SIZE and 
-               input_col >= 0 and input_col < IMAGE_SIZE then
-                -- Assign into channel 0 (INPUT_CHANNELS=1 in this TB)
-                input_pixel(0) <= std_logic_vector(to_unsigned(test_image(input_row, input_col), 8));
-                input_valid <= '1';
-            else
-                -- Provide zero for out-of-bounds pixels (padding)
-                input_pixel <= (others => (others => '0'));
-                input_valid <= '1';
-            end if;
-        else
-            input_valid <= '0';
-        end if;
-    end process;
-    
-    -- Monitor input requests (separate process for reporting)
-    input_monitor: process(clk)
+    -- Upstream provider process (simulates input layer providing pixel data)
+    -- Responds to input position requests from the conv layer
+    upstream_provider: process(clk)
+        variable req_pending : std_logic := '0';
+        variable pending_row : integer := 0;
+        variable pending_col : integer := 0;
     begin
         if rising_edge(clk) then
-            if input_ready = '1' and input_valid = '1' then
-                if input_row >= 0 and input_row < IMAGE_SIZE and 
-                   input_col >= 0 and input_col < IMAGE_SIZE then
-                    report "Providing pixel [" & integer'image(input_row) & "," & integer'image(input_col) & 
-                           "] = " & integer'image(test_image(input_row, input_col));
-                else
-                    report "Providing padding pixel [" & integer'image(input_row) & "," & integer'image(input_col) & "] = 0";
+            if rst = '1' then
+                pixel_in_req_ready <= '0';
+                pixel_in_valid <= '0';
+                req_pending := '0';
+            else
+                -- Default
+                pixel_in_req_ready <= '0';
+                pixel_in_valid <= '0';
+                
+                -- If we have a pending request, provide the data
+                if req_pending = '1' then
+                    -- Provide data from test image
+                    if pending_row >= 0 and pending_row < IMAGE_SIZE and 
+                       pending_col >= 0 and pending_col < IMAGE_SIZE then
+                        -- Valid pixel
+                        pixel_in(0) <= std_logic_vector(to_unsigned(test_image(pending_row, pending_col), 8));
+                        report "Upstream: Providing pixel [" & integer'image(pending_row) & "," & 
+                               integer'image(pending_col) & "] = " & 
+                               integer'image(test_image(pending_row, pending_col)) severity note;
+                    else
+                        -- Out of bounds - provide zero padding
+                        pixel_in(0) <= (others => '0');
+                        report "Upstream: Providing padding pixel [" & integer'image(pending_row) & "," & 
+                               integer'image(pending_col) & "] = 0" severity note;
+                    end if;
+                    pixel_in_valid <= '1';
+                    req_pending := '0';
+                end if;
+                
+                -- If conv layer requests an input position, acknowledge and schedule data
+                if pixel_in_req_valid = '1' and req_pending = '0' then
+                    pixel_in_req_ready <= '1';  -- Acknowledge request
+                    pending_row := pixel_in_req_row;
+                    pending_col := pixel_in_req_col;
+                    req_pending := '1';
+                    
+                    report "Upstream: Received request for position [" & 
+                           integer'image(pixel_in_req_row) & "," & 
+                           integer'image(pixel_in_req_col) & "]" severity note;
                 end if;
             end if;
         end if;
@@ -406,35 +436,35 @@ begin
     begin
         if rising_edge(clk) then
             -- Monitor input requests
-            if input_ready = '1' then
+            if pixel_in_req_valid = '1' then
                 write(debug_line, string'("INPUT_REQUEST: ["));
-                write(debug_line, input_row);
+                write(debug_line, pixel_in_req_row);
                 write(debug_line, ',');
-                write(debug_line, input_col);
+                write(debug_line, pixel_in_req_col);
                 write(debug_line, ']');
                 writeline(debug_file, debug_line);
             end if;
             
             -- Monitor input provision
-            if input_valid = '1' then
+            if pixel_in_valid = '1' then
                 write(debug_line, string'("INPUT_PROVIDED: ["));
-                write(debug_line, input_row);
+                write(debug_line, pixel_in_req_row);
                 write(debug_line, ',');
-                write(debug_line, input_col);
+                write(debug_line, pixel_in_req_col);
                 write(debug_line, string'("] "));
-                write(debug_line, to_integer(signed(input_pixel(0))));
+                write(debug_line, to_integer(signed(pixel_in(0))));
                 writeline(debug_file, debug_line);
             end if;
             
             -- Monitor final outputs
-            if output_valid = '1' and output_ready = '1' then
-                report "Modular Output at position [" & integer'image(output_row) & "," & integer'image(output_col) & "]";
+            if pixel_out_valid = '1' and pixel_out_ready = '1' then
+                report "Modular Output at position [" & integer'image(pixel_out_req_row) & "," & integer'image(pixel_out_req_col) & "]";
                 
                 -- MODULAR_OUTPUT header (include explicit metadata: scale and bitwidth)
                 write(debug_line, string'("MODULAR_OUTPUT: ["));
-                write(debug_line, output_row);
+                write(debug_line, pixel_out_req_row);
                 write(debug_line, ',');
-                write(debug_line, output_col);
+                write(debug_line, pixel_out_req_col);
                 write(debug_line, ']');
                 writeline(debug_file, debug_line);
 
@@ -444,46 +474,73 @@ begin
 
                 for i in 0 to NUM_FILTERS-1 loop
                     -- Human readable report (keeps existing reports for simulator console)
-                    report "  Filter " & integer'image(i) & ": " & integer'image(to_integer(signed(output_pixel(i))));
+                    report "  Filter " & integer'image(i) & ": " & integer'image(to_integer(signed(pixel_out(i))));
 
                     -- Write filter output as hex (MSB-first) and unsigned decimal to avoid signed printing ambiguity
                     write(debug_line, string'("Filter_"));
                     write(debug_line, i);
                     write(debug_line, string'("_hex: "));
-                    write(debug_line, slv_to_hex(output_pixel(i)));
+                    write(debug_line, slv_to_hex(pixel_out(i)));
                     write(debug_line, string'("  dec: "));
-                    write(debug_line, to_integer(unsigned(output_pixel(i))));
+                    write(debug_line, to_integer(unsigned(pixel_out(i))));
                     writeline(debug_file, debug_line);
                 end loop;
             end if;
         end if;
     end process;
 
-    -- Main test process
+    -- Main test process (acts as downstream consumer requesting outputs)
     test_process: process
+        constant OUT_SIZE : integer := IMAGE_SIZE - KERNEL_SIZE + 1;  -- 28-3+1=26
+        variable received_val : integer;
     begin
         -- Initialize
         rst <= '1';
         enable <= '0';
-        output_ready <= '1';
+        pixel_out_req_valid <= '0';
+        pixel_out_ready <= '0';
         
         wait for CLK_PERIOD * 2;
         rst <= '0';
         
         wait for CLK_PERIOD * 2;
         
-        report "Starting MODULAR convolution layer test...";
+        report "Starting MODULAR convolution layer test (Request/Response Protocol)...";
         report "Test image ready - first pixel value: " & integer'image(test_image(0,0));
-        report "Test image pattern - corner values: [0,0]=" & integer'image(test_image(0,0)) & 
-               " [0,27]=" & integer'image(test_image(0,27)) & 
-               " [27,0]=" & integer'image(test_image(27,0)) & 
-               " [27,27]=" & integer'image(test_image(27,27));
+        report "Output size: " & integer'image(OUT_SIZE) & "x" & integer'image(OUT_SIZE);
         
         -- Start the convolution
         enable <= '1';
         
-        -- Wait for layer to complete
-        wait until layer_done = '1';
+        -- Request all output positions
+        for out_row in 0 to OUT_SIZE-1 loop
+            for out_col in 0 to OUT_SIZE-1 loop
+                report "Requesting output position [" & integer'image(out_row) & "," & integer'image(out_col) & "]";
+                
+                -- Send output position request
+                pixel_out_req_row <= out_row;
+                pixel_out_req_col <= out_col;
+                pixel_out_req_valid <= '1';
+                
+                -- Wait for DUT to acknowledge request
+                wait until rising_edge(clk) and pixel_out_req_ready = '1';
+                
+                -- Clear request on next clock edge (single-cycle pulse)
+                wait until rising_edge(clk);
+                pixel_out_req_valid <= '0';
+                
+                -- Wait for output to be ready
+                wait until rising_edge(clk) and pixel_out_valid = '1';
+                
+                -- Accept the output
+                pixel_out_ready <= '1';
+                wait until rising_edge(clk);
+                pixel_out_ready <= '0';
+                
+                -- Small gap before next request
+                wait for CLK_PERIOD;
+            end loop;
+        end loop;
         
         report "MODULAR convolution layer completed successfully!";
         

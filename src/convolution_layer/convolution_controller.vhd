@@ -122,13 +122,19 @@ begin
 
     case current_state is
             when IDLE =>
-                -- stay idle until enabled
+                -- Stay idle until enabled
+                -- Clear MAC accumulators when starting a new request
                 if enable = '1' then
+                    v_compute_clear := '1';
                     next_state := LOAD_WEIGHTS;
+                else
+                    v_compute_clear := '0';
                 end if;
 
             when LOAD_WEIGHTS =>
-                -- request weight bundle from memory controller and wait one cycle
+                -- Request weight bundle from memory controller and wait one cycle
+                -- Deassert clear signal once we're processing
+                v_compute_clear := '0';
                 v_weight_load := '1';
                 next_state    := WAIT_WEIGHTS;
 

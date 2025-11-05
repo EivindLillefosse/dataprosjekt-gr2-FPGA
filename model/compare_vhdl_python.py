@@ -14,8 +14,11 @@ with open('vivado_project/CNN.sim/sim_1/behav/xsim/modular_intermediate_debug.tx
                 filters = []
                 for j in range(1, 9):
                     if i+j < len(lines) and lines[i+j].startswith('Filter_'):
-                        val = int(lines[i+j].split(': ')[1].strip())
-                        filters.append(val)
+                        # Extract decimal value: "Filter_0_hex: 0x39  dec: 57"
+                        parts = lines[i+j].split('dec:')
+                        if len(parts) >= 2:
+                            val = int(parts[1].strip())
+                            filters.append(val)
                 if len(filters) == 8:
                     vhdl_outputs[(row, col)] = filters
                     i += 9

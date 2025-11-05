@@ -26,6 +26,10 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
     keyval_re = re.compile(r'(\w+)=([^\s]+)')
     modular_re = re.compile(r'^MODULAR_OUTPUT:\s*\[(\d+),(\d+)\]')
     cnn_re = re.compile(r'^(?:CNN_OUTPUT|MODULAR_OUTPUT):\s*\[(\d+),(\d+)\]')
+    # NEW: Intermediate layer patterns
+    layer0_re = re.compile(r'^LAYER0_CONV1_OUTPUT:\s*\[(\d+),(\d+)\]')
+    layer1_re = re.compile(r'^LAYER1_POOL1_OUTPUT:\s*\[(\d+),(\d+)\]')
+    layer2_re = re.compile(r'^LAYER2_CONV2_OUTPUT:\s*\[(\d+),(\d+)\]')
     filter_re1 = re.compile(r'^Filter[_ ]?(\d+):\s*([0-9A-Fa-fx\-]+)')
     filter_re2 = re.compile(r'^Filter\s+(\d+)\s*:\s*([0-9A-Fa-fx\-]+)')
     # New TB format: Filter_<i>_hex: 0x..  dec: N
@@ -65,11 +69,26 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
                     current = entry
                     continue
 
-                # Human-readable MODULAR_OUTPUT or CNN_OUTPUT
+                # Human-readable MODULAR_OUTPUT or CNN_OUTPUT or intermediate layers
+                layer_type = None
                 m2 = cnn_re.match(line)
                 if m2:
+                    layer_type = 'final'
+                if not m2:
+                    m2 = layer0_re.match(line)
+                    if m2:
+                        layer_type = 'layer0'
+                if not m2:
+                    m2 = layer1_re.match(line)
+                    if m2:
+                        layer_type = 'layer1'
+                if not m2:
+                    m2 = layer2_re.match(line)
+                    if m2:
+                        layer_type = 'layer2'
+                if m2:
                     r, c = int(m2.group(1)), int(m2.group(2))
-                    current = {'row': r, 'col': c, 'filters': {}, 'raw_lines': [line]}
+                    current = {'row': r, 'col': c, 'filters': {}, 'layer': layer_type, 'raw_lines': [line]}
                     outputs.append(current)
                     continue
 
@@ -280,6 +299,22 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
     else:
         print("Invalid python data provided to compare_outputs")
         return
+
+    # Filter VHDL outputs by layer if layer_key is provided
+    # Map layer keys to layer types in the parsed outputs
+    layer_type_map = {
+        'layer_0_output': 'layer0',
+        'layer_1_output': 'layer1',
+        'layer_2_output': 'layer2',
+        'layer_3_output': 'final',
+        'cnn_output': 'final'
+    }
+    
+    if layer_key and layer_key in layer_type_map:
+        expected_layer_type = layer_type_map[layer_key]
+        filtered_outputs = [o for o in vhdl_outputs if o.get('layer') == expected_layer_type]
+        print(f"🔍 Filtering for layer '{layer_key}' (type='{expected_layer_type}'): {len(vhdl_outputs)} → {len(filtered_outputs)} outputs")
+        vhdl_outputs = filtered_outputs
 
     print(f"\n=== Comparison Results ===")
     print(f"Python data shape: {py.shape}")
