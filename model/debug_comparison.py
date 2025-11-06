@@ -283,7 +283,7 @@ def analyze_scaling(output_scale_factor=64):
     print("  - Step size: 1/64 = 0.015625")
     print("  - Example: value=4 → 4/64 = 0.0625")
 
-def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits=8, layer_key=None):
+def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits=8, layer_key=None, vhdl_layer=None):
     """Compare Python and VHDL outputs at all positions.
 
     Supports 3D conv/pool outputs (H x W x C) and 1D dense outputs.
@@ -300,8 +300,7 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
         print("Invalid python data provided to compare_outputs")
         return
 
-    # Filter VHDL outputs by layer if layer_key is provided
-    # Map layer keys to layer types in the parsed outputs
+    # Filter VHDL outputs either by provided explicit vhdl_layer or inferred from python layer_key
     layer_type_map = {
         'layer_0_output': 'layer0',
         'layer_1_output': 'layer1',
@@ -309,8 +308,12 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
         'layer_3_output': 'final',
         'cnn_output': 'final'
     }
-    
-    if layer_key and layer_key in layer_type_map:
+
+    if vhdl_layer:
+        filtered_outputs = [o for o in vhdl_outputs if o.get('layer') == vhdl_layer]
+        print(f"🔍 Filtering VHDL outputs for explicit vhdl_layer='{vhdl_layer}': {len(vhdl_outputs)} → {len(filtered_outputs)} outputs")
+        vhdl_outputs = filtered_outputs
+    elif layer_key and layer_key in layer_type_map:
         expected_layer_type = layer_type_map[layer_key]
         filtered_outputs = [o for o in vhdl_outputs if o.get('layer') == expected_layer_type]
         print(f"🔍 Filtering for layer '{layer_key}' (type='{expected_layer_type}'): {len(vhdl_outputs)} → {len(filtered_outputs)} outputs")
@@ -457,6 +460,7 @@ def main():
     parser.add_argument('--npz', default='model/intermediate_values.npz', help='Python intermediate NPZ file')
     parser.add_argument('--vhdl_scale', type=int, default=64, help='VHDL output scale (64 for Q1.6, default=64)')
     parser.add_argument('--vhdl_bits', type=int, default=8, help='VHDL output integer bit-width (8 for Q1.6, 16 for raw MAC)')
+    parser.add_argument('--vhdl_layer', type=str, default=None, help="VHDL layer type to filter (e.g. 'final','layer0','layer1','layer2'). If omitted, script will map from the Python layer name.)")
     parser.add_argument('--layer', type=str, default=None, help='Python layer key to compare (e.g. layer_0_output). If omitted, first available layer is used.')
     args = parser.parse_args()
 
@@ -483,7 +487,8 @@ def main():
     analyze_scaling(args.vhdl_scale)
 
     # Compare using provided VHDL scale (default Q1.6 -> 64)
-    avg_error = compare_outputs(py_layer_arr, vhdl_outputs, output_scale_factor=args.vhdl_scale, vhdl_bits=args.vhdl_bits, layer_key=layer_key)
+    # If user provided an explicit VHDL layer type, pass it through to the comparator
+    avg_error = compare_outputs(py_layer_arr, vhdl_outputs, output_scale_factor=args.vhdl_scale, vhdl_bits=args.vhdl_bits, layer_key=layer_key, vhdl_layer=args.vhdl_layer)
     
     if avg_error is not None:
         if avg_error < 0.01:

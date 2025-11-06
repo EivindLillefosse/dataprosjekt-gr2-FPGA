@@ -52,9 +52,7 @@ entity conv_layer_modular is
         -- Data TO downstream (output result)
         pixel_out           : out WORD_ARRAY(0 to NUM_FILTERS-1);     -- Output pixel data
         pixel_out_valid     : out std_logic;                           -- Output data valid
-        pixel_out_ready     : in  std_logic;                           -- Downstream ready for data
-
-        layer_done          : out STD_LOGIC
+        pixel_out_ready     : in  std_logic                            -- Downstream ready for data
     );
 end conv_layer_modular;
 
@@ -73,6 +71,8 @@ architecture Behavioral of conv_layer_modular is
     signal pos_advance    : std_logic;
     signal current_row    : integer;
     signal current_col    : integer;
+    signal input_row      : integer;
+    signal input_col      : integer;
     signal region_row     : integer range 0 to KERNEL_SIZE-1;
     signal region_col     : integer range 0 to KERNEL_SIZE-1;
     signal region_done    : std_logic;
@@ -82,6 +82,7 @@ architecture Behavioral of conv_layer_modular is
     signal requested_out_row : integer := 0;
     signal requested_out_col : integer := 0;
     signal output_req_accepted : std_logic := '0';
+    signal pos_req_pulse : std_logic := '0';  -- Single-cycle pulse for position calculator
     
     -- Convolution engine signals
     signal compute_en : std_logic;
@@ -121,9 +122,11 @@ begin
                 output_req_accepted <= '0';
                 requested_out_row <= 0;
                 requested_out_col <= 0;
+                pos_req_pulse <= '0';
             else
-                -- Default: not ready for new requests
+                -- Default: not ready for new requests, no pulse
                 pixel_out_req_ready <= '0';
+                pos_req_pulse <= '0';
                 
                 -- Accept output position requests when not currently processing
                 if pixel_out_req_valid = '1' and output_req_accepted = '0' then
@@ -131,9 +134,7 @@ begin
                     requested_out_row <= pixel_out_req_row;
                     requested_out_col <= pixel_out_req_col;
                     output_req_accepted <= '1';
-                    
-                    -- Initialize position calculator to start at requested output position
-                    -- (The position calculator will iterate through the 3x3 kernel internally)
+                    pos_req_pulse <= '1';  -- Single-cycle pulse to position calculator
                 end if;
                 
                 -- Clear flag when output is complete and downstream has accepted it
@@ -178,8 +179,13 @@ begin
             clk => clk,
             rst => rst,
             advance => pos_advance,
+            req_out_row => requested_out_row,
+            req_out_col => requested_out_col,
+            req_valid => pos_req_pulse,
             row => current_row,
             col => current_col,
+            input_row => input_row,
+            input_col => input_col,
             region_row => region_row,
             region_col => region_col,
             region_done => region_done,
@@ -285,7 +291,7 @@ begin
         port map (
             clk => clk,
             rst => rst,
-            enable => enable,
+            enable => output_req_accepted,  -- Only enable controller when we have an active request
 
             -- Weight memory controller
             weight_load_req => weight_load_req,
@@ -319,16 +325,14 @@ begin
         );
 
     -- Connect position calculation outputs
-    -- Use the requested output position (not the position calculator's position)
-    -- The position calculator is only used to iterate through the 3×3 kernel (region_row, region_col)
-    -- Calculate input position request from requested output position + kernel offset
-    pixel_in_req_row <= requested_out_row + region_row;
-    pixel_in_req_col <= requested_out_col + region_col;
+    -- Position calculator now directly provides the absolute input positions
+    -- (output position + kernel offset calculated internally)
+    pixel_in_req_row <= input_row;
+    pixel_in_req_col <= input_col;
     
     -- Connect outputs
     pixel_out <= relu_data_out;
     -- Drive module pixel_out_valid from the ReLU producer (data-valid originates at relu)
     pixel_out_valid <= relu_valid_out;
-    layer_done <= pos_layer_done;
 
 end Behavioral;
