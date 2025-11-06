@@ -25,8 +25,16 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
     sim_out_re = re.compile(r'^SIM_OUT\s+(.*)$')
     keyval_re = re.compile(r'(\w+)=([^\s]+)')
     modular_re = re.compile(r'^MODULAR_OUTPUT:\s*\[(\d+),(\d+)\]')
+    cnn_re = re.compile(r'^(?:CNN_OUTPUT|MODULAR_OUTPUT):\s*\[(\d+),(\d+)\]')
+    # NEW: Intermediate layer patterns
+    layer0_re = re.compile(r'^LAYER0_CONV1_OUTPUT:\s*\[(\d+),(\d+)\]')
+    layer1_re = re.compile(r'^LAYER1_POOL1_OUTPUT:\s*\[(\d+),(\d+)\]')
+    layer2_re = re.compile(r'^LAYER2_CONV2_OUTPUT:\s*\[(\d+),(\d+)\]')
     filter_re1 = re.compile(r'^Filter[_ ]?(\d+):\s*([0-9A-Fa-fx\-]+)')
     filter_re2 = re.compile(r'^Filter\s+(\d+)\s*:\s*([0-9A-Fa-fx\-]+)')
+    # New TB format: Filter_<i>_hex: 0x..  dec: N
+    filter_hex_re = re.compile(r'^Filter[_ ]?(\d+)_hex:\s*(0x[0-9A-Fa-f]+)')
+    filter_hex_dec_re = re.compile(r'^Filter[_ ]?(\d+)_hex:.*dec:\s*([0-9]+)')
 
     current = None
     try:
@@ -61,16 +69,52 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
                     current = entry
                     continue
 
-                # Human-readable MODULAR_OUTPUT
-                m2 = modular_re.match(line)
+                # Human-readable MODULAR_OUTPUT or CNN_OUTPUT or intermediate layers
+                layer_type = None
+                m2 = cnn_re.match(line)
+                if m2:
+                    layer_type = 'final'
+                if not m2:
+                    m2 = layer0_re.match(line)
+                    if m2:
+                        layer_type = 'layer0'
+                if not m2:
+                    m2 = layer1_re.match(line)
+                    if m2:
+                        layer_type = 'layer1'
+                if not m2:
+                    m2 = layer2_re.match(line)
+                    if m2:
+                        layer_type = 'layer2'
                 if m2:
                     r, c = int(m2.group(1)), int(m2.group(2))
-                    current = {'row': r, 'col': c, 'filters': {}, 'raw_lines': [line]}
+                    current = {'row': r, 'col': c, 'filters': {}, 'layer': layer_type, 'raw_lines': [line]}
                     outputs.append(current)
                     continue
 
-                # Filter lines following MODULAR_OUTPUT
+                # Filter lines following MODULAR_OUTPUT (support multiple formats)
                 if current is not None:
+                    # New hex format: prefer hex parsing (8-bit values)
+                    m_hex = filter_hex_re.match(line)
+                    if m_hex:
+                        idx = int(m_hex.group(1))
+                        hex_str = m_hex.group(2)
+                        # Interpret as 8-bit two's complement
+                        current['filters'][idx] = parse_int(hex_str, bits=8)
+                        current['raw_lines'].append(line)
+                        continue
+
+                    # If line contains hex but also 'dec: N', prefer hex; fallback to dec if needed
+                    m_hexdec = filter_hex_dec_re.match(line)
+                    if m_hexdec:
+                        idx = int(m_hexdec.group(1))
+                        dec_str = m_hexdec.group(2)
+                        # dec in TB is unsigned decimal; convert to signed 8-bit
+                        current['filters'][idx] = parse_int(dec_str, bits=8)
+                        current['raw_lines'].append(line)
+                        continue
+
+                    # Backwards-compatible formats
                     m3 = filter_re1.match(line) or filter_re2.match(line)
                     if m3:
                         idx = int(m3.group(1))
@@ -93,19 +137,53 @@ def parse_vivado_log_file(filename: str) -> Dict[str, Any]:
     return {'inputs': [], 'outputs': outputs}
 
 def load_python_data(filename: str = "model/intermediate_values.npz"):
-    """Load Python model intermediate values."""
+    """Load Python model intermediate values and return the full NPZ archive.
+
+    The caller may select a specific layer by name. Prints available keys for convenience.
+    """
     try:
         data = np.load(filename)
-        print(f"✓ Loaded Python data: {list(data.keys())}")
-        # try common keys
-        for key in ('layer_0_output', 'layer0_output', 'output'):
-            if key in data:
-                return data[key]
-        # fallback: return first array
-        return data[list(data.files)[0]]
+        keys = list(data.keys())
+        print(f"✓ Loaded Python data with keys: {keys}")
+        return data
     except FileNotFoundError:
         print(f"Python data not found. Run CNN.py first.")
         return None
+
+
+def pick_python_layer(npz_archive: np.lib.npyio.NpzFile, layer_name: Optional[str] = None):
+    """Pick a layer array from the NPZ archive.
+
+    If layer_name is provided and exists, return it. Otherwise, attempt to find
+    common naming patterns (layer_X_output, layer_X_filter_Y or similar) and return
+    a sensible default (first conv/pool output found).
+    Returns (array, key_name) or (None, None) on failure.
+    """
+    if npz_archive is None:
+        return None, None
+
+    keys = list(npz_archive.keys())
+    if layer_name:
+        if layer_name in npz_archive:
+            return npz_archive[layer_name], layer_name
+        # allow numeric layer index like 'layer_2' mapping to 'layer_2_output'
+        alt = f"layer_{layer_name}_output"
+        if alt in npz_archive:
+            return npz_archive[alt], alt
+        print(f"Requested layer '{layer_name}' not found. Available keys: {keys}")
+        return None, None
+
+    # No layer requested: find the first multi-dimensional array suitable for conv/pool
+    # Prefer 'layer_#_output' patterns
+    for k in keys:
+        if re.match(r"layer_\d+_output", k):
+            return npz_archive[k], k
+
+    # Fallback: return the first array
+    if keys:
+        return npz_archive[keys[0]], keys[0]
+
+    return None, None
 
 def get_weight_scale_factor():
     """Get the actual weight scale factor used in CNN.py (Q1.6 default)."""
@@ -205,17 +283,44 @@ def analyze_scaling(output_scale_factor=64):
     print("  - Step size: 1/64 = 0.015625")
     print("  - Example: value=4 → 4/64 = 0.0625")
 
-def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits=8):
-    """Compare Python and VHDL outputs at all positions."""
+def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits=8, layer_key=None):
+    """Compare Python and VHDL outputs at all positions.
+
+    Supports 3D conv/pool outputs (H x W x C) and 1D dense outputs.
+    If python_data is an NPZ archive, the caller must pass the selected layer array.
+    """
     if python_data is None or vhdl_outputs is None:
         print("❌ Missing data for comparison")
         return
+
+    # python_data may be an np.ndarray or an npz archive entry; ensure it's ndarray
+    if hasattr(python_data, 'shape'):
+        py = python_data
+    else:
+        print("Invalid python data provided to compare_outputs")
+        return
+
+    # Filter VHDL outputs by layer if layer_key is provided
+    # Map layer keys to layer types in the parsed outputs
+    layer_type_map = {
+        'layer_0_output': 'layer0',
+        'layer_1_output': 'layer1',
+        'layer_2_output': 'layer2',
+        'layer_3_output': 'final',
+        'cnn_output': 'final'
+    }
     
+    if layer_key and layer_key in layer_type_map:
+        expected_layer_type = layer_type_map[layer_key]
+        filtered_outputs = [o for o in vhdl_outputs if o.get('layer') == expected_layer_type]
+        print(f"🔍 Filtering for layer '{layer_key}' (type='{expected_layer_type}'): {len(vhdl_outputs)} → {len(filtered_outputs)} outputs")
+        vhdl_outputs = filtered_outputs
+
     print(f"\n=== Comparison Results ===")
-    print(f"Python data shape: {python_data.shape}")
+    print(f"Python data shape: {py.shape}")
     print(f"VHDL outputs: {len(vhdl_outputs)} positions")
     print(f"Weight format: Q1.6 (8-bit signed, scale = {get_weight_scale_factor()})")
-    
+
     if output_scale_factor == 64 and vhdl_bits == 8:
         format_desc = "Q1.6 (8-bit signed, scale = 64)"
     elif output_scale_factor == 1:
@@ -223,91 +328,104 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
     else:
         format_desc = f"{vhdl_bits}-bit signed (scale = {output_scale_factor})"
     print(f"Output format: {format_desc}")
-    
-    total_error = 0
-    total_abs_error = 0
+
+    total_error = 0.0
+    total_abs_error = 0.0
     valid_comparisons = 0
-    max_error = 0
+    max_error = 0.0
     max_error_pos = None
-    filter_errors = {}  # Track per-filter statistics
-    
+    filter_errors = {}
+
+    # Helper to index Python data depending on its dimensionality
+    def get_python_value(pyarr, r, c, fidx):
+        # If 3D (H,W,C)
+        if pyarr.ndim == 3:
+            return float(pyarr[r, c, fidx])
+        # If 2D (H,W) and fidx==0
+        if pyarr.ndim == 2:
+            return float(pyarr[r, c]) if fidx == 0 else 0.0
+        # If 1D (dense)
+        if pyarr.ndim == 1:
+            # interpret 'r' as flat index
+            return float(pyarr[fidx])
+        # If 4D (batch,H,W,C) choose first batch element
+        if pyarr.ndim == 4:
+            return float(pyarr[0, r, c, fidx])
+        return 0.0
+
+    # Display header
     print("\nPosition | Filter | Python   | VHDL(float) | VHDL(raw) | Error    | Rel.Err")
     print("---------|--------|----------|-------------|-----------|----------|--------")
-    
-    for output in vhdl_outputs[:10]:  # Show first 10 positions
+
+    # Show first N positions for quick debugging
+    for output in vhdl_outputs[:10]:
         row, col = output['row'], output['col']
-        
-        if row < python_data.shape[0] and col < python_data.shape[1]:
-            for filter_idx, vhdl_raw in output['filters'].items():
-                if filter_idx < python_data.shape[2]:
-                    # Get values
-                    python_val = python_data[row, col, filter_idx]
-                    vhdl_float = fixed_to_float(vhdl_raw, scale_factor=output_scale_factor, bits=vhdl_bits)
-                    vhdl_relu = max(0.0, vhdl_float)
-                    
-                    # Calculate error
-                    error = abs(python_val - vhdl_relu)
-                    rel_error = (error / max(abs(python_val), 0.001)) * 100  # Relative error %
-                    total_error += error
-                    total_abs_error += abs(error)
-                    valid_comparisons += 1
-                    
-                    # Track max error
-                    if error > max_error:
-                        max_error = error
-                        max_error_pos = (row, col, filter_idx)
-                    
-                    # Track per-filter statistics
-                    if filter_idx not in filter_errors:
-                        filter_errors[filter_idx] = {'count': 0, 'total_error': 0, 'zero_count': 0}
-                    filter_errors[filter_idx]['count'] += 1
-                    filter_errors[filter_idx]['total_error'] += error
-                    if vhdl_raw == 0:
-                        filter_errors[filter_idx]['zero_count'] += 1
-                    
-                    if valid_comparisons <= 80:  # Show first 80 comparisons (10 positions × 8 filters)
-                        print(f"[{row:2d},{col:2d}] |   {filter_idx}    | {python_val:8.5f} | {vhdl_relu:11.5f} | {vhdl_raw:9d} | {error:8.5f} | {rel_error:6.1f}%")
-    
-    # Compute statistics across ALL positions, not just displayed ones
+        for filter_idx, vhdl_raw in output['filters'].items():
+            # Skip filters outside python shape
+            if py.ndim >= 3 and filter_idx >= py.shape[2]:
+                continue
+            python_val = get_python_value(py, row, col, filter_idx)
+            vhdl_float = fixed_to_float(vhdl_raw, scale_factor=output_scale_factor, bits=vhdl_bits)
+            vhdl_relu = max(0.0, vhdl_float)
+            error = abs(python_val - vhdl_relu)
+            rel_error = (error / max(abs(python_val), 0.001)) * 100
+
+            total_error += error
+            total_abs_error += abs(error)
+            valid_comparisons += 1
+
+            if error > max_error:
+                max_error = error
+                max_error_pos = (row, col, filter_idx)
+
+            if filter_idx not in filter_errors:
+                filter_errors[filter_idx] = {'count': 0, 'total_error': 0.0, 'zero_count': 0}
+            filter_errors[filter_idx]['count'] += 1
+            filter_errors[filter_idx]['total_error'] += error
+            if vhdl_raw == 0:
+                filter_errors[filter_idx]['zero_count'] += 1
+
+            if valid_comparisons <= 80:
+                print(f"[{row:2d},{col:2d}] |   {filter_idx}    | {python_val:8.5f} | {vhdl_relu:11.5f} | {vhdl_raw:9d} | {error:8.5f} | {rel_error:6.1f}%")
+
+    # Now compute aggregate statistics across all reported VHDL outputs
     for output in vhdl_outputs:
         row, col = output['row'], output['col']
-        if row < python_data.shape[0] and col < python_data.shape[1]:
-            for filter_idx, vhdl_raw in output['filters'].items():
-                if filter_idx < python_data.shape[2]:
-                    python_val = python_data[row, col, filter_idx]
-                    vhdl_float = fixed_to_float(vhdl_raw, scale_factor=output_scale_factor, bits=vhdl_bits)
-                    vhdl_relu = max(0.0, vhdl_float)
-                    error = abs(python_val - vhdl_relu)
-                    
-                    if valid_comparisons <= 80:  # Already counted above
-                        continue
-                    
-                    total_error += error
-                    total_abs_error += abs(error)
-                    valid_comparisons += 1
-                    
-                    if error > max_error:
-                        max_error = error
-                        max_error_pos = (row, col, filter_idx)
-                    
-                    if filter_idx not in filter_errors:
-                        filter_errors[filter_idx] = {'count': 0, 'total_error': 0, 'zero_count': 0}
-                    filter_errors[filter_idx]['count'] += 1
-                    filter_errors[filter_idx]['total_error'] += error
-                    if vhdl_raw == 0:
-                        filter_errors[filter_idx]['zero_count'] += 1
-    
+        for filter_idx, vhdl_raw in output['filters'].items():
+            if py.ndim >= 3 and filter_idx >= py.shape[2]:
+                continue
+            python_val = get_python_value(py, row, col, filter_idx)
+            vhdl_float = fixed_to_float(vhdl_raw, scale_factor=output_scale_factor, bits=vhdl_bits)
+            vhdl_relu = max(0.0, vhdl_float)
+            error = abs(python_val - vhdl_relu)
+
+            # We already counted the first displayed comparisons; continue counting all
+            total_error += error
+            total_abs_error += abs(error)
+            valid_comparisons += 1
+
+            if error > max_error:
+                max_error = error
+                max_error_pos = (row, col, filter_idx)
+
+            if filter_idx not in filter_errors:
+                filter_errors[filter_idx] = {'count': 0, 'total_error': 0.0, 'zero_count': 0}
+            filter_errors[filter_idx]['count'] += 1
+            filter_errors[filter_idx]['total_error'] += error
+            if vhdl_raw == 0:
+                filter_errors[filter_idx]['zero_count'] += 1
+
     if valid_comparisons > 0:
         avg_error = total_error / valid_comparisons
         avg_abs_error = total_abs_error / valid_comparisons
-        
+
         print(f"\n{'='*70}")
         print(f"OVERALL STATISTICS ({valid_comparisons} comparisons)")
         print(f"{'='*70}")
         print(f"Average Error:     {avg_error:.6f}")
         print(f"Average Abs Error: {avg_abs_error:.6f}")
         print(f"Max Error:         {max_error:.6f} at position {max_error_pos}")
-        
+
         print(f"\nPer-Filter Analysis:")
         print(f"Filter | Avg Error | Zero Count | Total Samples")
         print(f"-------|-----------|------------|---------------")
@@ -317,7 +435,7 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
             zero_pct = (stats['zero_count'] / stats['count'] * 100) if stats['count'] > 0 else 0
             status = "⚠️ ALWAYS ZERO!" if zero_pct == 100 else f"{zero_pct:5.1f}% zeros"
             print(f"  {filt_idx}    | {avg_f_error:9.6f} | {stats['zero_count']:4d}/{stats['count']:4d} | {status}")
-        
+
         print(f"\nQuantization Summary:")
         print(f"  - Weights: Q1.6 format (8-bit signed, scale = 64)")
         print(f"  - Outputs: {format_desc}")
@@ -325,7 +443,7 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
             print(f"  - Range: weights ±2.0, outputs ±2.0 (Q1.6)")
         else:
             print(f"  - Range: weights ±2.0, outputs ±{(1 << (vhdl_bits-1))/output_scale_factor:.1f}")
-    
+
     return avg_error if valid_comparisons > 0 else None
 
 def main():
@@ -339,15 +457,23 @@ def main():
     parser.add_argument('--npz', default='model/intermediate_values.npz', help='Python intermediate NPZ file')
     parser.add_argument('--vhdl_scale', type=int, default=64, help='VHDL output scale (64 for Q1.6, default=64)')
     parser.add_argument('--vhdl_bits', type=int, default=8, help='VHDL output integer bit-width (8 for Q1.6, 16 for raw MAC)')
+    parser.add_argument('--layer', type=str, default=None, help='Python layer key to compare (e.g. layer_0_output). If omitted, first available layer is used.')
     args = parser.parse_args()
 
-    python_data = load_python_data(args.npz)
+    npz_archive = load_python_data(args.npz)
     parsed = parse_vivado_log_file(args.vivado)
     vhdl_outputs = parsed.get('outputs', [])
-    
-    if python_data is None:
+
+    if npz_archive is None:
         print("❌ No Python data. Run: python model/CNN.py")
         return
+
+    # Pick layer to compare
+    py_layer_arr, layer_key = pick_python_layer(npz_archive, layer_name=args.layer)
+    if py_layer_arr is None:
+        print("❌ Could not select a Python layer for comparison. Aborting.")
+        return
+    print(f"Comparing layer: {layer_key}")
     
     if not vhdl_outputs:
         print("❌ No VHDL data. Run VHDL simulation first.")
@@ -357,7 +483,7 @@ def main():
     analyze_scaling(args.vhdl_scale)
 
     # Compare using provided VHDL scale (default Q1.6 -> 64)
-    avg_error = compare_outputs(python_data, vhdl_outputs, output_scale_factor=args.vhdl_scale, vhdl_bits=args.vhdl_bits)
+    avg_error = compare_outputs(py_layer_arr, vhdl_outputs, output_scale_factor=args.vhdl_scale, vhdl_bits=args.vhdl_bits, layer_key=layer_key)
     
     if avg_error is not None:
         if avg_error < 0.01:

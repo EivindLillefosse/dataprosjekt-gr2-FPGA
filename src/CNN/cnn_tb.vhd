@@ -47,19 +47,47 @@ architecture Behavioral of cnn_tb is
     signal rst : STD_LOGIC := '0';
     signal enable : STD_LOGIC := '0';
     
-    signal input_valid : std_logic := '0';
+    -- Request/response signals for output
+    signal output_req_row   : integer := 0;
+    signal output_req_col   : integer := 0;
+    signal output_req_valid : std_logic := '0';
+    signal output_req_ready : std_logic;
+    
+    -- Request/response signals for input
+    signal input_req_row    : integer;
+    signal input_req_col    : integer;
+    signal input_req_valid  : std_logic;
+    signal input_req_ready  : std_logic := '0';
+    
+    -- Data signals
     signal input_pixel : WORD_ARRAY(0 to 0) := (others => (others => '0'));
-    signal input_row : integer := 0;
-    signal input_col : integer := 0;
+    signal input_valid : std_logic := '0';
     signal input_ready : std_logic;
     
-    signal output_valid : std_logic;
     signal output_pixel : WORD_ARRAY(0 to FINAL_NUM_FILTERS-1);
-    signal output_row : integer;
-    signal output_col : integer;
-    signal output_ready : std_logic := '1';
+    signal output_valid : std_logic;
+    signal output_ready : std_logic := '0';
     
     signal layer_done : STD_LOGIC;
+    
+    -- DEBUG: Intermediate layer signals
+    signal debug_conv1_pixel : WORD_ARRAY(0 to 7);  -- 8 filters
+    signal debug_conv1_valid : std_logic;
+    signal debug_conv1_ready : std_logic := '0';
+    signal debug_conv1_row   : natural := 0;
+    signal debug_conv1_col   : natural := 0;
+    
+    signal debug_pool1_pixel : WORD_ARRAY(0 to 7);  -- 8 filters
+    signal debug_pool1_valid : std_logic;
+    signal debug_pool1_ready : std_logic := '0';
+    signal debug_pool1_row   : natural := 0;
+    signal debug_pool1_col   : natural := 0;
+    
+    signal debug_conv2_pixel : WORD_ARRAY(0 to 15); -- 16 filters
+    signal debug_conv2_valid : std_logic;
+    signal debug_conv2_ready : std_logic := '0';
+    signal debug_conv2_row   : natural := 0;
+    signal debug_conv2_col   : natural := 0;
     
     -- Test image data (28x28 image)
     type test_image_type is array (0 to IMAGE_SIZE-1, 0 to IMAGE_SIZE-1) of integer;
@@ -90,20 +118,51 @@ begin
             IMAGE_SIZE => IMAGE_SIZE
         )
         port map (
-            clk => clk,
-            rst => rst,
-            enable => enable,
-            input_valid => input_valid,
-            input_pixel => input_pixel,
-            input_row => input_row,
-            input_col => input_col,
-            input_ready => input_ready,
-            output_valid => output_valid,
-            output_pixel => output_pixel,
-            output_row => output_row,
-            output_col => output_col,
-            output_ready => output_ready,
-            layer_done => layer_done
+            clk              => clk,
+            rst              => rst,
+            enable           => enable,
+            
+            -- Output request interface
+            output_req_row   => output_req_row,
+            output_req_col   => output_req_col,
+            output_req_valid => output_req_valid,
+            output_req_ready => output_req_ready,
+            
+            -- Input request interface
+            input_req_row    => input_req_row,
+            input_req_col    => input_req_col,
+            input_req_valid  => input_req_valid,
+            input_req_ready  => input_req_ready,
+            
+            -- Data interfaces
+            input_pixel      => input_pixel,
+            input_valid      => input_valid,
+            input_ready      => input_ready,
+            
+            output_pixel     => output_pixel,
+            output_valid     => output_valid,
+            output_ready     => output_ready,
+            
+            layer_done       => layer_done,
+            
+            -- DEBUG: Intermediate layer outputs
+            debug_conv1_pixel => debug_conv1_pixel,
+            debug_conv1_valid => debug_conv1_valid,
+            debug_conv1_ready => debug_conv1_ready,
+            debug_conv1_row   => debug_conv1_row,
+            debug_conv1_col   => debug_conv1_col,
+            
+            debug_pool1_pixel => debug_pool1_pixel,
+            debug_pool1_valid => debug_pool1_valid,
+            debug_pool1_ready => debug_pool1_ready,
+            debug_pool1_row   => debug_pool1_row,
+            debug_pool1_col   => debug_pool1_col,
+            
+            debug_conv2_pixel => debug_conv2_pixel,
+            debug_conv2_valid => debug_conv2_valid,
+            debug_conv2_ready => debug_conv2_ready,
+            debug_conv2_row   => debug_conv2_row,
+            debug_conv2_col   => debug_conv2_col
         );
 
     -- Clock process
@@ -118,22 +177,48 @@ begin
         wait;
     end process;
 
-    -- Input pixel provider process (combinatorial for same-cycle response)
-    input_provider: process(input_ready, input_row, input_col)
+    -- Input pixel provider process
+    -- Responds to input position requests from the CNN
+    input_provider: process(clk)
+        variable req_pending : boolean := false;
+        variable req_row_buf : integer := 0;
+        variable req_col_buf : integer := 0;
     begin
-        if input_ready = '1' then
-            -- Check if the requested coordinates are valid
-                if input_row >= 0 and input_row < IMAGE_SIZE and 
-               input_col >= 0 and input_col < IMAGE_SIZE then
-                input_pixel(0) <= std_logic_vector(to_unsigned(test_image(input_row, input_col), 8));
-                input_valid <= '1';
+        if rising_edge(clk) then
+            if rst = '1' then
+                input_req_ready <= '0';
+                input_valid <= '0';
+                req_pending := false;
             else
-                -- Provide zero for out-of-bounds pixels (padding)
-                input_pixel <= (others => (others => '0'));
-                input_valid <= '1';
+                -- Default: not ready for new requests, no data valid
+                input_req_ready <= '0';
+                input_valid <= '0';
+                
+                -- Accept new position requests
+                if input_req_valid = '1' and not req_pending then
+                    input_req_ready <= '1';  -- Acknowledge request
+                    req_row_buf := input_req_row;
+                    req_col_buf := input_req_col;
+                    req_pending := true;
+                end if;
+                
+                -- Provide data for pending request
+                if req_pending then
+                    if req_row_buf >= 0 and req_row_buf < IMAGE_SIZE and 
+                       req_col_buf >= 0 and req_col_buf < IMAGE_SIZE then
+                        input_pixel(0) <= std_logic_vector(to_unsigned(test_image(req_row_buf, req_col_buf), 8));
+                    else
+                        -- Provide zero for out-of-bounds pixels (padding)
+                        input_pixel(0) <= (others => '0');
+                    end if;
+                    input_valid <= '1';
+                    
+                    -- Wait for acknowledgment
+                    if input_ready = '1' then
+                        req_pending := false;
+                    end if;
+                end if;
             end if;
-        else
-            input_valid <= '0';
         end if;
     end process;
     
@@ -141,14 +226,17 @@ begin
     input_monitor: process(clk)
     begin
         if rising_edge(clk) then
-            if input_ready = '1' and input_valid = '1' then
-                if input_row >= 0 and input_row < IMAGE_SIZE and 
-                   input_col >= 0 and input_col < IMAGE_SIZE then
-                    report "Providing pixel [" & integer'image(input_row) & "," & integer'image(input_col) & 
-                           "] = " & integer'image(test_image(input_row, input_col));
+            if input_req_valid = '1' and input_req_ready = '1' then
+                if input_req_row >= 0 and input_req_row < IMAGE_SIZE and 
+                   input_req_col >= 0 and input_req_col < IMAGE_SIZE then
+                    report "Input requested [" & integer'image(input_req_row) & "," & integer'image(input_req_col) & "]";
                 else
-                    report "Providing padding pixel [" & integer'image(input_row) & "," & integer'image(input_col) & "] = 0";
+                    report "Input requested (padding) [" & integer'image(input_req_row) & "," & integer'image(input_req_col) & "]";
                 end if;
+            end if;
+            
+            if input_valid = '1' and input_ready = '1' then
+                report "Input provided: " & integer'image(to_integer(unsigned(input_pixel(0))));
             end if;
         end if;
     end process;
@@ -160,35 +248,95 @@ begin
     begin
         if rising_edge(clk) then
             -- Monitor input requests
-            if input_ready = '1' then
+            if input_req_valid = '1' and input_req_ready = '1' then
                 write(debug_line, string'("INPUT_REQUEST: ["));
-                write(debug_line, input_row);
+                write(debug_line, input_req_row);
                 write(debug_line, ',');
-                write(debug_line, input_col);
+                write(debug_line, input_req_col);
                 write(debug_line, ']');
                 writeline(debug_file, debug_line);
             end if;
             
             -- Monitor input provision
-            if input_valid = '1' then
+            if input_valid = '1' and input_ready = '1' then
                 write(debug_line, string'("INPUT_PROVIDED: ["));
-                write(debug_line, input_row);
+                write(debug_line, input_req_row);  -- Use last requested position
                 write(debug_line, ',');
-                write(debug_line, input_col);
+                write(debug_line, input_req_col);
                 write(debug_line, string'("] "));
-                write(debug_line, to_integer(signed(input_pixel(0))));
+                write(debug_line, to_integer(unsigned(input_pixel(0))));
                 writeline(debug_file, debug_line);
             end if;
             
-            -- Monitor final outputs
+            -- Monitor Conv1 outputs (Layer 0)
+            if debug_conv1_valid = '1' then
+                write(debug_line, string'("LAYER0_CONV1_OUTPUT: ["));
+                write(debug_line, debug_conv1_row);
+                write(debug_line, ',');
+                write(debug_line, debug_conv1_col);
+                write(debug_line, ']');
+                writeline(debug_file, debug_line);
+                for i in 0 to 7 loop
+                    write(debug_line, string'("  Filter_"));
+                    write(debug_line, i);
+                    write(debug_line, string'(": "));
+                    write(debug_line, to_integer(signed(debug_conv1_pixel(i))));
+                    writeline(debug_file, debug_line);
+                end loop;
+                debug_conv1_ready <= '1';
+            else
+                debug_conv1_ready <= '0';
+            end if;
+            
+            -- Monitor Pool1 outputs (Layer 1)
+            if debug_pool1_valid = '1' then
+                write(debug_line, string'("LAYER1_POOL1_OUTPUT: ["));
+                write(debug_line, debug_pool1_row);
+                write(debug_line, ',');
+                write(debug_line, debug_pool1_col);
+                write(debug_line, ']');
+                writeline(debug_file, debug_line);
+                for i in 0 to 7 loop
+                    write(debug_line, string'("  Filter_"));
+                    write(debug_line, i);
+                    write(debug_line, string'(": "));
+                    write(debug_line, to_integer(signed(debug_pool1_pixel(i))));
+                    writeline(debug_file, debug_line);
+                end loop;
+                debug_pool1_ready <= '1';
+            else
+                debug_pool1_ready <= '0';
+            end if;
+            
+            -- Monitor Conv2 outputs (Layer 2)
+            if debug_conv2_valid = '1' then
+                write(debug_line, string'("LAYER2_CONV2_OUTPUT: ["));
+                write(debug_line, debug_conv2_row);
+                write(debug_line, ',');
+                write(debug_line, debug_conv2_col);
+                write(debug_line, ']');
+                writeline(debug_file, debug_line);
+                for i in 0 to 15 loop
+                    write(debug_line, string'("  Filter_"));
+                    write(debug_line, i);
+                    write(debug_line, string'(": "));
+                    write(debug_line, to_integer(signed(debug_conv2_pixel(i))));
+                    writeline(debug_file, debug_line);
+                end loop;
+                debug_conv2_ready <= '1';
+            else
+                debug_conv2_ready <= '0';
+            end if;
+            
+            -- Monitor final outputs (Layer 3 - Pool2)
             if output_valid = '1' and output_ready = '1' then
-                report "CNN Output at position [" & integer'image(output_row) & "," & integer'image(output_col) & "]";
+                report "CNN Output received";
                 
                 -- CNN_OUTPUT header
                 write(debug_line, string'("CNN_OUTPUT: ["));
-                write(debug_line, output_row);
+                write(debug_line, output_req_row);  -- Use requested output position
                 write(debug_line, ',');
-                write(debug_line, output_col);
+                write(debug_line, output_req_col);
                 write(debug_line, ']');
                 writeline(debug_file, debug_line);
                 
@@ -208,11 +356,13 @@ begin
 
     -- Main test process
     test_process: process
+        constant FINAL_OUTPUT_SIZE : integer := 5;  -- After Conv1(26x26)->Pool1(13x13)->Conv2(11x11)->Pool2(5x5)
     begin
         -- Initialize
         rst <= '1';
         enable <= '0';
-        output_ready <= '1';
+        output_req_valid <= '0';
+        output_ready <= '0';
         
         wait for CLK_PERIOD * 2;
         rst <= '0';
@@ -229,10 +379,37 @@ begin
         -- Start the CNN
         enable <= '1';
         
-        -- Wait for CNN to complete
-        wait until layer_done = '1';
+        -- Request all output positions (5x5 final output)
+        for out_row in 0 to FINAL_OUTPUT_SIZE-1 loop
+            for out_col in 0 to FINAL_OUTPUT_SIZE-1 loop
+                report "Requesting CNN output position [" & integer'image(out_row) & "," & integer'image(out_col) & "]";
+                
+                -- Send output position request
+                output_req_row <= out_row;
+                output_req_col <= out_col;
+                output_req_valid <= '1';
+                
+                -- Wait for CNN to acknowledge request
+                wait until rising_edge(clk) and output_req_ready = '1';
+                
+                -- Clear request on next clock edge (single-cycle pulse)
+                wait until rising_edge(clk);
+                output_req_valid <= '0';
+                
+                -- Wait for output to be ready
+                wait until rising_edge(clk) and output_valid = '1';
+                
+                -- Accept the output
+                output_ready <= '1';
+                wait until rising_edge(clk);
+                output_ready <= '0';
+                
+                -- Small gap before next request
+                wait for CLK_PERIOD;
+            end loop;
+        end loop;
         
-        report "CNN processing completed successfully!";
+        report "All CNN outputs received!";
         
         -- Wait a few more cycles
         wait for CLK_PERIOD * 10;
@@ -245,24 +422,34 @@ begin
         
         wait for CLK_PERIOD * 5;
         
-        -- Test multiple runs
-        report "Testing second CNN run...";
+        -- Test second run (just first output position)
+        report "Testing second CNN run (first position only)...";
         enable <= '1';
         
-        wait until layer_done = '1';
+        output_req_row <= 0;
+        output_req_col <= 0;
+        output_req_valid <= '1';
+        wait until rising_edge(clk) and output_req_ready = '1';
+        wait until rising_edge(clk);
+        output_req_valid <= '0';
+        
+        wait until rising_edge(clk) and output_valid = '1';
+        output_ready <= '1';
+        wait until rising_edge(clk);
+        output_ready <= '0';
         
         report "Second CNN run completed!";
         
         wait for CLK_PERIOD * 10;
         
-    test_done <= true;
-    report "All CNN tests completed successfully!";
-    -- Allow signals to settle for one clock period
-    wait for CLK_PERIOD;
-    -- Explicitly stop simulation when the simulator supports VHDL-2008 std.env
-    -- This forces immediate termination; remove/comment out if your simulator doesn't support std.env
-    std.env.stop(0);
-    wait;
+        test_done <= true;
+        report "All CNN tests completed successfully!";
+        -- Allow signals to settle for one clock period
+        wait for CLK_PERIOD;
+        -- Explicitly stop simulation when the simulator supports VHDL-2008 std.env
+        -- This forces immediate termination; remove/comment out if your simulator doesn't support std.env
+        std.env.stop(0);
+        wait;
     end process;
 
     -- Timeout watchdog

@@ -32,19 +32,29 @@ entity conv_layer_modular is
         rst            : in STD_LOGIC;
         enable         : in STD_LOGIC;
 
-        input_valid    : in std_logic;
-        input_pixel    : in WORD_ARRAY(0 to INPUT_CHANNELS-1);
-        input_row      : out integer;
-        input_col      : out integer;
-        input_ready    : out std_logic;
-    
-        output_valid   : out std_logic;
-        output_pixel   : out WORD_ARRAY(0 to NUM_FILTERS-1);  -- Changed from WORD_ARRAY_16 to WORD_ARRAY (8-bit Q1.6)
-        output_row     : out integer;
-        output_col     : out integer;
-        output_ready   : in std_logic;
+        -- Request FROM downstream (what output position is needed)
+        pixel_out_req_row   : in  integer;                             -- Requested output row
+        pixel_out_req_col   : in  integer;                             -- Requested output col
+        pixel_out_req_valid : in  std_logic;                           -- Output position request valid
+        pixel_out_req_ready : out std_logic;                           -- Ready to accept output request
 
-        layer_done     : out STD_LOGIC
+        -- Request TO upstream (what input positions we need)
+        pixel_in_req_row    : out integer;                             -- Requesting input row
+        pixel_in_req_col    : out integer;                             -- Requesting input col
+        pixel_in_req_valid  : out std_logic;                           -- Input position request valid
+        pixel_in_req_ready  : in  std_logic;                           -- Upstream ready for request
+
+        -- Data FROM upstream (input pixels)
+        pixel_in            : in  WORD_ARRAY(0 to INPUT_CHANNELS-1);   -- Input pixel data
+        pixel_in_valid      : in  std_logic;                           -- Input data valid
+        pixel_in_ready      : out std_logic;                           -- Ready to accept input data
+
+        -- Data TO downstream (output result)
+        pixel_out           : out WORD_ARRAY(0 to NUM_FILTERS-1);     -- Output pixel data
+        pixel_out_valid     : out std_logic;                           -- Output data valid
+        pixel_out_ready     : in  std_logic;                           -- Downstream ready for data
+
+        layer_done          : out STD_LOGIC
     );
 end conv_layer_modular;
 
@@ -68,6 +78,11 @@ architecture Behavioral of conv_layer_modular is
     signal region_done    : std_logic;
     signal pos_layer_done : std_logic;
     
+    -- Store requested output position
+    signal requested_out_row : integer := 0;
+    signal requested_out_col : integer := 0;
+    signal output_req_accepted : std_logic := '0';
+    
     -- Convolution engine signals
     signal compute_en : std_logic;
     signal compute_clear : std_logic;
@@ -75,7 +90,6 @@ architecture Behavioral of conv_layer_modular is
     signal conv_results : WORD_ARRAY_16(0 to NUM_FILTERS-1);
     
     -- ReLU activation signals
-    signal relu_valid_in : std_logic;
     signal relu_data_out : WORD_ARRAY(0 to NUM_FILTERS-1); 
     signal relu_valid_out : std_logic;
 
@@ -89,9 +103,50 @@ architecture Behavioral of conv_layer_modular is
     signal scaler_data_out  : WORD_ARRAY(0 to NUM_FILTERS-1);
     signal scaler_valid_out : std_logic;
 
+    -- Internal signal to capture controller's notion of output_valid (not used to drive module output)
+    signal ctrl_output_valid : std_logic := '0';
+
     -- Biases are provided by bias_pkg (generated from Python export)
 
 begin
+
+    -- Handle output position requests from downstream
+    -- When downstream requests an output position, store it and let the position calculator
+    -- iterate through the 3×3 kernel window for that position
+    output_request_handler: process(clk)
+    begin
+        if rising_edge(clk) then
+            if rst = '1' then
+                pixel_out_req_ready <= '0';
+                output_req_accepted <= '0';
+                requested_out_row <= 0;
+                requested_out_col <= 0;
+            else
+                -- Default: not ready for new requests
+                pixel_out_req_ready <= '0';
+                
+                -- Accept output position requests when not currently processing
+                if pixel_out_req_valid = '1' and output_req_accepted = '0' then
+                    pixel_out_req_ready <= '1';  -- Single-cycle acknowledgement pulse
+                    requested_out_row <= pixel_out_req_row;
+                    requested_out_col <= pixel_out_req_col;
+                    output_req_accepted <= '1';
+                    
+                    -- Initialize position calculator to start at requested output position
+                    -- (The position calculator will iterate through the 3x3 kernel internally)
+                end if;
+                
+                -- Clear flag when output is complete and downstream has accepted it
+                if pixel_out_valid = '1' and pixel_out_ready = '1' then
+                    output_req_accepted <= '0';
+                end if;
+            end if;
+        end if;
+    end process;
+    
+    -- Generate input position requests based on output position + kernel offset
+    -- This tells upstream what input pixel we need
+    pixel_in_req_valid <= pixel_in_ready;  -- Request input whenever controller is ready
 
     -- Weight Memory Controller
     -- Use the entity's default generics (they match the module defaults),
@@ -143,7 +198,7 @@ begin
             clk => clk,
             rst => rst,
             clear => compute_clear,
-            pixel_data => input_pixel,
+            pixel_data => pixel_in,
             channel_index => weight_channel,
             weight_data => weight_data,
             compute_en => compute_en,
@@ -220,11 +275,12 @@ begin
             valid_out => relu_valid_out
         );
 
-    -- Main Controller FSM
     controller : entity work.convolution_controller
         generic map (
             NUM_FILTERS => NUM_FILTERS,
-            KERNEL_SIZE => KERNEL_SIZE
+            KERNEL_SIZE => KERNEL_SIZE,
+            -- provide number of input channels so the controller can iterate channels
+            NUM_INPUT_CHANNELS => INPUT_CHANNELS
         )
         port map (
             clk => clk,
@@ -237,16 +293,18 @@ begin
             weight_kernel_col => weight_kernel_col,
             weight_channel => weight_channel,
 
-            -- Input interface
-            input_ready => input_ready,
-            input_valid => input_valid,
+            -- Input interface (mapped to new request/response signals)
+            input_ready => pixel_in_ready,
+            input_valid => pixel_in_valid,
 
-            -- bias ports removed (bias stored in registers)
+            -- Position calculator interface
             pos_advance => pos_advance,
             region_row => region_row,
             region_col => region_col,
             region_done => region_done,
             layer_done => pos_layer_done,
+            
+            -- Convolution engine interface
             compute_en => compute_en,
             compute_clear => compute_clear,
             compute_done => compute_done,
@@ -255,19 +313,22 @@ begin
             scaled_ready => scaler_valid_in,
             scaled_done  => scaler_valid_out,
 
-            -- Output interface
-            output_valid => output_valid,
-            output_ready => output_ready
+            -- Output interface (mapped to new request/response signals)
+            output_valid => ctrl_output_valid,
+            output_ready => pixel_out_ready
         );
 
-    -- Connect position information
-    input_row <= current_row + region_row;
-    input_col <= current_col + region_col;
+    -- Connect position calculation outputs
+    -- Use the requested output position (not the position calculator's position)
+    -- The position calculator is only used to iterate through the 3×3 kernel (region_row, region_col)
+    -- Calculate input position request from requested output position + kernel offset
+    pixel_in_req_row <= requested_out_row + region_row;
+    pixel_in_req_col <= requested_out_col + region_col;
     
     -- Connect outputs
-    output_pixel <= relu_data_out;
-    output_row <= current_row;
-    output_col <= current_col;
+    pixel_out <= relu_data_out;
+    -- Drive module pixel_out_valid from the ReLU producer (data-valid originates at relu)
+    pixel_out_valid <= relu_valid_out;
     layer_done <= pos_layer_done;
 
 end Behavioral;
