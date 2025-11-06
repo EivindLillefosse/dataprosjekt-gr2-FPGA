@@ -58,6 +58,14 @@ if {[catch {start_gui} err]} {
 } else {
     puts "GUI started successfully"
 }
+# Start GUI (will only work if Vivado was launched in GUI mode, not batch mode)
+# To run with GUI: vivado -source scripts/create-project.tcl -tclargs 35
+# To run without GUI: vivado -mode batch -source scripts/create-project.tcl -tclargs 35
+if {[catch {start_gui} err]} {
+    puts "Note: Running in batch mode (GUI not available)"
+} else {
+    puts "GUI started successfully"
+}
 
 # Recursive procedure to collect files matching a pattern
 proc get_files_recursive {dir pattern} {
@@ -84,6 +92,16 @@ if {[file isdirectory $src_dir]} {
     }
 } else {
     puts "Warning: Source directory '$src_dir' does not exist."
+}
+
+# Ensure Vivado treats VHDL sources as VHDL-2008 (XSIM does not support 2019)
+puts "\nSetting VHDL standard to 2008 for all VHDL files..."
+foreach vfile [get_files_recursive $src_dir "*.vhd"] {
+    if {[catch {set_property FILE_TYPE {VHDL 2008} [get_files $vfile]} err]} {
+        puts "Warning: failed to set FILE_TYPE for $vfile : $err"
+    } else {
+        puts "  Set VHDL 2008 for: $vfile"
+    }
 }
 
 # Ensure Vivado treats VHDL sources as VHDL-2008 (XSIM does not support 2019)
@@ -487,6 +505,7 @@ foreach coe_file $found_coe_files {
                 }
             } else {
                 puts "Skipping - IP $ip_name already exists"
+                puts "Skipping - IP $ip_name already exists"
             }
         }
     }
@@ -494,6 +513,7 @@ foreach coe_file $found_coe_files {
 
 # Generate IP output products
 puts "\n=== Generating IP Output Products ==="
+set all_ips [get_ips]
 set all_ips [get_ips]
 if {[llength $all_ips] > 0} {
     puts "Found IPs: $all_ips"
