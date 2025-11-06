@@ -19,7 +19,8 @@ use work.types_pkg.all;
 entity convolution_controller is
     generic (
         NUM_FILTERS : integer := 8;
-        KERNEL_SIZE : integer := 3
+        KERNEL_SIZE : integer := 3;
+        NUM_INPUT_CHANNELS : integer := 1
     );
     port (
         clk           : in  std_logic;
@@ -30,7 +31,8 @@ entity convolution_controller is
         weight_load_req   : out std_logic;
         weight_kernel_row : out integer range 0 to KERNEL_SIZE-1;
         weight_kernel_col : out integer range 0 to KERNEL_SIZE-1;
-        weight_channel    : out integer range 0 to NUM_FILTERS-1;
+        -- Channel index (iterates over input channels, not filters)
+        weight_channel    : out integer range 0 to NUM_INPUT_CHANNELS-1;
          
         -- (bias handled locally in conv top module)
                 
@@ -64,9 +66,12 @@ architecture Behavioral of convolution_controller is
     type state_type is (IDLE, LOAD_WEIGHTS, WAIT_WEIGHTS, LOAD_DATA, COMPUTE, PIXEL_DONE, POST_COMPUTE, OUTPUT_WAIT);
     signal current_state : state_type := IDLE;
     signal next_state_sig    : state_type := IDLE;
+    -- State variable for channel counter
+    signal current_channel : integer range 0 to NUM_INPUT_CHANNELS-1 := 0;
+    signal next_channel    : integer range 0 to NUM_INPUT_CHANNELS-1 := 0;
     -- Registered outputs next-value signals
     signal weight_load_req_n : std_logic := '0';
-    signal weight_channel_n  : integer range 0 to NUM_FILTERS-1 := 0;
+    signal weight_channel_n  : integer := 0;
     signal pos_advance_n     : std_logic := '0';
     signal compute_en_n      : std_logic := '0';
     signal compute_clear_n   : std_logic := '0';
@@ -92,40 +97,71 @@ begin
     begin
         if rst = '1' then
             current_state <= IDLE;
+            current_channel <= 0;
         elsif rising_edge(clk) then
             current_state <= next_state_sig;
+            current_channel <= next_channel;
         end if;
     end process;
 
     -- Combinational next-state and output logic (Moore-style outputs assigned here)
-    fsm_comb : process(current_state, enable, input_valid, compute_done, region_done, output_ready, scaled_done, layer_done)
+    fsm_comb : process(current_state, current_channel, enable, input_valid, compute_done, region_done, output_ready, scaled_done, layer_done)
         -- Local variable for next state (named 'next_state')
-        variable next_state : state_type := IDLE;
+        variable next_state : state_type;
         -- Local combinational next-values for outputs
-        variable v_pos_advance     : std_logic := '0';
-        variable v_compute_en      : std_logic := '0';
-        variable v_compute_clear   : std_logic := '0';
-        variable v_input_ready     : std_logic := '0';
-        variable v_output_valid    : std_logic := '0';
-        variable v_scaled_ready    : std_logic := '0';
-        variable v_current_channel : integer range 0 to NUM_FILTERS-1 := 0;
+        variable v_pos_advance     : std_logic;
+        variable v_weight_load     : std_logic;
+        variable v_compute_en      : std_logic;
+        variable v_compute_clear   : std_logic;
+        variable v_input_ready     : std_logic;
+        variable v_output_valid    : std_logic;
+        variable v_scaled_ready    : std_logic;
+        variable v_current_channel : integer;
     begin
 
         -- Default next state is to remain; capture current state into variable
         next_state := current_state;
 
-        -- Default outputs (variables) already '0'
+        -- CRITICAL: Set all outputs to default values to prevent latches
+        v_pos_advance     := '0';
+        v_weight_load     := '0';
+        v_compute_en      := '0';
+        v_compute_clear   := '0';
+        v_input_ready     := '0';
+        v_output_valid    := '0';
+        v_scaled_ready    := '0';
+        v_current_channel := current_channel;  -- Default: preserve current channel
 
     case current_state is
             when IDLE =>
-                -- stay idle until enabled
+                -- Stay idle until enabled
+                -- Clear MAC accumulators when starting a new request
+                -- Reset channel counter
+                v_current_channel := 0;
                 if enable = '1' then
+                    v_compute_clear := '1';
                     next_state := LOAD_WEIGHTS;
+                else
+                    v_compute_clear := '0';
                 end if;
 
             when LOAD_WEIGHTS =>
-                -- request weight bundle
-                next_state    := LOAD_DATA;
+                -- Request weight bundle from memory controller and wait one cycle
+                -- Deassert clear signal once we're processing
+                v_compute_clear := '0';
+                v_weight_load := '1';
+                next_state    := WAIT_WEIGHTS;
+
+            when WAIT_WEIGHTS =>
+                -- Allow BRAM output to become valid on the next clock edge, then proceed
+                if v_current_channel = 0 then
+                    -- First channel loaded, now load input data
+                    next_state := LOAD_DATA;
+                else
+                    -- Subsequent channels: go directly to compute
+                    v_compute_en := '1';
+                    next_state := COMPUTE;
+                end if;
 
             when LOAD_DATA =>
                 -- wait for input pixel
@@ -138,22 +174,24 @@ begin
 
             when COMPUTE =>
                 -- compute_en is pulsed on the transition into COMPUTE (from LOAD_DATA)
-                -- wait for the MAC/engine to assert compute_done, then proceed to POST_COMPUTE
+                -- wait for the MAC/engine to assert compute_done, then proceed to either
+                -- load the next input channel or finish the kernel accumulation and post-process
                 v_compute_en := '0';
                 if all_ones(compute_done) then
-                    if weight_channel < NUM_FILTERS-1 then
+                    -- Compute all channels for this kernel position
+                    if v_current_channel < NUM_INPUT_CHANNELS - 1 then
+                        v_current_channel := v_current_channel + 1;
+                        next_state := LOAD_WEIGHTS;
+                    else
+                        -- All channels processed for this kernel position -> post-compute
                         v_current_channel := 0;
                         v_pos_advance := '1';
                         next_state := POST_COMPUTE;
-                    else
-                        v_current_channel := v_current_channel + 1;
-                        next_state := LOAD_WEIGHTS;
                     end if;
                 end if;
 
             when POST_COMPUTE =>
                 -- request downstream processing (scaling/ReLU)
-                v_pos_advance  := '0';
                 if region_done = '1' then
                     v_scaled_ready := '1';
                     next_state := PIXEL_DONE;
@@ -180,9 +218,11 @@ begin
                         
 
             when OUTPUT_WAIT =>
+                -- Assert output_valid and wait for downstream to accept (output_ready=1)
                 v_output_valid := '1';
                 if output_ready = '1' then
-                    v_output_valid := '0';
+                    -- Do not clear v_output_valid here; keep it asserted for the current cycle
+                    -- The next_state change will move the FSM and leave output_valid deasserted
                     next_state := LOAD_WEIGHTS;
                 end if;
 
@@ -192,8 +232,10 @@ begin
 
         -- Commit local next-state variable to the signal
         next_state_sig <= next_state;
+        next_channel   <= v_current_channel;
 
         -- Commit combinational next-values to registered next signals
+        weight_load_req_n <= v_weight_load;
         weight_channel_n  <= v_current_channel;
         pos_advance_n     <= v_pos_advance;
         compute_en_n      <= v_compute_en;
