@@ -150,6 +150,8 @@ begin
     stim_proc: process
         variable received_val : integer;
         variable expected_val : integer;
+        variable first_result : WORD_ARRAY(0 to INPUT_CHANNELS-1);
+        variable test_pass : boolean := true;
     begin
         -- Initial reset
         rst <= '1';
@@ -163,7 +165,8 @@ begin
         report "=== Starting Max Pooling Test (Request/Response Protocol) ===" severity note;
         report "Requesting 4x4 output from 8x8 input" severity note;
         
-        -- Request all 16 output positions (4x4 grid)
+        -- Test 1: Request all 16 output positions (4x4 grid) - FIRST PASS
+        report "=== Test 1: First pass through all positions ===" severity note;
         for out_row in 0 to OUTPUT_SIZE-1 loop
             for out_col in 0 to OUTPUT_SIZE-1 loop
                 report "Requesting output position [" & integer'image(out_row) & 
@@ -184,26 +187,147 @@ begin
                 -- Accept the output
                 pixel_out_ready <= '1';
                 
-                -- Verify the result (check channel 0)
-                received_val := to_integer(signed(pixel_out(0)));
-                expected_val := EXPECTED_OUTPUT(out_row, out_col);
-                
-                if received_val = expected_val then
-                    report "PASS: Output[" & integer'image(out_row) & "," & 
-                           integer'image(out_col) & "] = " & integer'image(received_val) 
-                           severity note;
-                else
-                    report "FAIL: Output[" & integer'image(out_row) & "," & 
-                           integer'image(out_col) & "], expected " & 
-                           integer'image(expected_val) & " but got " & 
-                           integer'image(received_val) severity error;
-                end if;
+                -- Verify the result for ALL channels
+                for ch in 0 to INPUT_CHANNELS-1 loop
+                    received_val := to_integer(signed(pixel_out(ch)));
+                    expected_val := EXPECTED_OUTPUT(out_row, out_col) + ch;
+                    
+                    if received_val = expected_val then
+                        report "PASS: Output[" & integer'image(out_row) & "," & 
+                               integer'image(out_col) & "][ch" & integer'image(ch) & "] = " & 
+                               integer'image(received_val) severity note;
+                    else
+                        report "FAIL: Output[" & integer'image(out_row) & "," & 
+                               integer'image(out_col) & "][ch" & integer'image(ch) & 
+                               "], expected " & integer'image(expected_val) & 
+                               " but got " & integer'image(received_val) severity error;
+                        test_pass := false;
+                    end if;
+                end loop;
                 
                 wait for CLK_PERIOD;
                 pixel_out_ready <= '0';
-                wait for CLK_PERIOD;
+                wait for 2*CLK_PERIOD;
             end loop;
         end loop;
+        
+        -- Test 2: CRITICAL - Request same position multiple times to test for state persistence bug
+        report "=== Test 2: Determinism test - Request [0,0] five times ===" severity note;
+        for repeat in 1 to 5 loop
+            report "Repeat #" & integer'image(repeat) & ": Requesting [0,0]" severity note;
+            
+            pixel_out_req_row <= 0;
+            pixel_out_req_col <= 0;
+            pixel_out_req_valid <= '1';
+            
+            wait until rising_edge(clk) and pixel_out_req_ready = '1';
+            pixel_out_req_valid <= '0';
+            wait for CLK_PERIOD;
+            
+            wait until rising_edge(clk) and pixel_out_valid = '1';
+            pixel_out_ready <= '1';
+            
+            if repeat = 1 then
+                -- Store first result
+                first_result := pixel_out;
+                report "First result [0,0][ch0] = " & integer'image(to_integer(signed(pixel_out(0)))) severity note;
+            else
+                -- Compare with first result
+                for ch in 0 to INPUT_CHANNELS-1 loop
+                    if pixel_out(ch) /= first_result(ch) then
+                        report "DETERMINISM FAILURE: Repeat #" & integer'image(repeat) & 
+                               " [0,0][ch" & integer'image(ch) & "] = " & 
+                               integer'image(to_integer(signed(pixel_out(ch)))) & 
+                               " but first was " & integer'image(to_integer(signed(first_result(ch)))) 
+                               severity error;
+                        test_pass := false;
+                    else
+                        report "DETERMINISM OK: Repeat #" & integer'image(repeat) & 
+                               " [0,0][ch" & integer'image(ch) & "] = " & 
+                               integer'image(to_integer(signed(pixel_out(ch)))) severity note;
+                    end if;
+                end loop;
+            end if;
+            
+            wait for CLK_PERIOD;
+            pixel_out_ready <= '0';
+            wait for 2*CLK_PERIOD;
+        end loop;
+        
+        -- Test 3: Request different positions in sequence to ensure proper reset
+        report "=== Test 3: Reset test - Different positions in sequence ===" severity note;
+        for test_iter in 1 to 3 loop
+            report "Iteration #" & integer'image(test_iter) severity note;
+            
+            -- Request [0,0]
+            pixel_out_req_row <= 0;
+            pixel_out_req_col <= 0;
+            pixel_out_req_valid <= '1';
+            wait until rising_edge(clk) and pixel_out_req_ready = '1';
+            pixel_out_req_valid <= '0';
+            wait for CLK_PERIOD;
+            wait until rising_edge(clk) and pixel_out_valid = '1';
+            pixel_out_ready <= '1';
+            
+            received_val := to_integer(signed(pixel_out(0)));
+            expected_val := EXPECTED_OUTPUT(0, 0);
+            if received_val /= expected_val then
+                report "FAIL: [0,0] expected " & integer'image(expected_val) & 
+                       " got " & integer'image(received_val) severity error;
+                test_pass := false;
+            end if;
+            wait for CLK_PERIOD;
+            pixel_out_ready <= '0';
+            wait for 2*CLK_PERIOD;
+            
+            -- Request [1,1]
+            pixel_out_req_row <= 1;
+            pixel_out_req_col <= 1;
+            pixel_out_req_valid <= '1';
+            wait until rising_edge(clk) and pixel_out_req_ready = '1';
+            pixel_out_req_valid <= '0';
+            wait for CLK_PERIOD;
+            wait until rising_edge(clk) and pixel_out_valid = '1';
+            pixel_out_ready <= '1';
+            
+            received_val := to_integer(signed(pixel_out(0)));
+            expected_val := EXPECTED_OUTPUT(1, 1);
+            if received_val /= expected_val then
+                report "FAIL: [1,1] expected " & integer'image(expected_val) & 
+                       " got " & integer'image(received_val) severity error;
+                test_pass := false;
+            end if;
+            wait for CLK_PERIOD;
+            pixel_out_ready <= '0';
+            wait for 2*CLK_PERIOD;
+            
+            -- Request [0,0] again - should give same result as first time
+            pixel_out_req_row <= 0;
+            pixel_out_req_col <= 0;
+            pixel_out_req_valid <= '1';
+            wait until rising_edge(clk) and pixel_out_req_ready = '1';
+            pixel_out_req_valid <= '0';
+            wait for CLK_PERIOD;
+            wait until rising_edge(clk) and pixel_out_valid = '1';
+            pixel_out_ready <= '1';
+            
+            received_val := to_integer(signed(pixel_out(0)));
+            expected_val := EXPECTED_OUTPUT(0, 0);
+            if received_val /= expected_val then
+                report "FAIL: [0,0] second request expected " & integer'image(expected_val) & 
+                       " got " & integer'image(received_val) & " (state persistence bug!)" severity error;
+                test_pass := false;
+            end if;
+            wait for CLK_PERIOD;
+            pixel_out_ready <= '0';
+            wait for 2*CLK_PERIOD;
+        end loop;
+        
+        if test_pass then
+            report "=== ALL TESTS PASSED ===" severity note;
+        else
+            report "=== SOME TESTS FAILED ===" severity error;
+        end if;
         
         report "=== Max Pooling Test Complete ===" severity note;
         

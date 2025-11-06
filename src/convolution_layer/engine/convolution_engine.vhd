@@ -47,7 +47,6 @@ architecture Behavioral of convolution_engine is
     subtype signed_result is signed(MAC_RESULT_WIDTH-1 downto 0);
     type signed_result_array is array (natural range <>) of signed(MAC_RESULT_WIDTH-1 downto 0);
 
-    signal pixel_data_s : signed_word;
     signal results_s    : signed_result_array(0 to NUM_FILTERS-1);
 begin
 

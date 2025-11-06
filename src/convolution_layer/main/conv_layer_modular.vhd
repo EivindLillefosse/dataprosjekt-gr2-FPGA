@@ -90,7 +90,6 @@ architecture Behavioral of conv_layer_modular is
     signal conv_results : WORD_ARRAY_16(0 to NUM_FILTERS-1);
     
     -- ReLU activation signals
-    signal relu_valid_in : std_logic;
     signal relu_data_out : WORD_ARRAY(0 to NUM_FILTERS-1); 
     signal relu_valid_out : std_logic;
 

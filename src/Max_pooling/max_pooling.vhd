@@ -68,7 +68,7 @@ architecture Behavioral of max_pooling is
     signal state : state_type := IDLE;
 
     -- Store largest pixel in 2x2 window
-    signal curr_largest : WORD_ARRAY(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
+    signal curr_largest : WORD_ARRAY(0 to INPUT_CHANNELS-1) := (others => x"80");  -- Initialize to most negative Q1.6 value
 
     -- Count input pixels in current 2x2 block
     signal pixel_count : integer range 0 to BLOCK_SIZE*BLOCK_SIZE-1 := 0;
@@ -77,7 +77,16 @@ architecture Behavioral of max_pooling is
     signal req_out_row : integer := 0;
     signal req_out_col : integer := 0;
 
+    -- Registered request positions (to avoid enable-by-reset warnings)
+    signal req_in_row_reg : integer := 0;
+    signal req_in_col_reg : integer := 0;
+
 begin
+
+    -- Combinational output assignments (eliminates RESET-3 warnings)
+    pixel_out <= curr_largest;
+    pixel_in_req_row <= req_in_row_reg;
+    pixel_in_req_col <= req_in_col_reg;
 
     -- Main FSM
     process(clk)
@@ -92,9 +101,11 @@ begin
                 pixel_out_req_ready  <= '0';
                 pixel_in_req_valid   <= '0';
                 pixel_in_ready       <= '0';
-                curr_largest         <= (others => (others => '0'));
+                curr_largest         <= (others => x"80");  -- Reset to most negative Q1.6 value
                 req_out_row          <= 0;
                 req_out_col          <= 0;
+                req_in_row_reg       <= 0;
+                req_in_col_reg       <= 0;
                 
             else
                 -- Default values
@@ -111,7 +122,7 @@ begin
                             req_out_row <= pixel_out_req_row;
                             req_out_col <= pixel_out_req_col;
                             pixel_count <= 0;
-                            curr_largest <= (others => (others => '0'));
+                            curr_largest <= (others => x"80");  -- Reset to most negative Q1.6 value
                             state <= REQUEST_INPUT;
                         end if;
                     
@@ -120,8 +131,8 @@ begin
                         next_req_row := (pixel_count / BLOCK_SIZE) + (req_out_row * BLOCK_SIZE);
                         next_req_col := (pixel_count mod BLOCK_SIZE) + (req_out_col * BLOCK_SIZE);
                         
-                        pixel_in_req_row <= next_req_row;
-                        pixel_in_req_col <= next_req_col;
+                        req_in_row_reg <= next_req_row;
+                        req_in_col_reg <= next_req_col;
                         pixel_in_req_valid <= '1';  -- Request this input position
                         
                         if pixel_in_req_ready = '1' then
@@ -147,7 +158,8 @@ begin
                     when RECEIVING =>
                         -- Check if we've received all pixels in the 2x2 block
                         if pixel_count = BLOCK_SIZE*BLOCK_SIZE - 1 then
-                            -- All pixels received, output is ready
+                            -- All pixels received, output is read
+                            pixel_out_valid <= '1';
                             state <= OUTPUT_READY;
                         else
                             -- Need more pixels
@@ -157,8 +169,6 @@ begin
                     
                     when OUTPUT_READY =>
                         -- Provide output to downstream
-                        pixel_out <= curr_largest;
-                        pixel_out_valid <= '1';
                         
                         if pixel_out_ready = '1' then
                             -- Downstream accepted the data
