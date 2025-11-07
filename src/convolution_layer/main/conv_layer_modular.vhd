@@ -105,6 +105,8 @@ architecture Behavioral of conv_layer_modular is
     signal bias_regs : bias_local_t(0 to NUM_FILTERS-1);
     signal biased_results : WORD_ARRAY_16(0 to NUM_FILTERS-1);
     signal biased_valid : std_logic;
+    -- Input to the ReLU block: biased_results shifted right by 6 (convert to Q1.6)
+    signal relu_input : WORD_ARRAY_16(0 to NUM_FILTERS-1);
 
     -- Internal signal to capture controller's notion of output_valid (not used to drive module output)
     signal ctrl_output_valid : std_logic := '0';
@@ -257,12 +259,32 @@ begin
     biased_results_proc: process(conv_results, bias_regs)
     begin
         for i in 0 to NUM_FILTERS-1 loop
-            -- Add bias in Q2.12 format to conv_results (which are Q2.12)
+            -- Then add bias in Q1.6 format to get final Q2.12 biased result
             biased_results(i) <= std_logic_vector(signed(conv_results(i)) + resize(bias_regs(i), 16));
         end loop;
     end process;
 
-    -- ReLU Activation Layer (takes 16-bit biased results directly)
+    -- Drive relu_input from biased_results using a generate (portable VHDL)
+    -- Only instantiate the shifting logic for the layers that use 16-bit biased_results (LAYER_ID = 1)
+    gen_relu_input_layer1 : if LAYER_ID = 1 generate
+        gen_relu_input : for i in 0 to NUM_FILTERS-1 generate
+        begin
+            -- Optionally add rounding: shift_right(signed(biased_results(i)) + to_signed(32, 16), 6)
+            relu_input(i) <= std_logic_vector( shift_right( signed(biased_results(i)), 6 ) );
+        end generate;
+    end generate;
+
+    -- Fallback: for other layer IDs (e.g. LAYER_ID = 0) drive relu_input from biased_results
+    -- scaled/converted appropriately or default to zero to avoid undriven signals. Here we
+    -- simply map the lower 8 bits into the 16-bit word for LAYER_ID = 0 so the signal remains
+    -- well-defined. Adjust if a different behavior is required.
+    gen_relu_input_other : if LAYER_ID = 0 generate
+
+            relu_input <= biased_results;
+
+    end generate;
+
+    -- ReLU Activation Layer (takes 16-bit inputs in Q1.6)
     relu : entity work.relu_layer
         generic map (
             NUM_FILTERS => NUM_FILTERS,
@@ -271,7 +293,7 @@ begin
         port map (
             clk => clk,
             rst => rst,
-            data_in => biased_results,
+            data_in => relu_input,
             data_valid => biased_valid,
             data_out => relu_data_out,
             valid_out => relu_valid_out
