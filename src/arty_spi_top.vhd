@@ -198,9 +198,9 @@ begin
                                 tx_valid <= '1';
                             end if;
                     end case;
-                -- Echo mode: auto-increment counter (only when CNN mode is OFF)
+                -- Echo mode: respond when data is received
                 else
-                    if tx_ready = '1' and tx_valid = '0' then
+                    if rx_valid = '1' then
                         tx_counter <= tx_counter + 1;
                         tx_valid <= '1';
                     end if;

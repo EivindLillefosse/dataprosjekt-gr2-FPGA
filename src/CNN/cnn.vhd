@@ -48,12 +48,6 @@ entity cnn_top is
         rst          : in  std_logic;
         enable       : in  std_logic;
 
-        -- Request FROM external controller (what output position is needed)
-        output_req_row   : in  integer;
-        output_req_col   : in  integer;
-        output_req_valid : in  std_logic;
-        output_req_ready : out std_logic;
-
         -- Request TO input provider (what input positions we need)
         input_req_row    : out integer;
         input_req_col    : out integer;
@@ -66,7 +60,7 @@ entity cnn_top is
         input_ready      : out std_logic;
 
         -- Data TO external consumer (final output)
-        output_pixel     : out WORD_ARRAY(0 to CONV_2_NUM_FILTERS-1);
+        output_guess     : out WORD;
         output_valid     : out std_logic;
         output_ready     : in  std_logic
     );
