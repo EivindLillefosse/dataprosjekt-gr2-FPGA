@@ -44,6 +44,8 @@ entity SPI_top is
             DATA_OUT     : out std_logic_vector(WORD_SIZE-1 downto 0); 
 
           -- Handhakes
+            COL_ROW_REQ_READY : out std_logic;
+            COL_ROW_REQ_VALID : in  std_logic;
             DATA_IN_VALID  : in  std_logic; 
             DATA_IN_READY  : out std_logic; 
             DATA_OUT_VALID : out std_logic; 
@@ -85,7 +87,9 @@ controller_memory_inst : entity work.SPI_memory_controller
     data_out_valid  => DATA_OUT_VALID,
     data_out_ready  => DATA_OUT_READY,
     data_out_col    => DATA_OUT_COL,
-    data_out_row    => DATA_OUT_ROW
+    data_out_row    => DATA_OUT_ROW,
+    col_row_req_ready => COL_ROW_REQ_READY,
+    col_row_req_valid => COL_ROW_REQ_VALID
   );
 
 SPI_slave_inst : entity work.SPI_SLAVE

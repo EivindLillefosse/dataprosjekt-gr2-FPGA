@@ -44,7 +44,9 @@ entity SPI_memory_controller is
              data_out_valid : out std_logic;
              data_out_ready : in  std_logic;
              data_out_col   : in  integer;
-             data_out_row   : in  integer
+             data_out_row   : in  integer;
+             col_row_req_ready : out std_logic;
+             col_row_req_valid : in  std_logic
          );
 end SPI_memory_controller;
 
@@ -150,6 +152,9 @@ begin
     bram_A_en <= '1';
     bram_B_en <= '1';
     bram_C_en <= '1';
+    
+    -- col_row_req_ready is high when at least one buffer is complete
+    col_row_req_ready <= BRAM_A_last_written or BRAM_B_last_written or BRAM_C_last_written;
     
     -- Address multiplexers: Select read or write address based on we signal
     -- When writing (we='1'), use write address; when reading (we='0'), use read address
@@ -431,8 +436,8 @@ begin
         case read_state is
             when READ_IDLE =>
                 data_out_valid <= '0';
-                -- Detect new read request
-                if data_out_ready = '1' then
+                -- Detect new read request (requires BOTH data_out_ready AND col_row_req_valid)
+                if col_row_req_valid = '1' then
                     if first_read = '1' then
                         -- First read: check if any buffer is complete
                         if BRAM_A_last_written = '1' or BRAM_B_last_written = '1' or BRAM_C_last_written = '1' then
@@ -513,8 +518,13 @@ begin
             when WAIT_BRAM =>
                 -- Wait one cycle for BRAM to fetch data
                 -- Address was set two cycles ago, data will be ready next cycle
-                read_state <= LOAD_DATA_OUT;                
-            
+                if data_out_ready = '1' then
+                    read_state <= LOAD_DATA_OUT;
+                else
+                    read_state <= WAIT_BRAM;
+                end if;
+
+
             when LOAD_DATA_OUT =>
                 -- Load data from the selected buffer
                 case active_read_buffer is

@@ -50,6 +50,8 @@ architecture Behavioral of SPI_memory_controller_debug_tb is
     signal data_out_ready : std_logic := '0';
     signal data_out_col : integer := 0;
     signal data_out_row : integer := 0;
+    signal col_row_req_ready : std_logic;
+    signal col_row_req_valid : std_logic := '0';
     
     -- Test control signals
     signal test_done : boolean := false;
@@ -71,7 +73,9 @@ architecture Behavioral of SPI_memory_controller_debug_tb is
             data_out_valid : out std_logic;
             data_out_ready : in std_logic;
             data_out_col : in integer;
-            data_out_row : in integer
+            data_out_row : in integer;
+            col_row_req_ready : out std_logic;
+            col_row_req_valid : in std_logic
         );
     end component;
 
@@ -92,7 +96,9 @@ begin
             data_out_valid => data_out_valid,
             data_out_ready => data_out_ready,
             data_out_col => data_out_col,
-            data_out_row => data_out_row
+            data_out_row => data_out_row,
+            col_row_req_ready => col_row_req_ready,
+            col_row_req_valid => col_row_req_valid
         );
     
     -- Clock generation
@@ -191,139 +197,169 @@ begin
         wait;
     end process;
     
-    -- Simple read process - just reads addresses throughout the test
+    -- Proper read process following RTL handshake protocol:
+    -- 1. Set col/row and assert col_row_req_valid
+    -- 2. Wait for FSM to reach WAIT_BRAM state
+    -- 3. Assert data_out_ready to load data
+    -- 4. Wait for data_out_valid
     data_out_ready_control: process
         variable col, row : integer;
     begin
         wait until rst = '0';
         data_out_ready <= '0';
+        col_row_req_valid <= '0';
         data_out_col <= 0;
         data_out_row <= 0;
-        
-        -- EARLY READ TEST: Try to read before any buffer is complete
-        wait for CLK_PERIOD * 20;
-        report "";
-        report "=== EARLY READ TEST: Attempting read before buffer complete ===";
-        report "    (Should wait in WAIT_FOR_DATA state)";
-        data_out_col <= 0;
-        data_out_row <= 0;
-        data_out_ready <= '1';
-        wait for CLK_PERIOD * 30;  -- Hold ready high while waiting
-        data_out_ready <= '0';
-        report "=== Early read test complete ===";
-        report "";
         
         -- Wait for first buffer to complete
         wait until pixels_sent >= PIXELS_PER_BUFFER;
-        wait for CLK_PERIOD * 10;
+        wait until col_row_req_ready = '1';
+        wait for CLK_PERIOD * 5;
         
-        -- Just do 10 simple read sessions with faster address changes
-        for read_session in 1 to 10 loop
-            report "=== READ SESSION " & integer'image(read_session) & " ===";
+        report "";
+        report "=== col_row_req_ready is HIGH - buffers available ===";
+        report "";
+        
+        -- Perform 15 individual read transactions (each toggles col_row_req_valid)
+        for read_transaction in 1 to 15 loop
+            -- Cycle through all possible addresses (0-8) repeatedly
+            col := (read_transaction - 1) mod IMAGE_WIDTH;
+            row := (read_transaction - 1) / IMAGE_WIDTH;
             
-            -- Read all 4 addresses in 2x2 grid
-            for i in 0 to PIXELS_PER_BUFFER - 1 loop
-                -- Convert linear address to col/row (2x2 grid)
-                col := i / IMAGE_WIDTH;
-                row := i mod IMAGE_WIDTH;
-                
-                data_out_col <= col;
-                data_out_row <= row;
-                wait for CLK_PERIOD * 2;  -- Reduced from 5 to 2
-                
-                data_out_ready <= '1';
-                report "  READ col=" & integer'image(col) & " row=" & integer'image(row) & 
-                       " (addr=" & integer'image(i) & ")";
-                wait for CLK_PERIOD;
-                
-                data_out_ready <= '0';
-                wait for CLK_PERIOD * 3;  -- Reduced from 10 to 3
-            end loop;
+            report "";
+            report "========================================";
+            report "READ TRANSACTION #" & integer'image(read_transaction) & " of 15";
+            report "========================================";
             
-            report "=== Session " & integer'image(read_session) & " complete ===";
+            -- STEP 1: Ensure signals are low initially (clean state)
+            col_row_req_valid <= '0';
+            data_out_ready <= '0';
+            report "  STEP 0: Both signals LOW (clean state)";
+            wait for CLK_PERIOD * 3;
             
-            -- Wait before next read session
-            wait for CLK_PERIOD * 10;  -- Reduced from 20 to 10
+            -- STEP 2: Present col/row address and assert col_row_req_valid
+            data_out_col <= col;
+            data_out_row <= row;
+            col_row_req_valid <= '1';
+            report "  STEP 1: col=" & integer'image(col) & " row=" & integer'image(row) & 
+                   " (linear addr=" & integer'image((read_transaction - 1) mod PIXELS_PER_BUFFER) & ")";
+            report "          >>> col_row_req_valid = '1' (ASSERTED) <<<";
+            wait for CLK_PERIOD * 2;
+            
+            -- Wait for FSM to process (READ_IDLE -> READ_ADDR -> WAIT_ADDR_SETTLE -> WAIT_BRAM)
+            report "  STEP 2: Waiting for FSM to reach WAIT_BRAM...";
+            wait for CLK_PERIOD * 4;
+            
+            -- STEP 3: Now assert data_out_ready to trigger data load
+            data_out_ready <= '1';
+            report "  STEP 3: >>> data_out_ready = '1' (trigger load) <<<";
+            
+            -- Wait for data_out_valid to assert
+            wait until data_out_valid = '1' for CLK_PERIOD * 10;
+            if data_out_valid = '1' then
+                report "  STEP 4: data_out_valid = '1', data = 0x" & 
+                       integer'image(to_integer(unsigned(data_out)));
+            else
+                report "  ERROR: Timeout waiting for data_out_valid!";
+            end if;
+            wait for CLK_PERIOD;
+            
+            -- STEP 4: Deassert both signals
+            data_out_ready <= '0';
+            col_row_req_valid <= '0';
+            report "  STEP 5: >>> col_row_req_valid = '0' (DEASSERTED) <<<";
+            report "          >>> data_out_ready = '0' (DEASSERTED) <<<";
+            report "          Transaction complete!";
+            report "";
+            
+            -- Longer gap between transactions to make toggles visible
+            wait for CLK_PERIOD * 10;
         end loop;
         
-        report "=== ALL READS DONE (10 sessions, 40 total data_out_ready pulses) ===";
+        report "";
+        report "============================================";
+        report "ALL READ TRANSACTIONS COMPLETE";
+        report "Total reads: 15 (col_row_req_valid toggled 15 times)";
+        report "============================================";
+        report "";
         
         wait;
     end process;
     
-    -- Monitor handshake and data flow with enhanced reporting
+    -- Monitor handshake and data flow
     transaction_monitor: process(clk)
-        variable buffer_fill_count : integer := 0;
-        variable last_data_out_ready : std_logic := '0';
-        variable transitions_seen : integer := 0;
-        variable stalls_detected : integer := 0;
+        variable write_count : integer := 0;
+        variable read_count : integer := 0;
+        variable last_col_row_req_ready : std_logic := '0';
     begin
         if rising_edge(clk) and rst = '0' then
-            -- Monitor successful data transfers (handshake completion)
+            -- Monitor successful writes
             if data_in_valid = '1' and data_in_ready = '1' then
-                buffer_fill_count := buffer_fill_count + 1;
+                write_count := write_count + 1;
                 
-                -- Detect buffer transitions (every PIXELS_PER_BUFFER pixels)
-                if (buffer_fill_count mod PIXELS_PER_BUFFER) = 0 then
-                    transitions_seen := transitions_seen + 1;
-                    report "    => TRANSITION " & integer'image(transitions_seen) & 
-                           ": Buffer complete at pixel " & integer'image(buffer_fill_count);
+                if (write_count mod PIXELS_PER_BUFFER) = 0 then
+                    report "    => WRITE: Buffer complete at pixel " & integer'image(write_count);
                 end if;
             end if;
             
-            -- Monitor data_out_ready transitions (indicates busy flag changes)
-            if data_out_ready /= last_data_out_ready then
-                if data_out_ready = '1' then
+            -- Monitor successful reads
+            if data_out_valid = '1' then
+                read_count := read_count + 1;
+                report "    <= READ #" & integer'image(read_count) & 
+                       ": data=" & integer'image(to_integer(unsigned(data_out)));
+            end if;
+            
+            -- Monitor col_row_req_ready transitions
+            if col_row_req_ready /= last_col_row_req_ready then
+                if col_row_req_ready = '1' then
                     report "";
-                    report "    >>> DATA_OUT_READY ASSERTED <<<";
-                    report "        -> Last completed buffer becomes BUSY";
-                    report "        -> Controller must skip to next available buffer";
+                    report "    >>> col_row_req_ready ASSERTED <<<";
+                    report "        -> Buffer(s) ready for reading";
                     report "";
                 else
                     report "";
-                    report "    >>> DATA_OUT_READY RELEASED <<<";
-                    report "        -> All buffers become AVAILABLE";
-                    report "        -> Normal rotation resumes";
+                    report "    >>> col_row_req_ready DEASSERTED <<<";
+                    report "        -> No complete buffers available";
                     report "";
                 end if;
-                last_data_out_ready := data_out_ready;
-            end if;
-            
-            -- Monitor when controller is not ready (indicates transition or all buffers busy)
-            if data_in_valid = '1' and data_in_ready = '0' then
-                stalls_detected := stalls_detected + 1;
-                if stalls_detected = 1 or (stalls_detected mod 5) = 0 then
-                    report "    [STALL] detected (cycle " & integer'image(stalls_detected) & 
-                           "): Transition or all buffers busy";
-                end if;
+                last_col_row_req_ready := col_row_req_ready;
             end if;
         end if;
     end process;
     
-    -- Simple test control
+    -- Test control
     test_control: process
     begin
         rst <= '1';
         report "";
         report "============================================================";
-        report "   SPI MEMORY CONTROLLER SIMPLE TESTBENCH                  ";
-        report "   Testing triple-buffer with multiple reads               ";
+        report "   SPI MEMORY CONTROLLER TESTBENCH                          ";
+        report "   Testing proper read/write handshake protocol             ";
         report "============================================================";
+        report "";
+        report "Protocol (each transaction toggles col_row_req_valid):";
+        report "  1. Deassert col_row_req_valid (ensure clean state)";
+        report "  2. Set col/row and assert col_row_req_valid";
+        report "  3. Wait ~3 cycles for FSM (READ_ADDR -> WAIT_BRAM)";
+        report "  4. Assert data_out_ready to load data";
+        report "  5. Wait for data_out_valid = '1'";
+        report "  6. Deassert both col_row_req_valid and data_out_ready";
         report "";
         wait for CLK_PERIOD * 5;
         rst <= '0';
         report ">> Test starting...";
         report "";
         
-        -- Wait for all pixels to be written
+        -- Wait for all pixels to be written and reads to complete
         wait until pixels_sent >= TOTAL_TEST_PIXELS;
-        wait for CLK_PERIOD * 1000;
+        wait for CLK_PERIOD * 2000;
         
         report "";
         report "============================================================";
         report "   TEST COMPLETE                                            ";
-        report "   Total pixels: " & integer'image(TOTAL_TEST_PIXELS);
-        report "   Read sessions: 10 (40 total reads)";
+        report "   Total pixels written: " & integer'image(TOTAL_TEST_PIXELS);
+        report "   Read transactions: 15 (col_row_req_valid toggled 15x)";
+        report "   Each transaction: DEASSERT -> ASSERT -> DEASSERT";
         report "============================================================";
         report "";
         

@@ -7,8 +7,9 @@ set_property CFGBVS VCCO [current_design]
 set_property CONFIG_VOLTAGE 3.3 [current_design]
 
 ## System Clock (100 MHz)
-set_property -dict { PACKAGE_PIN E3    IOSTANDARD LVCMOS33 } [get_ports { clk100 }];
-create_clock -add -name sys_clk_pin -period 10.00 -waveform {0 5} [get_ports { clk100 }];
+set_property -dict { PACKAGE_PIN E3    IOSTANDARD LVCMOS33 } [get_ports { clk }];
+create_clock -add -name sys_clk_pin -period 10.00 -waveform {0 5} [get_ports { clk }];
+
 
 ## Reset Button (btn[0] - active high)
 set_property -dict { PACKAGE_PIN D9    IOSTANDARD LVCMOS33 } [get_ports { btn_reset }];

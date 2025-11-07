@@ -48,12 +48,6 @@ entity cnn_top is
         rst          : in  std_logic;
         enable       : in  std_logic;
 
-        -- Request FROM external controller (what output position is needed)
-        output_req_row   : in  integer;
-        output_req_col   : in  integer;
-        output_req_valid : in  std_logic;
-        output_req_ready : out std_logic;
-
         -- Request TO input provider (what input positions we need)
         input_req_row    : out integer;
         input_req_col    : out integer;
@@ -61,12 +55,12 @@ entity cnn_top is
         input_req_ready  : in  std_logic;
 
         -- Data FROM input provider
-        input_pixel      : in  WORD_ARRAY(0 to CONV_1_INPUT_CHANNELS-1);
+        input_pixel      : in  WORD;
         input_valid      : in  std_logic;
         input_ready      : out std_logic;
 
         -- Data TO external consumer (final output)
-        output_pixel     : out WORD_ARRAY(0 to CONV_2_NUM_FILTERS-1);
+        output_guess     : out WORD;
         output_valid     : out std_logic;
         output_ready     : in  std_logic
     );
@@ -128,6 +122,13 @@ architecture Structural of cnn_top is
     signal pool2_in_req_col     : integer;
     signal pool2_in_req_valid   : std_logic;
     signal pool2_in_req_ready   : std_logic;
+    
+    -- Output signals (not connected, just declared)
+    signal output_req_row       : integer;
+    signal output_req_col       : integer;
+    signal output_req_valid     : std_logic;
+    signal output_req_ready     : std_logic;
+    signal output_pixel         : WORD_ARRAY(0 to CONV_2_NUM_FILTERS-1);
 
 begin
     -- Instantiate 1st convolution layer
@@ -301,7 +302,7 @@ begin
     conv1_in_req_ready <= input_req_ready;
 
     -- Connect top-level input data to conv1's input data
-    conv1_pixel_in       <= input_pixel;
+    conv1_pixel_in(0)       <= input_pixel;
     conv1_pixel_in_valid <= input_valid;
     input_ready          <= conv1_pixel_in_ready;
 
