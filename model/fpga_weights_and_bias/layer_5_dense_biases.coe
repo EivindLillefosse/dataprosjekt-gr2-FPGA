@@ -5,7 +5,7 @@
 ; Range: [-2.0, 1.984375]
 ;
 memory_initialization_radix=16; Hexadecimal format
-memory_initialization_vector=00,FF,01,FE,FF,FE,FF,01,FE,FF,FF,01,FE,FD,FF,FF
-,FF,02,FE,FF,FF,01,01,FF,01,00,00,FE,01,FF,FF,00
-,FE,FF,FF,FF,FF,FF,FE,FE,00,FF,FF,FF,FE,00,FF,FF
-,FF,00,FF,FF,00,02,FF,FF,FF,FF,00,00,00,FF,FE,FF;
+memory_initialization_vector=00,FF,FE,FF,FF,FF,00,FF,FE,FF,00,FF,FF,FF,00,FF
+,FF,FF,FF,FF,FF,FF,FF,FF,FF,FF,FF,00,FF,FF,FF,FF
+,01,FF,00,00,FF,FF,00,FF,FF,FF,FF,00,00,FF,FF,FF
+,00,FF,FF,FF,00,FF,FF,FF,00,00,FF,FF,FF,FF,FF,FE;

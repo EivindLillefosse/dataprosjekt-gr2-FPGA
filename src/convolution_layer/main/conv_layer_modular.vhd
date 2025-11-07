@@ -255,7 +255,8 @@ begin
             NUM_CHANNELS => NUM_FILTERS,
             INPUT_WIDTH  => 16,  -- Q2.12
             OUTPUT_WIDTH => 8,   -- Q1.6
-            SHIFT_AMOUNT => 6    -- 12 - 6 = 6 bits to shift
+            SHIFT_AMOUNT => 6,   -- 12 - 6 = 6 bits to shift
+            SKIP_SHIFT   => LAYER_ID
         )
         port map (
             clk       => clk,
