@@ -11,7 +11,7 @@ import re
 import os
 from typing import List, Dict, Any, Optional
 
-def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
+def parse_sim_output_file(filename: str, bits: int = 16) -> List[Dict[str, Any]]:
     """
     Parse Vivado simulation log and accept either:
       - machine-friendly lines like: SIM_OUT layer=layer0 r=0 c=1 filter=0 raw=0xffea scale=4096
@@ -100,7 +100,8 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
                         idx = int(m_hex.group(1))
                         hex_str = m_hex.group(2)
                         # Interpret as 8-bit two's complement
-                        current['filters'][idx] = parse_int(hex_str, bits=8)
+                        # Use provided bit-width for two's complement interpretation
+                        current['filters'][idx] = parse_int(hex_str, bits=bits)
                         current['raw_lines'].append(line)
                         continue
 
@@ -110,7 +111,7 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
                         idx = int(m_hexdec.group(1))
                         dec_str = m_hexdec.group(2)
                         # dec in TB is unsigned decimal; convert to signed 8-bit
-                        current['filters'][idx] = parse_int(dec_str, bits=8)
+                        current['filters'][idx] = parse_int(dec_str, bits=bits)
                         current['raw_lines'].append(line)
                         continue
 
@@ -119,7 +120,7 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
                     if m3:
                         idx = int(m3.group(1))
                         raw_str = m3.group(2)
-                        current['filters'][idx] = parse_int(raw_str)
+                        current['filters'][idx] = parse_int(raw_str, bits=bits)
                         current['raw_lines'].append(line)
                         continue
 
@@ -129,11 +130,11 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
 
     return outputs
 
-def parse_vivado_log_file(filename: str) -> Dict[str, Any]:
+def parse_vivado_log_file(filename: str, bits: int = 16) -> Dict[str, Any]:
     """
     Backwards-compatible parser wrapper. Returns dict with 'inputs' and 'outputs'.
     """
-    outputs = parse_sim_output_file(filename)
+    outputs = parse_sim_output_file(filename, bits=bits)
     return {'inputs': [], 'outputs': outputs}
 
 def load_python_data(filename: str = "model/intermediate_values.npz"):
@@ -465,7 +466,7 @@ def main():
     args = parser.parse_args()
 
     npz_archive = load_python_data(args.npz)
-    parsed = parse_vivado_log_file(args.vivado)
+    parsed = parse_vivado_log_file(args.vivado, bits=args.vhdl_bits)
     vhdl_outputs = parsed.get('outputs', [])
 
     if npz_archive is None:

@@ -61,13 +61,13 @@ architecture Behavioral of conv_layer_modular_tb is
     signal pixel_in_req_valid  : std_logic;
     signal pixel_in_req_ready  : std_logic := '0';
     
-    -- Input data TO DUT
-    signal pixel_in            : WORD_ARRAY(0 to INPUT_CHANNELS-1);
+    -- Input data TO DUT (16-bit for flexibility, lower 8 bits used for Layer 0)
+    signal pixel_in            : WORD_ARRAY_16(0 to INPUT_CHANNELS-1);
     signal pixel_in_valid      : std_logic := '0';
     signal pixel_in_ready      : std_logic;
     
-    -- Output data FROM DUT
-    signal pixel_out           : WORD_ARRAY(0 to NUM_FILTERS-1);
+    -- Output data FROM DUT (16-bit outputs)
+    signal pixel_out           : WORD_ARRAY_16(0 to NUM_FILTERS-1);
     signal pixel_out_valid     : std_logic;
     signal pixel_out_ready     : std_logic := '0';
     
@@ -396,8 +396,8 @@ begin
                     -- Provide data from test image
                     if pending_row >= 0 and pending_row < IMAGE_SIZE and 
                        pending_col >= 0 and pending_col < IMAGE_SIZE then
-                        -- Valid pixel
-                        pixel_in(0) <= std_logic_vector(to_unsigned(test_image(pending_row, pending_col), 8));
+                        -- Valid pixel (extend 8-bit to 16-bit for Layer 0 compatibility)
+                        pixel_in(0) <= std_logic_vector(resize(to_unsigned(test_image(pending_row, pending_col), 8), 16));
                         report "Upstream: Providing pixel [" & integer'image(pending_row) & "," & 
                                integer'image(pending_col) & "] = " & 
                                integer'image(test_image(pending_row, pending_col)) severity note;
@@ -465,8 +465,8 @@ begin
                 write(debug_line, ']');
                 writeline(debug_file, debug_line);
 
-                -- Output meta: include scale & bitwidth so external parsers know how to interpret values
-                write(debug_line, string'("OUTPUT_META: scale=64 bits=8"));
+                -- Output meta: 16-bit outputs (Q2.12 format before final scaling)
+                write(debug_line, string'("OUTPUT_META: scale=4096 bits=16"));
                 writeline(debug_file, debug_line);
 
                 for i in 0 to NUM_FILTERS-1 loop

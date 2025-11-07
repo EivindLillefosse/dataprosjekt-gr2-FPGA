@@ -551,7 +551,9 @@ def export_to_FPGA(model, q_format="Q1.6"):
                                 weight_idx = ((kh * kernel_w + kw) * in_channels + c_in) * num_filters + f_idx
                                 qw = quantized_weights[weight_idx]
                                 byte_value = int(qw) & 0xFF
-                                packed_value |= (byte_value << (f_idx * 8))
+                                # Pack MSB-first so that filter 0 occupies the most significant byte
+                                # This matches the VHDL BRAM unpacking convention (MSB-first)
+                                packed_value |= (byte_value << ((num_filters - 1 - f_idx) * 8))
                             
                             # Write packed value
                             num_hex_chars = (num_filters * 8 + 3) // 4

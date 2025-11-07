@@ -60,28 +60,28 @@ architecture Behavioral of cnn_tb is
     signal input_req_ready  : std_logic := '0';
     
     -- Data signals
-    signal input_pixel : WORD_ARRAY(0 to 0) := (others => (others => '0'));
+    signal input_pixel : WORD_ARRAY_16(0 to 0) := (others => (others => '0'));
     signal input_valid : std_logic := '0';
     signal input_ready : std_logic;
     
-    signal output_pixel : WORD_ARRAY(0 to FINAL_NUM_FILTERS-1);
+    signal output_pixel : WORD_ARRAY_16(0 to FINAL_NUM_FILTERS-1);
     signal output_valid : std_logic;
     signal output_ready : std_logic := '0';
     
     -- DEBUG: Intermediate layer signals
-    signal debug_conv1_pixel : WORD_ARRAY(0 to 7);  -- 8 filters
+    signal debug_conv1_pixel : WORD_ARRAY_16(0 to 7);  -- 8 filters
     signal debug_conv1_valid : std_logic;
     signal debug_conv1_ready : std_logic := '0';
     signal debug_conv1_row   : natural := 0;
     signal debug_conv1_col   : natural := 0;
     
-    signal debug_pool1_pixel : WORD_ARRAY(0 to 7);  -- 8 filters
+    signal debug_pool1_pixel : WORD_ARRAY_16(0 to 7);  -- 8 filters
     signal debug_pool1_valid : std_logic;
     signal debug_pool1_ready : std_logic := '0';
     signal debug_pool1_row   : natural := 0;
     signal debug_pool1_col   : natural := 0;
     
-    signal debug_conv2_pixel : WORD_ARRAY(0 to 15); -- 16 filters
+    signal debug_conv2_pixel : WORD_ARRAY_16(0 to 15); -- 16 filters
     signal debug_conv2_valid : std_logic;
     signal debug_conv2_ready : std_logic := '0';
     signal debug_conv2_row   : natural := 0;
@@ -200,9 +200,9 @@ begin
                 
                 -- Provide data for pending request
                 if req_pending then
-                    if req_row_buf >= 0 and req_row_buf < IMAGE_SIZE and 
-                       req_col_buf >= 0 and req_col_buf < IMAGE_SIZE then
-                        input_pixel(0) <= std_logic_vector(to_unsigned(test_image(req_row_buf, req_col_buf), 8));
+                          if req_row_buf >= 0 and req_row_buf < IMAGE_SIZE and 
+                              req_col_buf >= 0 and req_col_buf < IMAGE_SIZE then
+                                input_pixel(0) <= std_logic_vector(to_unsigned(test_image(req_row_buf, req_col_buf), 16));
                     else
                         -- Provide zero for out-of-bounds pixels (padding)
                         input_pixel(0) <= (others => '0');

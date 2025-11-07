@@ -61,32 +61,32 @@ entity cnn_top_debug is
         input_req_ready  : in  std_logic;
 
         -- Data FROM input provider
-        input_pixel      : in  WORD_ARRAY(0 to CONV_1_INPUT_CHANNELS-1);
+        input_pixel      : in  WORD_ARRAY_16(0 to CONV_1_INPUT_CHANNELS-1);
         input_valid      : in  std_logic;
         input_ready      : out std_logic;
 
         -- Data TO external consumer (final output)
-        output_pixel     : out WORD_ARRAY(0 to CONV_2_NUM_FILTERS-1);
+        output_pixel     : out WORD_ARRAY_16(0 to CONV_2_NUM_FILTERS-1);
         output_valid     : out std_logic;
         output_ready     : in  std_logic;
 
         -- DEBUG: Intermediate layer outputs
         -- Conv1 output (after convolution, before pool1)
-        debug_conv1_pixel       : out WORD_ARRAY(0 to CONV_1_NUM_FILTERS-1);
+        debug_conv1_pixel       : out WORD_ARRAY_16(0 to CONV_1_NUM_FILTERS-1);
         debug_conv1_valid       : out std_logic;
         debug_conv1_ready       : in  std_logic;
         debug_conv1_row         : out integer;
         debug_conv1_col         : out integer;
         
         -- Pool1 output (after first pooling, before conv2)
-        debug_pool1_pixel       : out WORD_ARRAY(0 to CONV_1_NUM_FILTERS-1);
+        debug_pool1_pixel       : out WORD_ARRAY_16(0 to CONV_1_NUM_FILTERS-1);
         debug_pool1_valid       : out std_logic;
         debug_pool1_ready       : in  std_logic;
         debug_pool1_row         : out integer;
         debug_pool1_col         : out integer;
         
         -- Conv2 output (after second convolution, before pool2)
-        debug_conv2_pixel       : out WORD_ARRAY(0 to CONV_2_NUM_FILTERS-1);
+        debug_conv2_pixel       : out WORD_ARRAY_16(0 to CONV_2_NUM_FILTERS-1);
         debug_conv2_valid       : out std_logic;
         debug_conv2_ready       : in  std_logic;
         debug_conv2_row         : out integer;
@@ -107,11 +107,11 @@ architecture Structural of cnn_top_debug is
     signal conv1_in_req_valid   : std_logic;
     signal conv1_in_req_ready   : std_logic;
     
-    signal conv1_pixel_out      : WORD_ARRAY(0 to CONV_1_NUM_FILTERS-1);
+    signal conv1_pixel_out      : WORD_ARRAY_16(0 to CONV_1_NUM_FILTERS-1);
     signal conv1_pixel_out_valid: std_logic;
     signal conv1_pixel_out_ready: std_logic;
     
-    signal conv1_pixel_in       : WORD_ARRAY(0 to CONV_1_INPUT_CHANNELS-1);
+    signal conv1_pixel_in       : WORD_ARRAY_16(0 to CONV_1_INPUT_CHANNELS-1);
     signal conv1_pixel_in_valid : std_logic;
     signal conv1_pixel_in_ready : std_logic;
 
@@ -126,7 +126,7 @@ architecture Structural of cnn_top_debug is
     signal pool1_in_req_valid   : std_logic;
     signal pool1_in_req_ready   : std_logic;
     
-    signal pool1_pixel_out      : WORD_ARRAY(0 to CONV_1_NUM_FILTERS-1);
+    signal pool1_pixel_out      : WORD_ARRAY_16(0 to CONV_1_NUM_FILTERS-1);
     signal pool1_pixel_out_valid: std_logic;
     signal pool1_pixel_out_ready: std_logic;
 
@@ -141,7 +141,7 @@ architecture Structural of cnn_top_debug is
     signal conv2_in_req_valid   : std_logic;
     signal conv2_in_req_ready   : std_logic;
     
-    signal conv2_pixel_out      : WORD_ARRAY(0 to CONV_2_NUM_FILTERS-1);
+    signal conv2_pixel_out      : WORD_ARRAY_16(0 to CONV_2_NUM_FILTERS-1);
     signal conv2_pixel_out_valid: std_logic;
     signal conv2_pixel_out_ready: std_logic;
 
