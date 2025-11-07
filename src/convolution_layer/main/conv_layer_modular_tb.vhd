@@ -71,8 +71,6 @@ architecture Behavioral of conv_layer_modular_tb is
     signal pixel_out_valid     : std_logic;
     signal pixel_out_ready     : std_logic := '0';
     
-    signal layer_done : STD_LOGIC;
-    
     -- Test image data (28x28 image)
     type test_image_type is array (0 to IMAGE_SIZE-1, 0 to IMAGE_SIZE-1) of integer;
     
@@ -361,8 +359,7 @@ begin
             pixel_in_ready      => pixel_in_ready,
             pixel_out           => pixel_out,
             pixel_out_valid     => pixel_out_valid,
-            pixel_out_ready     => pixel_out_ready,
-            layer_done          => layer_done
+            pixel_out_ready     => pixel_out_ready
         );
 
     -- Clock process
@@ -555,11 +552,29 @@ begin
         
         wait for CLK_PERIOD * 5;
         
-        -- Test multiple runs
+        -- Test multiple runs (request a few more positions to verify)
         report "Testing second MODULAR convolution run...";
         enable <= '1';
         
-        wait until layer_done = '1';
+        -- Request a few more output positions
+        for i in 0 to 4 loop
+            pixel_out_req_row <= i;
+            pixel_out_req_col <= i;
+            pixel_out_req_valid <= '1';
+            wait for CLK_PERIOD;
+            while pixel_out_req_ready = '0' loop
+                wait for CLK_PERIOD;
+            end loop;
+            pixel_out_req_valid <= '0';
+            
+            -- Wait for output
+            pixel_out_ready <= '1';
+            wait for CLK_PERIOD;
+            while pixel_out_valid = '0' loop
+                wait for CLK_PERIOD;
+            end loop;
+            pixel_out_ready <= '0';
+        end loop;
         
         report "Second MODULAR convolution completed!";
         

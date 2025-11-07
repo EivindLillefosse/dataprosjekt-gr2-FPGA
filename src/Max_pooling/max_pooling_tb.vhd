@@ -105,232 +105,198 @@ begin
 
     -- Upstream provider process (simulates Conv layer providing input data)
     upstream_provider: process(clk)
-        variable req_pending : std_logic := '0';
-        variable pending_row : integer := 0;
-        variable pending_col : integer := 0;
+        type provider_state_t is (PROV_IDLE, PROV_WAIT_ACK, PROV_WAIT_DATA, PROV_SEND_DATA);
+        variable state        : provider_state_t := PROV_IDLE;
+        variable pending_row  : integer := 0;
+        variable pending_col  : integer := 0;
+        variable ack_delay    : integer range 0 to 2 := 0;
+        variable data_delay   : integer range 0 to 2 := 0;
     begin
         if rising_edge(clk) then
             if rst = '1' then
                 pixel_in_req_ready <= '0';
-                pixel_in_valid <= '0';
-                req_pending := '0';
+                pixel_in_valid     <= '0';
+                state              := PROV_IDLE;
+                ack_delay          := 0;
+                data_delay         := 0;
             else
-                -- Default
                 pixel_in_req_ready <= '0';
-                pixel_in_valid <= '0';
-                
-                -- If we have a pending request, provide the data
-                if req_pending = '1' then
-                    -- Provide data from test matrix
-                    for ch in 0 to INPUT_CHANNELS-1 loop
-                        pixel_in(ch) <= std_logic_vector(to_signed(
-                            TEST_MATRIX(pending_row, pending_col) + ch, 
-                            WORD'length));
-                    end loop;
-                    pixel_in_valid <= '1';
-                    req_pending := '0';
-                end if;
-                
-                -- If pooling requests an input position, acknowledge and schedule data
-                if pixel_in_req_valid = '1' and req_pending = '0' then
-                    pixel_in_req_ready <= '1';  -- Acknowledge request
-                    pending_row := pixel_in_req_row;
-                    pending_col := pixel_in_req_col;
-                    req_pending := '1';
-                    
-                    report "Upstream: Received request for position [" & 
-                           integer'image(pixel_in_req_row) & "," & 
-                           integer'image(pixel_in_req_col) & "]" severity note;
-                end if;
+                pixel_in_valid     <= '0';
+
+                case state is
+                    when PROV_IDLE =>
+                        if pixel_in_req_valid = '1' then
+                            pending_row := pixel_in_req_row;
+                            pending_col := pixel_in_req_col;
+                            ack_delay   := (pending_row + pending_col) mod 2;
+                            data_delay  := (pending_row + pending_col + 1) mod 2;
+                            state       := PROV_WAIT_ACK;
+
+                            report "Upstream: Received request for position [" &
+                                   integer'image(pending_row) & "," &
+                                   integer'image(pending_col) & "]" severity note;
+                        end if;
+
+                    when PROV_WAIT_ACK =>
+                        if ack_delay = 0 then
+                            pixel_in_req_ready <= '1';
+                            state              := PROV_WAIT_DATA;
+                        else
+                            ack_delay := ack_delay - 1;
+                        end if;
+
+                    when PROV_WAIT_DATA =>
+                        if data_delay = 0 then
+                            state := PROV_SEND_DATA;
+                        else
+                            data_delay := data_delay - 1;
+                        end if;
+
+                    when PROV_SEND_DATA =>
+                        for ch in 0 to INPUT_CHANNELS-1 loop
+                            pixel_in(ch) <= std_logic_vector(to_signed(
+                                TEST_MATRIX(pending_row, pending_col) + ch,
+                                WORD'length));
+                        end loop;
+                        pixel_in_valid <= '1';
+                        state          := PROV_IDLE;
+                end case;
             end if;
         end if;
     end process;
 
     -- Main test stimulus (acts as downstream consumer requesting outputs)
     stim_proc: process
-        variable received_val : integer;
-        variable expected_val : integer;
-        variable first_result : WORD_ARRAY(0 to INPUT_CHANNELS-1);
-        variable test_pass : boolean := true;
+        variable test_pass    : boolean := true;
+        variable tmp_result   : WORD_ARRAY(0 to INPUT_CHANNELS-1);
+        variable baseline     : WORD_ARRAY(0 to INPUT_CHANNELS-1);
+
+        procedure execute_request(
+            constant out_row      : integer;
+            constant out_col      : integer;
+            constant hold_cycles  : integer;
+            constant tag          : string;
+            variable captured     : out WORD_ARRAY(0 to INPUT_CHANNELS-1);
+            variable local_status : inout boolean) is
+            variable first_capture : WORD_ARRAY(0 to INPUT_CHANNELS-1);
+            variable received_val  : integer;
+            variable expected_val  : integer;
+        begin
+            report tag & ": Requesting output position [" &
+                   integer'image(out_row) & "," &
+                   integer'image(out_col) & "]" severity note;
+
+            pixel_out_req_row   <= out_row;
+            pixel_out_req_col   <= out_col;
+            pixel_out_req_valid <= '1';
+
+            wait until rising_edge(clk) and pixel_out_req_ready = '1';
+            pixel_out_req_valid <= '0';
+
+            wait until rising_edge(clk);
+            while pixel_out_valid = '0' loop
+                wait until rising_edge(clk);
+            end loop;
+
+            first_capture := pixel_out;
+
+            for delay in 1 to hold_cycles loop
+                wait until rising_edge(clk);
+                if pixel_out_valid /= '1' then
+                    report tag & ": output_valid dropped before READY handshake" severity error;
+                    local_status := false;
+                end if;
+                for ch in 0 to INPUT_CHANNELS-1 loop
+                    if pixel_out(ch) /= first_capture(ch) then
+                        report tag & ": Output changed while READY='0' at channel " &
+                               integer'image(ch) severity error;
+                        local_status := false;
+                    end if;
+                end loop;
+            end loop;
+
+            pixel_out_ready <= '1';
+            wait until rising_edge(clk);
+            if pixel_out_valid /= '1' then
+                report tag & ": output_valid was not asserted during READY handshake" severity error;
+                local_status := false;
+            end if;
+            pixel_out_ready <= '0';
+
+            captured := first_capture;
+
+            for ch in 0 to INPUT_CHANNELS-1 loop
+                received_val := to_integer(signed(first_capture(ch)));
+                expected_val := EXPECTED_OUTPUT(out_row, out_col) + ch;
+
+                if received_val /= expected_val then
+                    report tag & ": channel " & integer'image(ch) &
+                           " expected " & integer'image(expected_val) &
+                           " but got " & integer'image(received_val) severity error;
+                    local_status := false;
+                else
+                    report tag & ": channel " & integer'image(ch) &
+                           " = " & integer'image(received_val) severity note;
+                end if;
+            end loop;
+
+            wait until rising_edge(clk);
+            if pixel_out_valid = '1' then
+                report tag & ": output_valid stuck high after READY handshake" severity error;
+                local_status := false;
+            end if;
+        end procedure;
     begin
-        -- Initial reset
         rst <= '1';
         pixel_out_req_valid <= '0';
-        pixel_out_ready <= '0';
+        pixel_out_ready     <= '0';
         wait for 5*CLK_PERIOD;
-        
+
         rst <= '0';
         wait for 2*CLK_PERIOD;
-        
-        report "=== Starting Max Pooling Test (Request/Response Protocol) ===" severity note;
+
+        report "=== Starting Max Pooling Test (Robust Request/Response Protocol) ===" severity note;
         report "Requesting 4x4 output from 8x8 input" severity note;
-        
-        -- Test 1: Request all 16 output positions (4x4 grid) - FIRST PASS
-        report "=== Test 1: First pass through all positions ===" severity note;
+
+        report "=== Test 1: Sweep all positions with varied READY latency ===" severity note;
         for out_row in 0 to OUTPUT_SIZE-1 loop
             for out_col in 0 to OUTPUT_SIZE-1 loop
-                report "Requesting output position [" & integer'image(out_row) & 
-                       "," & integer'image(out_col) & "]" severity note;
-                
-                -- Send request
-                pixel_out_req_row <= out_row;
-                pixel_out_req_col <= out_col;
-                pixel_out_req_valid <= '1';
-                
-                wait until rising_edge(clk) and pixel_out_req_ready = '1';
-                pixel_out_req_valid <= '0';
-                wait for CLK_PERIOD;
-                
-                -- Wait for output to be ready
-                wait until rising_edge(clk) and pixel_out_valid = '1';
-                
-                -- Accept the output
-                pixel_out_ready <= '1';
-                
-                -- Verify the result for ALL channels
-                for ch in 0 to INPUT_CHANNELS-1 loop
-                    received_val := to_integer(signed(pixel_out(ch)));
-                    expected_val := EXPECTED_OUTPUT(out_row, out_col) + ch;
-                    
-                    if received_val = expected_val then
-                        report "PASS: Output[" & integer'image(out_row) & "," & 
-                               integer'image(out_col) & "][ch" & integer'image(ch) & "] = " & 
-                               integer'image(received_val) severity note;
-                    else
-                        report "FAIL: Output[" & integer'image(out_row) & "," & 
-                               integer'image(out_col) & "][ch" & integer'image(ch) & 
-                               "], expected " & integer'image(expected_val) & 
-                               " but got " & integer'image(received_val) severity error;
-                        test_pass := false;
-                    end if;
-                end loop;
-                
-                wait for CLK_PERIOD;
-                pixel_out_ready <= '0';
-                wait for 2*CLK_PERIOD;
+                execute_request(out_row, out_col, (out_row + out_col) mod 3, "Test1", tmp_result, test_pass);
             end loop;
         end loop;
-        
-        -- Test 2: CRITICAL - Request same position multiple times to test for state persistence bug
-        report "=== Test 2: Determinism test - Request [0,0] five times ===" severity note;
-        for repeat in 1 to 5 loop
-            report "Repeat #" & integer'image(repeat) & ": Requesting [0,0]" severity note;
-            
-            pixel_out_req_row <= 0;
-            pixel_out_req_col <= 0;
-            pixel_out_req_valid <= '1';
-            
-            wait until rising_edge(clk) and pixel_out_req_ready = '1';
-            pixel_out_req_valid <= '0';
-            wait for CLK_PERIOD;
-            
-            wait until rising_edge(clk) and pixel_out_valid = '1';
-            pixel_out_ready <= '1';
-            
-            if repeat = 1 then
-                -- Store first result
-                first_result := pixel_out;
-                report "First result [0,0][ch0] = " & integer'image(to_integer(signed(pixel_out(0)))) severity note;
-            else
-                -- Compare with first result
-                for ch in 0 to INPUT_CHANNELS-1 loop
-                    if pixel_out(ch) /= first_result(ch) then
-                        report "DETERMINISM FAILURE: Repeat #" & integer'image(repeat) & 
-                               " [0,0][ch" & integer'image(ch) & "] = " & 
-                               integer'image(to_integer(signed(pixel_out(ch)))) & 
-                               " but first was " & integer'image(to_integer(signed(first_result(ch)))) 
-                               severity error;
-                        test_pass := false;
-                    else
-                        report "DETERMINISM OK: Repeat #" & integer'image(repeat) & 
-                               " [0,0][ch" & integer'image(ch) & "] = " & 
-                               integer'image(to_integer(signed(pixel_out(ch)))) severity note;
-                    end if;
-                end loop;
-            end if;
-            
-            wait for CLK_PERIOD;
-            pixel_out_ready <= '0';
-            wait for 2*CLK_PERIOD;
+
+        report "=== Test 2: Determinism test - repeated requests for [0,0] ===" severity note;
+        execute_request(0, 0, 2, "Test2_initial", baseline, test_pass);
+        for repeat in 2 to 5 loop
+            execute_request(0, 0, repeat mod 3, "Test2_repeat", tmp_result, test_pass);
+            for ch in 0 to INPUT_CHANNELS-1 loop
+                if tmp_result(ch) /= baseline(ch) then
+                    report "Determinism failure: repeat #" & integer'image(repeat) &
+                           " channel " & integer'image(ch) &
+                           " changed from " & integer'image(to_integer(signed(baseline(ch)))) &
+                           " to " & integer'image(to_integer(signed(tmp_result(ch)))) severity error;
+                    test_pass := false;
+                else
+                    report "Determinism ok: repeat #" & integer'image(repeat) &
+                           " channel " & integer'image(ch) &
+                           " remains " & integer'image(to_integer(signed(tmp_result(ch)))) severity note;
+                end if;
+            end loop;
         end loop;
-        
-        -- Test 3: Request different positions in sequence to ensure proper reset
-        report "=== Test 3: Reset test - Different positions in sequence ===" severity note;
-        for test_iter in 1 to 3 loop
-            report "Iteration #" & integer'image(test_iter) severity note;
-            
-            -- Request [0,0]
-            pixel_out_req_row <= 0;
-            pixel_out_req_col <= 0;
-            pixel_out_req_valid <= '1';
-            wait until rising_edge(clk) and pixel_out_req_ready = '1';
-            pixel_out_req_valid <= '0';
-            wait for CLK_PERIOD;
-            wait until rising_edge(clk) and pixel_out_valid = '1';
-            pixel_out_ready <= '1';
-            
-            received_val := to_integer(signed(pixel_out(0)));
-            expected_val := EXPECTED_OUTPUT(0, 0);
-            if received_val /= expected_val then
-                report "FAIL: [0,0] expected " & integer'image(expected_val) & 
-                       " got " & integer'image(received_val) severity error;
-                test_pass := false;
-            end if;
-            wait for CLK_PERIOD;
-            pixel_out_ready <= '0';
-            wait for 2*CLK_PERIOD;
-            
-            -- Request [1,1]
-            pixel_out_req_row <= 1;
-            pixel_out_req_col <= 1;
-            pixel_out_req_valid <= '1';
-            wait until rising_edge(clk) and pixel_out_req_ready = '1';
-            pixel_out_req_valid <= '0';
-            wait for CLK_PERIOD;
-            wait until rising_edge(clk) and pixel_out_valid = '1';
-            pixel_out_ready <= '1';
-            
-            received_val := to_integer(signed(pixel_out(0)));
-            expected_val := EXPECTED_OUTPUT(1, 1);
-            if received_val /= expected_val then
-                report "FAIL: [1,1] expected " & integer'image(expected_val) & 
-                       " got " & integer'image(received_val) severity error;
-                test_pass := false;
-            end if;
-            wait for CLK_PERIOD;
-            pixel_out_ready <= '0';
-            wait for 2*CLK_PERIOD;
-            
-            -- Request [0,0] again - should give same result as first time
-            pixel_out_req_row <= 0;
-            pixel_out_req_col <= 0;
-            pixel_out_req_valid <= '1';
-            wait until rising_edge(clk) and pixel_out_req_ready = '1';
-            pixel_out_req_valid <= '0';
-            wait for CLK_PERIOD;
-            wait until rising_edge(clk) and pixel_out_valid = '1';
-            pixel_out_ready <= '1';
-            
-            received_val := to_integer(signed(pixel_out(0)));
-            expected_val := EXPECTED_OUTPUT(0, 0);
-            if received_val /= expected_val then
-                report "FAIL: [0,0] second request expected " & integer'image(expected_val) & 
-                       " got " & integer'image(received_val) & " (state persistence bug!)" severity error;
-                test_pass := false;
-            end if;
-            wait for CLK_PERIOD;
-            pixel_out_ready <= '0';
-            wait for 2*CLK_PERIOD;
-        end loop;
-        
+
+        report "=== Test 3: Interleaved positions to ensure state reset ===" severity note;
+        execute_request(0, 0, 1, "Test3_phaseA", tmp_result, test_pass);
+        execute_request(1, 1, 2, "Test3_phaseB", tmp_result, test_pass);
+        execute_request(0, 0, 0, "Test3_phaseC", tmp_result, test_pass);
+
         if test_pass then
             report "=== ALL TESTS PASSED ===" severity note;
         else
             report "=== SOME TESTS FAILED ===" severity error;
         end if;
-        
+
         report "=== Max Pooling Test Complete ===" severity note;
-        
+
         wait for 10*CLK_PERIOD;
         test_done <= true;
         wait;
