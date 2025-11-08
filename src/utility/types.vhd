@@ -12,6 +12,7 @@ package types_pkg is
 
     -- Type definitions
     subtype WORD is STD_LOGIC_VECTOR(7 downto 0);
+    subtype WORD_16 is STD_LOGIC_VECTOR(15 downto 0);
 
     type IMAGE_VECTOR is array (0 to KERNEL_SIZE_1-1, 0 to KERNEL_SIZE_1-1) of WORD;
     type LINE_BUFFER is array (0 to KERNEL_SIZE_1-2) of WORD;

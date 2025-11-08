@@ -68,19 +68,45 @@ proc get_files_recursive {dir pattern} {
     return $files
 }
 
-# Add VHDL source files (excluding *_tb.vhd)
+# Add VHDL source files (exclude files whose basename ends with _tb.vhd)
 set src_dir "./src"
 if {[file isdirectory $src_dir]} {
     foreach file [get_files_recursive $src_dir "*.vhd"] {
-        if {![string match "*_tb.vhd" $file]} {
-            puts "Adding source: $file"
-            add_files $file
+        # Use basename to decide whether this is a testbench
+        set base [file tail $file]
+        if {[string match "*_tb.vhd" $base]} {
+            # Skip here; we'll add testbenches explicitly to sim_1 below
+            continue
         }
+        puts "Adding source: $file"
+        add_files $file
     }
-    # Add testbench files to simulation fileset
-    foreach file [get_files_recursive $src_dir "*_tb.vhd"] {
-        puts "Adding testbench: $file"
-        add_files -fileset sim_1 $file
+
+    # Before adding testbenches, ensure sim_1 does not contain stale files
+    # (e.g., files previously added manually or from an earlier run).
+    # We attempt to remove any existing entries in sim_1 safely and continue on errors.
+    if {[catch {
+        # Use supported form to query files in a fileset
+        set existing_sim_files [get_files -of_objects [get_filesets sim_1]]
+        if {[llength $existing_sim_files] > 0} {
+            puts "Clearing existing simulation fileset (sim_1) entries..."
+            remove_files -fileset sim_1 $existing_sim_files
+            puts "  Cleared [llength $existing_sim_files] file(s) from sim_1"
+        } else {
+            puts "sim_1 fileset already empty"
+        }
+    } err]} {
+        puts "Warning: could not clear sim_1 fileset cleanly: $err"
+        puts "Proceeding to (re)add known testbench files."
+    }
+
+    # Add testbench files to simulation fileset (basenames ending with _tb.vhd)
+    foreach file [get_files_recursive $src_dir "*.vhd"] {
+        set base [file tail $file]
+        if {[string match "*_tb.vhd" $base]} {
+            puts "Adding testbench: $file"
+            add_files -fileset sim_1 $file
+        }
     }
 } else {
     puts "Warning: Source directory '$src_dir' does not exist."
@@ -981,3 +1007,18 @@ puts "\n=== Project Setup Complete ==="
 puts "Project: $project_name"
 puts "IPs added: [llength $all_ips]"
 puts "Top module: $top_module"
+
+# Diagnostic: list files in simulation and source filesets for easier verification
+puts "\n--- Fileset summary (diagnostic) ---"
+if {[catch {set sim_files [get_files -of_objects [get_filesets sim_1]]} err]} {
+    puts "Could not query sim_1 fileset: $err"
+} else {
+    puts "Simulation fileset (sim_1) contains [llength $sim_files] file(s):"
+    foreach f $sim_files { puts "  - [file normalize $f]" }
+}
+if {[catch {set src_files [get_files -of_objects [get_filesets sources_1]]} err2]} {
+    puts "Could not query sources_1 fileset: $err2"
+} else {
+    puts "Source fileset (sources_1) contains [llength $src_files] file(s):"
+    foreach f $src_files { puts "  - [file normalize $f]" }
+}
