@@ -131,6 +131,10 @@ architecture Structural of cnn_top is
     signal output_pixel         : WORD_ARRAY_16(0 to CONV_2_NUM_FILTERS-1);
     signal output_pixel_valid   : std_logic;
     signal output_pixel_ready   : std_logic := '0';
+    
+    -- Auto-request generator for synthesis (ensures all outputs are computed)
+    constant FINAL_OUTPUT_SIZE : integer := ((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE;
+    signal auto_req_active : std_logic := '0';
 
 begin
     -- Instantiate 1st convolution layer
@@ -306,12 +310,78 @@ begin
     conv1_pixel_in_valid <= input_valid;
     input_ready          <= conv1_pixel_in_ready;
 
+    -- TEMPORARY: Auto-request generator for synthesis testing
+    -- Automatically cycles through all output positions to ensure complete synthesis
+    auto_request_gen: process(clk)
+        variable req_pending : boolean := false;
+    begin
+        if rising_edge(clk) then
+            if rst = '1' then
+                output_req_row <= 0;
+                output_req_col <= 0;
+                output_req_valid <= '0';
+                output_pixel_ready <= '0';
+                auto_req_active <= '0';
+                req_pending := false;
+            else
+                -- Default: clear request valid
+                output_req_valid <= '0';
+                output_pixel_ready <= '0';
+                
+                -- Start auto-requesting after reset (simple enable-free approach)
+                if auto_req_active = '0' then
+                    auto_req_active <= '1';
+                    output_req_valid <= '1';
+                    req_pending := true;
+                end if;
+                
+                -- Handle request acknowledgement
+                if req_pending and output_req_ready = '1' then
+                    req_pending := false;
+                end if;
+                
+                -- Accept output when valid
+                if output_pixel_valid = '1' then
+                    output_pixel_ready <= '1';
+                    
+                    -- Move to next position after accepting output
+                    if output_req_col < FINAL_OUTPUT_SIZE - 1 then
+                        output_req_col <= output_req_col + 1;
+                    else
+                        output_req_col <= 0;
+                        if output_req_row < FINAL_OUTPUT_SIZE - 1 then
+                            output_req_row <= output_req_row + 1;
+                        else
+                            output_req_row <= 0; -- Wrap around to continue cycling
+                        end if;
+                    end if;
+                    
+                    -- Send next request
+                    if not req_pending then
+                        output_req_valid <= '1';
+                        req_pending := true;
+                    end if;
+                end if;
+            end if;
+        end if;
+    end process;
+
     -- TEMPORARY: Tie-down adapter for output_guess (map pool2 output to top-level port)
     -- This allows synthesis without changing the cnn_top entity port signature
-    -- Simply drive output_guess with first filter's output; ignore the rest
-    output_guess <= output_pixel(0)(7 downto 0);  -- Take lower 8 bits of first filter
+    -- XOR all 16 filters together to ensure synthesis doesn't optimize them away
+    -- This forces all filters to be computed and prevents elimination of unused logic
+    process(output_pixel)
+        variable combined : std_logic_vector(7 downto 0);
+    begin
+        combined := output_pixel(0)(7 downto 0);
+        for i in 1 to CONV_2_NUM_FILTERS-1 loop
+            combined := combined xor output_pixel(i)(7 downto 0);
+        end loop;
+        output_guess <= combined;
+    end process;
+    
     output_valid <= output_pixel_valid;
-    -- output_ready is already a top-level input port, connect it to internal ready
-    output_pixel_ready <= output_ready;
+    -- output_ready is a top-level input port - don't drive output_pixel_ready from it
+    -- The auto_request_gen process handles output_pixel_ready internally
 
 end Structural;
