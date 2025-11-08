@@ -45,7 +45,6 @@ architecture Behavioral of cnn_tb is
     -- UUT signals
     signal clk : STD_LOGIC := '0';
     signal rst : STD_LOGIC := '0';
-    signal enable : STD_LOGIC := '0';
     
     -- Request/response signals for output
     signal output_req_row   : integer := 0;
@@ -118,7 +117,6 @@ begin
         port map (
             clk              => clk,
             rst              => rst,
-            enable           => enable,
             
             -- Output request interface
             output_req_row   => output_req_row,
@@ -356,7 +354,6 @@ begin
     begin
         -- Initialize
         rst <= '1';
-        enable <= '0';
         output_req_valid <= '0';
         output_ready <= '0';
         
@@ -371,9 +368,6 @@ begin
                " [0,27]=" & integer'image(test_image(0,27)) & 
                " [27,0]=" & integer'image(test_image(27,0)) & 
                " [27,27]=" & integer'image(test_image(27,27));
-        
-        -- Start the CNN
-        enable <= '1';
         
         -- Request all output positions (5x5 final output)
         for out_row in 0 to FINAL_OUTPUT_SIZE-1 loop
@@ -432,7 +426,6 @@ begin
         
         -- Test second run (just first output position)
         report "Testing second CNN run (first position only)...";
-        enable <= '1';
         
         output_req_row <= 0;
         output_req_col <= 0;

@@ -46,7 +46,6 @@ entity cnn_top is
         -- Control signals
         clk          : in  std_logic;
         rst          : in  std_logic;
-        enable       : in  std_logic;
 
         -- Request TO input provider (what input positions we need)
         input_req_row    : out integer;
@@ -123,6 +122,16 @@ architecture Structural of cnn_top is
     signal pool2_in_req_valid   : std_logic;
     signal pool2_in_req_ready   : std_logic;
 
+    -- TEMPORARY: Fake request/response signals for pool2 output (tie-down adapter)
+    -- These allow pool2 to connect without changing cnn_top entity ports
+    signal output_req_row       : integer := 0;
+    signal output_req_col       : integer := 0;
+    signal output_req_valid     : std_logic := '0';
+    signal output_req_ready     : std_logic;
+    signal output_pixel         : WORD_ARRAY_16(0 to CONV_2_NUM_FILTERS-1);
+    signal output_pixel_valid   : std_logic;
+    signal output_pixel_ready   : std_logic := '0';
+
 begin
     -- Instantiate 1st convolution layer
     conv_layer1: entity work.conv_layer_modular
@@ -138,7 +147,6 @@ begin
         port map (
             clk                 => clk,
             rst                 => rst,
-            enable              => enable,
 
             -- Request FROM pool1 (what output position pool1 needs)
             pixel_out_req_row   => conv1_out_req_row,
@@ -217,7 +225,6 @@ begin
         port map (
             clk                 => clk,
             rst                 => rst,
-            enable              => enable,
             
             -- Request FROM pool2 (what output position pool2 needs)
             pixel_out_req_row   => conv2_out_req_row,
@@ -278,8 +285,8 @@ begin
 
             -- Data TO external consumer
             pixel_out           => output_pixel,
-            pixel_out_valid     => output_valid,
-            pixel_out_ready     => output_ready
+            pixel_out_valid     => output_pixel_valid,
+            pixel_out_ready     => output_pixel_ready
         );
 
     -- Connect pool2 output requests to conv2 input requests
@@ -298,5 +305,13 @@ begin
     conv1_pixel_in       <= input_pixel;
     conv1_pixel_in_valid <= input_valid;
     input_ready          <= conv1_pixel_in_ready;
+
+    -- TEMPORARY: Tie-down adapter for output_guess (map pool2 output to top-level port)
+    -- This allows synthesis without changing the cnn_top entity port signature
+    -- Simply drive output_guess with first filter's output; ignore the rest
+    output_guess <= output_pixel(0)(7 downto 0);  -- Take lower 8 bits of first filter
+    output_valid <= output_pixel_valid;
+    -- output_ready is already a top-level input port, connect it to internal ready
+    output_pixel_ready <= output_ready;
 
 end Structural;

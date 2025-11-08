@@ -347,11 +347,17 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
             return float(pyarr[r, c, fidx])
         # If 2D (H,W) and fidx==0
         if pyarr.ndim == 2:
-            return float(pyarr[r, c]) if fidx == 0 else 0.0
+            # Only valid when comparing a single-channel output
+            if fidx == 0:
+                return float(pyarr[r, c])
+            return 0.0
         # If 1D (dense)
         if pyarr.ndim == 1:
-            # interpret 'r' as flat index
-            return float(pyarr[fidx])
+            # Dense output: ensure filter index is within bounds
+            if 0 <= fidx < pyarr.shape[0]:
+                return float(pyarr[fidx])
+            # Out-of-range filter reported by VHDL; return 0.0 to allow comparison to continue
+            return 0.0
         # If 4D (batch,H,W,C) choose first batch element
         if pyarr.ndim == 4:
             return float(pyarr[0, r, c, fidx])

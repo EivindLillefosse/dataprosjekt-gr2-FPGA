@@ -46,7 +46,6 @@ entity cnn_top_debug is
         -- Control signals
         clk          : in  std_logic;
         rst          : in  std_logic;
-        enable       : in  std_logic;
 
         -- Request FROM external controller (what output position is needed)
         output_req_row   : in  integer;
@@ -174,7 +173,6 @@ begin
         port map (
             clk                 => clk,
             rst                 => rst,
-            enable              => enable,
 
             -- Request FROM pool1 (what output position pool1 needs)
             pixel_out_req_row   => conv1_out_req_row,
@@ -253,7 +251,6 @@ begin
         port map (
             clk                 => clk,
             rst                 => rst,
-            enable              => enable,
             
             -- Request FROM pool2 (what output position pool2 needs)
             pixel_out_req_row   => conv2_out_req_row,

@@ -30,7 +30,6 @@ entity conv_layer_modular is
     Port ( 
         clk            : in STD_LOGIC;
         rst            : in STD_LOGIC;
-        enable         : in STD_LOGIC;
 
         -- Request FROM downstream (what output position is needed)
         pixel_out_req_row   : in  integer;                             -- Requested output row
@@ -254,23 +253,13 @@ begin
             report "conv_layer_modular: NUM_FILTERS must equal layer_2_conv2d_1_BIAS length when LAYER_ID=1" severity failure;
     end generate;
 
-    -- Add bias to convolution results before ReLU
-    -- CRITICAL: Convert bias from Q1.6 to Q2.12 before adding to conv results
-    biased_results_proc: process(conv_results, bias_regs)
-    begin
-        for i in 0 to NUM_FILTERS-1 loop
-            -- Then add bias in Q1.6 format to get final Q2.12 biased result
-            biased_results(i) <= std_logic_vector(signed(conv_results(i)) + resize(bias_regs(i), 16));
-        end loop;
-    end process;
-
     -- Drive relu_input from biased_results using a generate (portable VHDL)
     -- Only instantiate the shifting logic for the layers that use 16-bit biased_results (LAYER_ID = 1)
     gen_relu_input_layer1 : if LAYER_ID = 1 generate
         gen_relu_input : for i in 0 to NUM_FILTERS-1 generate
         begin
             -- Optionally add rounding: shift_right(signed(biased_results(i)) + to_signed(32, 16), 6)
-            relu_input(i) <= std_logic_vector( shift_right( signed(biased_results(i)), 6 ) );
+            relu_input(i) <= std_logic_vector( shift_right( signed(conv_results(i)), 6 ) );
         end generate;
     end generate;
 
@@ -279,10 +268,19 @@ begin
     -- simply map the lower 8 bits into the 16-bit word for LAYER_ID = 0 so the signal remains
     -- well-defined. Adjust if a different behavior is required.
     gen_relu_input_other : if LAYER_ID = 0 generate
-
-            relu_input <= biased_results;
-
+            relu_input <= conv_results;
     end generate;
+
+    -- Add bias to convolution results before ReLU
+    -- CRITICAL: Convert bias from Q1.6 to Q2.12 before adding to conv results
+    biased_results_proc: process(relu_input, bias_regs)
+    begin
+        for i in 0 to NUM_FILTERS-1 loop
+            -- Then add bias in Q1.6 format to get final Q2.12 biased result
+            biased_results(i) <= std_logic_vector(signed(relu_input(i)) + resize(bias_regs(i), 16));
+        end loop;
+    end process;
+
 
     -- ReLU Activation Layer (takes 16-bit inputs in Q1.6)
     relu : entity work.relu_layer
