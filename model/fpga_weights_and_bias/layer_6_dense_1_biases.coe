@@ -5,8 +5,4 @@
 ; Range: [-2.0, 1.984375]
 ;
 memory_initialization_radix=16; Hexadecimal format
-<<<<<<< HEAD
 memory_initialization_vector=06,04,F5,FF,01,F8,00,FE,01,07;
-=======
-memory_initialization_vector=FE,00,02,0D,FB,02,08,F9,FB,FC;
->>>>>>> origin/fullyconnected

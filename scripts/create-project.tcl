@@ -196,12 +196,12 @@ proc parse_coe_metadata {coe_file} {
             # don't continue; allow packed_count detection below
         }
 
-        # Packed count: "Each address contains all 8 filter weights" or "contains 16 values" or "64 node weights"
-        if {![dict exists $metadata packed_count] && [regexp -nocase {Each address contains(?: all)?\s+([0-9]+)\s+(?:filter weights|node weights|filter|weights|values)} $l -> pc]} {
+        # Packed count: "Each address contains all 8 filter weights" or "contains 16 values"
+        if {![dict exists $metadata packed_count] && [regexp -nocase {Each address contains(?: all)?\s+([0-9]+)\s+(?:filter weights|filter|weights|values)} $l -> pc]} {
             dict set metadata packed_count $pc
             continue
         }
-        if {![dict exists $metadata packed_count] && [regexp -nocase {contains(?: all)?\s+([0-9]+)\s+(?:node weights|weights|values|filter)} $l -> pc2]} {
+        if {![dict exists $metadata packed_count] && [regexp -nocase {contains(?: all)?\s+([0-9]+)\s+(?:weights|values|filter)} $l -> pc2]} {
             dict set metadata packed_count $pc2
             continue
         }
@@ -352,6 +352,7 @@ proc create_bram_ip {ip_name width depth coe_file {description "Block RAM"}} {
             CONFIG.Use_RSTA_Pin {false} \
             CONFIG.Port_A_Write_Rate {0} \
             CONFIG.Port_A_Enable_Rate {100} \
+            CONFIG.Algorithm {Minimum_Area} \
             ] [get_ips $ip_name]
     } result]
 
