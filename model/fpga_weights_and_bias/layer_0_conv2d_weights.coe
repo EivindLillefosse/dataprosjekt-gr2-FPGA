@@ -3,10 +3,10 @@
 ; Total elements: 72
 ; Quantization: 6 fractional bits
 ; Range: [-2.0, 1.984375]
-; Memory organization: 3x3x1 addresses × 64 bits (packed)
+; Memory organization: 3x3x1 addresses ï¿½ 64 bits (packed)
 ; Each address contains all 8 filter weights for one (kernel_pos, channel) combination
 ;
 memory_initialization_radix=16; Hexadecimal format
-memory_initialization_vector=05F40C09FC0D05FA,0AFFFE0B0FEEFAF3,F5F2FAFEF703010B,05FCFBEFF8F4090A
-,F6F606FDF1F501F9,0DEFFCF60002FB01,FBF80208EF03FBF6,F4F50806FCFB0A03
-,FB11F5F407F300F8;
+memory_initialization_vector=FC0AF60AF6F8FF04,FAFB030A01040EF9,F600F0F2F203030B,F8EEFA0B03F8FA00
+,F602FD08FF0201F5,06EFF90D0E0BF404,06F9F8FA0EF8FF07,F00D0206F503FCF5
+,F1F80AF7FBED09F6;
