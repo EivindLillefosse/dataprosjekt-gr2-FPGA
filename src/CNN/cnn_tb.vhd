@@ -68,8 +68,6 @@ architecture Behavioral of cnn_tb is
     signal output_valid : std_logic;
     signal output_ready : std_logic := '0';
     
-    signal layer_done : STD_LOGIC;
-    
     -- DEBUG: Intermediate layer signals
     signal debug_conv1_pixel : WORD_ARRAY(0 to 7);  -- 8 filters
     signal debug_conv1_valid : std_logic;
@@ -113,7 +111,7 @@ architecture Behavioral of cnn_tb is
 
 begin
     -- Unit Under Test (UUT) - CNN Top-Level
-    uut: entity work.cnn_top
+    uut: entity work.cnn_top_debug
         generic map (
             IMAGE_SIZE => IMAGE_SIZE
         )
@@ -142,8 +140,6 @@ begin
             output_pixel     => output_pixel,
             output_valid     => output_valid,
             output_ready     => output_ready,
-            
-            layer_done       => layer_done,
             
             -- DEBUG: Intermediate layer outputs
             debug_conv1_pixel => debug_conv1_pixel,
@@ -384,24 +380,36 @@ begin
             for out_col in 0 to FINAL_OUTPUT_SIZE-1 loop
                 report "Requesting CNN output position [" & integer'image(out_row) & "," & integer'image(out_col) & "]";
                 
-                -- Send output position request
+                -- Send output position request (robust handshake)
                 output_req_row <= out_row;
                 output_req_col <= out_col;
                 output_req_valid <= '1';
-                
-                -- Wait for CNN to acknowledge request
-                wait until rising_edge(clk) and output_req_ready = '1';
-                
+
+                -- Let DUT sample the valid (wait one clock edge)
+                wait until rising_edge(clk);
+
+                -- Wait until DUT asserts ready (may be pulsed after sampling)
+                while output_req_ready /= '1' loop
+                    wait until rising_edge(clk);
+                end loop;
+
                 -- Clear request on next clock edge (single-cycle pulse)
                 wait until rising_edge(clk);
                 output_req_valid <= '0';
                 
-                -- Wait for output to be ready
-                wait until rising_edge(clk) and output_valid = '1';
+                -- Wait for output to be ready, then accept it
+                -- Set ready high BEFORE the clock edge where output_valid is '1'
+                loop
+                    -- Pre-assert output_ready
+                    output_ready <= '1';
+                    wait until rising_edge(clk);
+                    -- Check if output was valid on this edge
+                    if output_valid = '1' then
+                        exit;  -- Both signals were high, monitor will capture
+                    end if;
+                end loop;
                 
-                -- Accept the output
-                output_ready <= '1';
-                wait until rising_edge(clk);
+                -- Clear ready on next cycle
                 output_ready <= '0';
                 
                 -- Small gap before next request
@@ -429,13 +437,26 @@ begin
         output_req_row <= 0;
         output_req_col <= 0;
         output_req_valid <= '1';
-        wait until rising_edge(clk) and output_req_ready = '1';
+
+        -- Give DUT a clock to sample the request
+        wait until rising_edge(clk);
+
+        -- Wait for acknowledgement
+        while output_req_ready /= '1' loop
+            wait until rising_edge(clk);
+        end loop;
+
         wait until rising_edge(clk);
         output_req_valid <= '0';
         
-        wait until rising_edge(clk) and output_valid = '1';
-        output_ready <= '1';
-        wait until rising_edge(clk);
+        -- Fixed handshake for second run too (same pattern)
+        loop
+            output_ready <= '1';
+            wait until rising_edge(clk);
+            if output_valid = '1' then
+                exit;
+            end if;
+        end loop;
         output_ready <= '0';
         
         report "Second CNN run completed!";

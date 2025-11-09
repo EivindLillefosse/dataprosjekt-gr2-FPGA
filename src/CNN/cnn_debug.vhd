@@ -3,11 +3,11 @@
 -- Engineer: Eivind Lillefosse, Martin Brekke Nilsen, Nikolai Sandvik Nore
 -- 
 -- Create Date: 31.10.2025
--- Design Name: CNN Accelerator
--- Module Name: cnn_top
+-- Design Name: CNN Accelerator (Debug Version)
+-- Module Name: cnn_top_debug
 -- Project Name: CNN Accelerator
 -- Target Devices: Xilinx FPGA
--- Description: Top-level module for CNN Accelerator (Clean version without debug ports)
+-- Description: Top-level module for CNN Accelerator with debug ports
 --
 ----------------------------------------------------------------------------------
 
@@ -16,7 +16,7 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 use work.types_pkg.all;
 
-entity cnn_top is
+entity cnn_top_debug is
     generic (
         IMAGE_SIZE     : integer := 28;
         -- Parameters for 1st convolution layer
@@ -48,6 +48,12 @@ entity cnn_top is
         rst          : in  std_logic;
         enable       : in  std_logic;
 
+        -- Request FROM external controller (what output position is needed)
+        output_req_row   : in  integer;
+        output_req_col   : in  integer;
+        output_req_valid : in  std_logic;
+        output_req_ready : out std_logic;
+
         -- Request TO input provider (what input positions we need)
         input_req_row    : out integer;
         input_req_col    : out integer;
@@ -60,13 +66,35 @@ entity cnn_top is
         input_ready      : out std_logic;
 
         -- Data TO external consumer (final output)
-        output_guess     : out WORD;
+        output_pixel     : out WORD_ARRAY(0 to CONV_2_NUM_FILTERS-1);
         output_valid     : out std_logic;
-        output_ready     : in  std_logic
-    );
-end cnn_top;
+        output_ready     : in  std_logic;
 
-architecture Structural of cnn_top is
+        -- DEBUG: Intermediate layer outputs
+        -- Conv1 output (after convolution, before pool1)
+        debug_conv1_pixel       : out WORD_ARRAY(0 to CONV_1_NUM_FILTERS-1);
+        debug_conv1_valid       : out std_logic;
+        debug_conv1_ready       : in  std_logic;
+        debug_conv1_row         : out integer;
+        debug_conv1_col         : out integer;
+        
+        -- Pool1 output (after first pooling, before conv2)
+        debug_pool1_pixel       : out WORD_ARRAY(0 to CONV_1_NUM_FILTERS-1);
+        debug_pool1_valid       : out std_logic;
+        debug_pool1_ready       : in  std_logic;
+        debug_pool1_row         : out integer;
+        debug_pool1_col         : out integer;
+        
+        -- Conv2 output (after second convolution, before pool2)
+        debug_conv2_pixel       : out WORD_ARRAY(0 to CONV_2_NUM_FILTERS-1);
+        debug_conv2_valid       : out std_logic;
+        debug_conv2_ready       : in  std_logic;
+        debug_conv2_row         : out integer;
+        debug_conv2_col         : out integer
+    );
+end cnn_top_debug;
+
+architecture Structural of cnn_top_debug is
 
     -- Signals between conv1 and pool1 (request/response protocol)
     signal conv1_out_req_row    : integer;
@@ -122,6 +150,14 @@ architecture Structural of cnn_top is
     signal pool2_in_req_col     : integer;
     signal pool2_in_req_valid   : std_logic;
     signal pool2_in_req_ready   : std_logic;
+
+    -- DEBUG: Register output positions when request handshake completes
+    signal conv1_active_out_row : integer := 0;
+    signal conv1_active_out_col : integer := 0;
+    signal pool1_active_out_row : integer := 0;
+    signal pool1_active_out_col : integer := 0;
+    signal conv2_active_out_row : integer := 0;
+    signal conv2_active_out_col : integer := 0;
 
 begin
     -- Instantiate 1st convolution layer
@@ -299,7 +335,6 @@ begin
     conv1_pixel_in_valid <= input_valid;
     input_ready          <= conv1_pixel_in_ready;
 
-<<<<<<< HEAD
     -- DEBUG: Tap intermediate layer outputs
     -- Register the active output position when request handshake completes
     process(clk)
@@ -334,7 +369,7 @@ begin
         end if;
     end process;
 
-    -- Conv1 output tap (before pool1 consumption) -- 
+    -- Conv1 output tap (before pool1 consumption)
     process(clk)
     begin
         if rising_edge(clk) then
@@ -406,8 +441,4 @@ begin
         end if;
     end process;
 
-
-    -- Reverted to old working version, 36a1ccc, merging broke the branch.
-=======
->>>>>>> origin/Conv_Layer
 end Structural;

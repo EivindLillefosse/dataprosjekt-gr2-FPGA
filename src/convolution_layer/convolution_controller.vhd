@@ -208,12 +208,9 @@ begin
                 if scaled_done = '1' then
                     v_scaled_ready := '0';
                     v_compute_clear := '0';
-                    -- Decide next state after the pixel-clear: if layer is done, go IDLE, else load next weights
-                    if layer_done = '1' then
-                        next_state := IDLE;
-                    else
-                        next_state := OUTPUT_WAIT;
-                    end if;
+                    -- After pixel processing is complete, always go to OUTPUT_WAIT
+                    -- OUTPUT_WAIT will return to IDLE after output is accepted
+                    next_state := OUTPUT_WAIT;
                 end if;
                         
 
@@ -221,9 +218,9 @@ begin
                 -- Assert output_valid and wait for downstream to accept (output_ready=1)
                 v_output_valid := '1';
                 if output_ready = '1' then
-                    -- Do not clear v_output_valid here; keep it asserted for the current cycle
-                    -- The next_state change will move the FSM and leave output_valid deasserted
-                    next_state := LOAD_WEIGHTS;
+                    -- Return to IDLE to wait for next request
+                    -- IDLE state will check enable and start LOAD_WEIGHTS if needed
+                    next_state := IDLE;
                 end if;
 
             when others =>
