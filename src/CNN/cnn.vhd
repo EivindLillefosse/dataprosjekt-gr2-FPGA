@@ -376,7 +376,7 @@ begin
         end if;
     end process;
 
-    -- Conv1 output tap (before pool1 consumption)
+    -- Conv1 output tap (before pool1 consumption) -- 
     process(clk)
     begin
         if rising_edge(clk) then
@@ -448,4 +448,6 @@ begin
         end if;
     end process;
 
+
+    -- Reverted to old working version, 36a1ccc, merging broke the branch.
 end Structural;
