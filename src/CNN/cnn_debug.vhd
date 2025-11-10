@@ -80,12 +80,12 @@ entity cnn_top_debug is
         use_fc_path      : in  std_logic;  -- '1' = calc_index controls Pool2, '0' = testbench controls Pool2
         
         -- FC1 outputs (for testing/debug)
-        fc1_output_data  : out WORD_ARRAY(0 to 63);
+        fc1_output_data  : out WORD_ARRAY_16(0 to 63);
         fc1_output_valid : out std_logic;
         fc1_output_ready : in  std_logic;
         
         -- FC2 outputs (final 10-class classification)
-        fc2_output_data  : out WORD_ARRAY(0 to 9);
+        fc2_output_data  : out WORD_ARRAY_16(0 to 9);
         fc2_output_valid : out std_logic;
         fc2_output_ready : in  std_logic;
 
