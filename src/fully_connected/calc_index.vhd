@@ -33,7 +33,9 @@ entity calc_index is
         req_valid   : out std_logic;
         
         -- Input from max pooling: all 16 channels at once (16x8 bits)
-        pool_pixel_data : in WORD_ARRAY(0 to INPUT_CHANNELS-1);
+        pool_pixel_data  : in WORD_ARRAY(0 to INPUT_CHANNELS-1);
+        pool_pixel_valid : in std_logic;
+        pool_pixel_ready : out std_logic;
         
         -- Output to FC layer: selected single channel pixel
         fc_pixel_out    : out WORD;
@@ -54,6 +56,7 @@ architecture Structural of calc_index is
 begin
     
     -- Sequential index counter (0 to 399)
+    -- Only increment when Pool2 delivers valid data
     process(clk)
     begin
         if rising_edge(clk) then
@@ -66,12 +69,15 @@ begin
                     -- Was done, now restart
                     index_counter <= 0;
                     internal_done <= '0';
-                elsif index_counter = NODES_IN - 1 then
-                    -- Reached last index, set done
-                    internal_done <= '1';
-                else
-                    -- Normal increment
-                    index_counter <= index_counter + 1;
+                -- Only advance when Pool2 delivers valid data
+                elsif pool_pixel_valid = '1' then
+                    if index_counter = NODES_IN - 1 then
+                        -- Reached last index, set done
+                        internal_done <= '1';
+                    else
+                        -- Normal increment
+                        index_counter <= index_counter + 1;
+                    end if;
                 end if;
             elsif enable = '0' then
                 -- When disabled, clear done flag
@@ -103,8 +109,12 @@ begin
     req_valid   <= enable and not internal_done;
     
     -- Select the correct channel from pool_pixel_data and forward to FC
+    -- Only output when Pool2 delivers valid data
     fc_pixel_out   <= pool_pixel_data(current_channel);
-    fc_pixel_valid <= enable and not internal_done;
+    fc_pixel_valid <= pool_pixel_valid and enable and not internal_done;
+    
+    -- Assert ready whenever we're enabled and requesting
+    pool_pixel_ready <= enable and not internal_done;
     
     -- Status outputs
     curr_index  <= index_counter;
