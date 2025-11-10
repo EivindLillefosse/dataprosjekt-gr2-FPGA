@@ -50,74 +50,82 @@ entity calc_index is
 end calc_index;
 
 architecture Structural of calc_index is
-    signal index_counter : integer range 0 to NODES_IN-1 := 0;
-    signal internal_done : std_logic := '0';
-    signal current_channel : integer range 0 to INPUT_CHANNELS-1 := 0;
+    constant NUM_POSITIONS : integer := INPUT_SIZE * INPUT_SIZE;  -- 25 spatial positions
+    
+    signal position_counter : integer range 0 to NUM_POSITIONS-1 := 0;
+    signal channel_counter  : integer range 0 to INPUT_CHANNELS-1 := 0;
+    signal internal_done    : std_logic := '0';
+    signal pool_data_captured : WORD_ARRAY(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
+    signal data_valid       : std_logic := '0';
 begin
     
-    -- Sequential index counter (0 to 399)
-    -- Only increment when Pool2 delivers valid data
+    -- Main state machine: request Pool2 position, capture 16 channels, send to FC1 sequentially
     process(clk)
     begin
         if rising_edge(clk) then
             if rst = '1' then
-                -- Hard reset
-                index_counter <= 0;
+                position_counter <= 0;
+                channel_counter <= 0;
                 internal_done <= '0';
+                data_valid <= '0';
+                pool_data_captured <= (others => (others => '0'));
             elsif enable = '1' then
                 if internal_done = '1' then
-                    -- Was done, now restart
-                    index_counter <= 0;
+                    -- Restart
+                    position_counter <= 0;
+                    channel_counter <= 0;
                     internal_done <= '0';
-                -- Only advance when Pool2 delivers valid data
-                elsif pool_pixel_valid = '1' then
-                    if index_counter = NODES_IN - 1 then
-                        -- Reached last index, set done
-                        internal_done <= '1';
-                    else
-                        -- Normal increment
-                        index_counter <= index_counter + 1;
+                    data_valid <= '0';
+                else
+                    -- When Pool2 delivers data, capture it and start sending channels
+                    if pool_pixel_valid = '1' and data_valid = '0' then
+                        pool_data_captured <= pool_pixel_data;
+                        data_valid <= '1';
+                        channel_counter <= 0;
+                    end if;
+                    
+                    -- Send captured channels sequentially to FC1
+                    if data_valid = '1' then
+                        if channel_counter = INPUT_CHANNELS - 1 then
+                            -- Sent all 16 channels for this position
+                            channel_counter <= 0;
+                            data_valid <= '0';
+                            
+                            if position_counter = NUM_POSITIONS - 1 then
+                                -- All positions done
+                                internal_done <= '1';
+                            else
+                                -- Move to next position
+                                position_counter <= position_counter + 1;
+                            end if;
+                        else
+                            -- Move to next channel
+                            channel_counter <= channel_counter + 1;
+                        end if;
                     end if;
                 end if;
             elsif enable = '0' then
-                -- When disabled, clear done flag
                 internal_done <= '0';
+                data_valid <= '0';
             end if;
         end if;
     end process;
     
-    -- Reverse calculation: 1D index to 3D coordinates
-    -- Given: index = (row * WIDTH + col) * CHANNELS + channel
-    -- Solve for row, col, channel:
-    --   channel = index mod CHANNELS
-    --   temp    = index / CHANNELS  (integer division)
-    --   col     = temp mod WIDTH
-    --   row     = temp / WIDTH
-    --
-    -- Example mappings (reverse):
-    --   index=0   → channel=0,  temp=0,  col=0, row=0  → [0,0,0]
-    --   index=15  → channel=15, temp=0,  col=0, row=0  → [0,0,15]
-    --   index=16  → channel=0,  temp=1,  col=1, row=0  → [0,1,0]
-    --   index=399 → channel=15, temp=24, col=4, row=4  → [4,4,15]
+    -- Reverse calculation: position to 2D coordinates
+    -- position = row * INPUT_SIZE + col
+    req_row     <= position_counter / INPUT_SIZE;
+    req_col     <= position_counter mod INPUT_SIZE;
+    req_valid   <= enable and not internal_done and not data_valid;  -- Only request when not processing channels
     
-    -- Calculate which channel we need from the 16-channel array
-    current_channel <= index_counter mod INPUT_CHANNELS;
+    -- Output current channel from captured data
+    fc_pixel_out   <= pool_data_captured(channel_counter);
+    fc_pixel_valid <= data_valid and enable and not internal_done;
     
-    -- Request position (only row/col, max pooling sends all channels)
-    req_col     <= (index_counter / INPUT_CHANNELS) mod INPUT_SIZE;
-    req_row     <= index_counter / (INPUT_CHANNELS * INPUT_SIZE);
-    req_valid   <= enable and not internal_done;
-    
-    -- Select the correct channel from pool_pixel_data and forward to FC
-    -- Only output when Pool2 delivers valid data
-    fc_pixel_out   <= pool_pixel_data(current_channel);
-    fc_pixel_valid <= pool_pixel_valid and enable and not internal_done;
-    
-    -- Assert ready whenever we're enabled and requesting
-    pool_pixel_ready <= enable and not internal_done;
+    -- Assert ready when waiting for Pool2 data
+    pool_pixel_ready <= enable and not internal_done and not data_valid;
     
     -- Status outputs
-    curr_index  <= index_counter;
+    curr_index  <= position_counter * INPUT_CHANNELS + channel_counter;  -- Absolute pixel index (0-399)
     done        <= internal_done;
 
 end architecture Structural;
