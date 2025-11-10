@@ -47,7 +47,6 @@ architecture Behavioral of conv_layer_modular_tb is
     -- UUT signals
     signal clk : STD_LOGIC := '0';
     signal rst : STD_LOGIC := '0';
-    signal enable : STD_LOGIC := '0';
     
     -- Output request TO DUT (testbench acts as downstream)
     signal pixel_out_req_row   : integer := 0;
@@ -345,7 +344,6 @@ begin
         port map (
             clk                 => clk,
             rst                 => rst,
-            enable              => enable,
             pixel_out_req_row   => pixel_out_req_row,
             pixel_out_req_col   => pixel_out_req_col,
             pixel_out_req_valid => pixel_out_req_valid,
@@ -491,9 +489,8 @@ begin
         constant OUT_SIZE : integer := IMAGE_SIZE - KERNEL_SIZE + 1;  -- 28-3+1=26
         variable received_val : integer;
     begin
-        -- Initialize
-        rst <= '1';
-        enable <= '0';
+    -- Initialize
+    rst <= '1';
         pixel_out_req_valid <= '0';
         pixel_out_ready <= '0';
         
@@ -506,8 +503,7 @@ begin
         report "Test image ready - first pixel value: " & integer'image(test_image(0,0));
         report "Output size: " & integer'image(OUT_SIZE) & "x" & integer'image(OUT_SIZE);
         
-        -- Start the convolution
-        enable <= '1';
+    -- Start the convolution
         
         -- Request all output positions
         for out_row in 0 to OUT_SIZE-1 loop
@@ -553,8 +549,7 @@ begin
         wait for CLK_PERIOD * 5;
         
         -- Test multiple runs (request a few more positions to verify)
-        report "Testing second MODULAR convolution run...";
-        enable <= '1';
+    report "Testing second MODULAR convolution run...";
         
         -- Request a few more output positions
         for i in 0 to 4 loop

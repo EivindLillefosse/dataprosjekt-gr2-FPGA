@@ -39,7 +39,14 @@ entity cnn_top is
         CONV_2_BLOCK_SIZE     : integer := 2;
 
         -- Parameters for 2nd pooling layer
-        POOL_2_BLOCK_SIZE     : integer := 2
+        POOL_2_BLOCK_SIZE     : integer := 2;
+        
+        -- Parameters for fully connected layers
+        FC1_NODES_IN      : integer := (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
+                                        (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
+                                        CONV_2_NUM_FILTERS;  -- 5*5*16 = 400
+        FC1_NODES_OUT     : integer := 64;
+        FC2_NODES_OUT     : integer := 10  -- Final classification output
     
     );
     port (
@@ -59,9 +66,19 @@ entity cnn_top is
         input_ready      : out std_logic;
 
         -- Data TO external consumer (final output)
-        output_guess     : out WORD;
+        output_guess     : out WORD;  -- Final classification (after argmax)
         output_valid     : out std_logic;
-        output_ready     : in  std_logic
+        output_ready     : in  std_logic;
+        
+        -- FC1 outputs (intermediate, for testing/debug)
+        fc1_output_data  : out WORD_ARRAY_16(0 to 63);  -- 64 outputs from FC1
+        fc1_output_valid : out std_logic;
+        fc1_output_ready : in  std_logic;
+        
+        -- FC2 outputs (final 10-class classification)
+        fc2_output_data  : out WORD_ARRAY_16(0 to 9);   -- 10 class scores
+        fc2_output_valid : out std_logic;
+        fc2_output_ready : in  std_logic
     );
 end cnn_top;
 
@@ -116,25 +133,48 @@ architecture Structural of cnn_top is
     signal conv2_pixel_out_valid: std_logic;
     signal conv2_pixel_out_ready: std_logic;
 
-    -- Signals between pool2 and output (request/response protocol)
-    signal pool2_in_req_row     : integer;
-    signal pool2_in_req_col     : integer;
-    signal pool2_in_req_valid   : std_logic;
-    signal pool2_in_req_ready   : std_logic;
-
-    -- TEMPORARY: Fake request/response signals for pool2 output (tie-down adapter)
-    -- These allow pool2 to connect without changing cnn_top entity ports
-    signal output_req_row       : integer := 0;
-    signal output_req_col       : integer := 0;
-    signal output_req_valid     : std_logic := '0';
-    signal output_req_ready     : std_logic;
-    signal output_pixel         : WORD_ARRAY_16(0 to CONV_2_NUM_FILTERS-1);
-    signal output_pixel_valid   : std_logic;
-    signal output_pixel_ready   : std_logic := '0';
+    -- Signals between pool2 and calc_index
+    signal pool2_pixel_out       : WORD_ARRAY_16(0 to CONV_2_NUM_FILTERS-1);
+    signal pool2_pixel_out_valid : std_logic;
+    signal pool2_pixel_out_ready : std_logic;
     
-    -- Auto-request generator for synthesis (ensures all outputs are computed)
-    constant FINAL_OUTPUT_SIZE : integer := ((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE;
-    signal auto_req_active : std_logic := '0';
+    signal pool2_in_req_row      : integer;
+    signal pool2_in_req_col      : integer;
+    signal pool2_in_req_valid    : std_logic;
+    signal pool2_in_req_ready    : std_logic;
+
+    -- Signals between calc_index and fc1
+    signal calc_index_enable     : std_logic;
+    signal calc_req_row          : integer;
+    signal calc_req_col          : integer;
+    signal calc_req_valid        : std_logic;
+    signal calc_fc_pixel         : WORD;
+    signal calc_fc_valid         : std_logic;
+    signal calc_curr_index       : integer range 0 to FC1_NODES_IN-1;
+    signal calc_done             : std_logic;
+
+    -- Signals for FC1 output
+    signal fc1_out_valid         : std_logic;
+    signal fc1_out_ready         : std_logic;
+    signal fc1_out_data          : WORD_ARRAY_16(0 to FC1_NODES_OUT-1);
+    signal fc1_in_ready          : std_logic;
+
+    -- Signals for buffer between FC1 and FC2
+    signal buf_out_valid         : std_logic;
+    signal buf_out_data          : WORD_ARRAY_16(0 to FC1_NODES_OUT-1);
+    signal buf_out_ready         : std_logic;
+    signal buf_in_ready          : std_logic;
+    
+    -- Signals for FC2 input sequencer
+    signal fc2_input_index       : integer range 0 to FC1_NODES_OUT-1 := 0;
+    signal fc2_input_valid       : std_logic;
+    signal fc2_input_data        : WORD;
+    signal fc2_sending           : std_logic;  -- State: actively sending to FC2
+    
+    -- Signals for FC2 output
+    signal fc2_out_valid         : std_logic;
+    signal fc2_out_data          : WORD_ARRAY_16(0 to FC2_NODES_OUT-1);
+    signal fc2_in_ready          : std_logic;
 
 begin
     -- Instantiate 1st convolution layer
@@ -259,7 +299,13 @@ begin
     pool1_out_req_valid <= conv2_in_req_valid;
     conv2_in_req_ready  <= pool1_out_req_ready;
 
-    -- Instantiate 2nd Pooling layer (final output)
+    -- Connect pool2 output requests to conv2 input requests
+    conv2_out_req_row   <= pool2_in_req_row;
+    conv2_out_req_col   <= pool2_in_req_col;
+    conv2_out_req_valid <= pool2_in_req_valid;
+    pool2_in_req_ready  <= conv2_out_req_ready;
+
+    -- Instantiate 2nd Pooling layer
     pooling_layer2: entity work.max_pooling
         generic map (
             INPUT_SIZE     => ((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE),
@@ -270,11 +316,11 @@ begin
             clk                 => clk,
             rst                 => rst,
             
-            -- Request FROM external controller
-            pixel_out_req_row   => output_req_row,
-            pixel_out_req_col   => output_req_col,
-            pixel_out_req_valid => output_req_valid,
-            pixel_out_req_ready => output_req_ready,
+            -- Request FROM calc_index (what output position calc_index needs)
+            pixel_out_req_row   => calc_req_row,
+            pixel_out_req_col   => calc_req_col,
+            pixel_out_req_valid => calc_req_valid,
+            pixel_out_req_ready => open,  -- calc_index doesn't need ready
 
             -- Request TO conv2
             pixel_in_req_row    => pool2_in_req_row,
@@ -287,17 +333,157 @@ begin
             pixel_in_valid      => conv2_pixel_out_valid,
             pixel_in_ready      => conv2_pixel_out_ready,
 
-            -- Data TO external consumer
-            pixel_out           => output_pixel,
-            pixel_out_valid     => output_pixel_valid,
-            pixel_out_ready     => output_pixel_ready
+            -- Data TO calc_index (all 16 channels)
+            pixel_out           => pool2_pixel_out,
+            pixel_out_valid     => pool2_pixel_out_valid,
+            pixel_out_ready     => '1'  -- calc_index always ready
         );
 
-    -- Connect pool2 output requests to conv2 input requests
-    conv2_out_req_row   <= pool2_in_req_row;
-    conv2_out_req_col   <= pool2_in_req_col;
-    conv2_out_req_valid <= pool2_in_req_valid;
-    pool2_in_req_ready  <= conv2_out_req_ready;
+    -- Instantiate calc_index (flattens 3D tensor to 1D for FC layer)
+    calc_index_inst: entity work.calc_index
+        generic map (
+            NODES_IN       => FC1_NODES_IN,      -- 400
+            INPUT_CHANNELS => CONV_2_NUM_FILTERS, -- 16
+            INPUT_SIZE     => (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE)  -- 5
+        )
+        port map (
+            clk             => clk,
+            rst             => rst,
+            enable          => calc_index_enable,
+            
+            -- Request TO pool2
+            req_row         => calc_req_row,
+            req_col         => calc_req_col,
+            req_valid       => calc_req_valid,
+            
+            -- Input FROM pool2 (all 16 channels at once)
+            pool_pixel_data => pool2_pixel_out,
+            
+            -- Output TO fc1 (selected single channel pixel)
+            fc_pixel_out    => calc_fc_pixel,
+            fc_pixel_valid  => calc_fc_valid,
+            
+            curr_index      => calc_curr_index,
+            done            => calc_done
+        );
+
+    -- Enable calc_index when CNN is enabled
+    calc_index_enable <= enable;
+
+    -- Instantiate FC1 layer (400 inputs -> 64 outputs)
+    fc1_inst: entity work.fullyconnected
+        generic map (
+            NODES_IN  => FC1_NODES_IN,   -- 400
+            NODES_OUT => FC1_NODES_OUT,  -- 64
+            LAYER_ID  => 0               -- First FC layer (uses layer_5_dense weights/biases)
+        )
+        port map (
+            clk             => clk,
+            rst             => rst,
+            
+            -- Input FROM calc_index
+            pixel_in_valid  => calc_fc_valid,
+            pixel_in_ready  => fc1_in_ready,
+            pixel_in_data   => calc_fc_pixel,
+            pixel_in_index  => calc_curr_index,
+            
+            -- Output TO buffer
+            pixel_out_valid => fc1_out_valid,
+            pixel_out_ready => buf_in_ready,
+            pixel_out_data  => fc1_out_data
+        );
+
+    -- Buffer between FC1 and FC2
+    fc_buffer: entity work.fc_layer_buffer
+        generic map (
+            DATA_WIDTH  => 8,
+            NUM_NEURONS => FC1_NODES_OUT  -- 64
+        )
+        port map (
+            clk          => clk,
+            rst          => rst,
+            
+            -- Input FROM FC1
+            input_valid  => fc1_out_valid,
+            input_data   => fc1_out_data,
+            input_ready  => buf_in_ready,  -- Buffer tells FC1 it's ready
+            
+            -- Output TO FC2 sequencer
+            output_valid => buf_out_valid,
+            output_data  => buf_out_data,
+            output_ready => buf_out_ready
+        );
+
+    -- FC2 input sequencer: send buffered 64 neurons sequentially
+    fc2_input_data <= buf_out_data(fc2_input_index);
+    
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if rst = '1' then
+                fc2_input_index <= 0;
+                fc2_input_valid <= '0';
+                fc2_sending <= '0';
+            elsif buf_out_valid = '1' and fc2_sending = '0' then
+                -- Buffer has full output, start sending to FC2
+                fc2_sending <= '1';
+                fc2_input_valid <= '1';
+                fc2_input_index <= 0;
+            elsif fc2_sending = '1' and fc2_in_ready = '1' then
+                -- FC2 accepted current pixel, advance
+                if fc2_input_index = FC1_NODES_OUT - 1 then
+                    -- Last pixel sent, done
+                    fc2_input_index <= 0;
+                    fc2_input_valid <= '0';
+                    fc2_sending <= '0';
+                else
+                    -- Send next pixel
+                    fc2_input_index <= fc2_input_index + 1;
+                    fc2_input_valid <= '1';  -- Keep valid high
+                end if;
+            end if;
+        end if;
+    end process;
+    
+    -- Tell buffer we're ready to drain it during FC2 transmission
+    -- Assert ready whenever we're sending data to FC2 (draining the buffer)
+    buf_out_ready <= '1' when fc2_sending = '1' else '0';
+
+    -- Instantiate FC2 layer (64 inputs -> 10 outputs)
+    fc2_inst: entity work.fullyconnected
+        generic map (
+            NODES_IN  => FC1_NODES_OUT,  -- 64
+            NODES_OUT => FC2_NODES_OUT,  -- 10
+            LAYER_ID  => 1               -- Second FC layer (uses layer_6_dense_1 weights/biases)
+        )
+        port map (
+            clk             => clk,
+            rst             => rst,
+            
+            -- Input FROM buffer sequencer
+            pixel_in_valid  => fc2_input_valid,
+            pixel_in_ready  => fc2_in_ready,
+            pixel_in_data   => fc2_input_data,
+            pixel_in_index  => fc2_input_index,
+            
+            -- Output (FC2 doesn't use input ready signal)
+            pixel_out_valid => fc2_out_valid,
+            pixel_out_ready => open,  -- Not used, just an indicator
+            pixel_out_data  => fc2_out_data
+        );
+
+    -- Connect FC1 output to top-level output (for debug)
+    fc1_output_data  <= fc1_out_data;
+    fc1_output_valid <= fc1_out_valid;
+    fc1_out_ready    <= fc1_output_ready;  -- Connect ready from top-level port
+    
+    -- Connect FC2 output to top-level output
+    fc2_output_data  <= fc2_out_data;
+    fc2_output_valid <= fc2_out_valid;
+    
+    -- Placeholder for output_guess (will be driven by argmax)
+    output_guess  <= (others => '0');
+    output_valid  <= fc2_out_valid;  -- Use FC2 valid for final output
 
     -- Connect top-level input requests to conv1's input requests
     input_req_row    <= conv1_in_req_row;
@@ -309,79 +495,5 @@ begin
     conv1_pixel_in       <= input_pixel;
     conv1_pixel_in_valid <= input_valid;
     input_ready          <= conv1_pixel_in_ready;
-
-    -- TEMPORARY: Auto-request generator for synthesis testing
-    -- Automatically cycles through all output positions to ensure complete synthesis
-    auto_request_gen: process(clk)
-        variable req_pending : boolean := false;
-    begin
-        if rising_edge(clk) then
-            if rst = '1' then
-                output_req_row <= 0;
-                output_req_col <= 0;
-                output_req_valid <= '0';
-                output_pixel_ready <= '0';
-                auto_req_active <= '0';
-                req_pending := false;
-            else
-                -- Default: clear request valid
-                output_req_valid <= '0';
-                output_pixel_ready <= '0';
-                
-                -- Start auto-requesting after reset (simple enable-free approach)
-                if auto_req_active = '0' then
-                    auto_req_active <= '1';
-                    output_req_valid <= '1';
-                    req_pending := true;
-                end if;
-                
-                -- Handle request acknowledgement
-                if req_pending and output_req_ready = '1' then
-                    req_pending := false;
-                end if;
-                
-                -- Accept output when valid
-                if output_pixel_valid = '1' then
-                    output_pixel_ready <= '1';
-                    
-                    -- Move to next position after accepting output
-                    if output_req_col < FINAL_OUTPUT_SIZE - 1 then
-                        output_req_col <= output_req_col + 1;
-                    else
-                        output_req_col <= 0;
-                        if output_req_row < FINAL_OUTPUT_SIZE - 1 then
-                            output_req_row <= output_req_row + 1;
-                        else
-                            output_req_row <= 0; -- Wrap around to continue cycling
-                        end if;
-                    end if;
-                    
-                    -- Send next request
-                    if not req_pending then
-                        output_req_valid <= '1';
-                        req_pending := true;
-                    end if;
-                end if;
-            end if;
-        end if;
-    end process;
-
-    -- TEMPORARY: Tie-down adapter for output_guess (map pool2 output to top-level port)
-    -- This allows synthesis without changing the cnn_top entity port signature
-    -- XOR all 16 filters together to ensure synthesis doesn't optimize them away
-    -- This forces all filters to be computed and prevents elimination of unused logic
-    process(output_pixel)
-        variable combined : std_logic_vector(7 downto 0);
-    begin
-        combined := output_pixel(0)(7 downto 0);
-        for i in 1 to CONV_2_NUM_FILTERS-1 loop
-            combined := combined xor output_pixel(i)(7 downto 0);
-        end loop;
-        output_guess <= combined;
-    end process;
-    
-    output_valid <= output_pixel_valid;
-    -- output_ready is a top-level input port - don't drive output_pixel_ready from it
-    -- The auto_request_gen process handles output_pixel_ready internally
 
 end Structural;

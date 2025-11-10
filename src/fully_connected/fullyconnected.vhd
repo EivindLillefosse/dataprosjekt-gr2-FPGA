@@ -130,11 +130,15 @@ begin
 
     -- Add bias to calculation results before ReLU
     -- CRITICAL: Convert bias from Q1.6 to Q2.12 before adding to calc results
+    -- Q1.6 format: value / 64 = value × 2^(-6)
+    -- Q2.12 format: value / 4096 = value × 2^(-12)
+    -- To convert Q1.6 to Q2.12, shift left by 6 bits (multiply by 2^6)
     biased_results_proc: process(calc_results, bias_regs)
     begin
         for i in 0 to NODES_OUT-1 loop
             -- Add bias in Q2.12 format to calc_results (which are Q2.12)
-            biased_results(i) <= std_logic_vector(signed(calc_results(i)) + resize(bias_regs(i), 16));
+            -- Shift bias left by 6 bits to scale from Q1.6 to Q2.12
+            biased_results(i) <= std_logic_vector(signed(calc_results(i)) + shift_left(resize(bias_regs(i), 16), 6));
         end loop;
     end process;
 
@@ -144,23 +148,56 @@ begin
     end generate;
 
     -- ReLU Activation Layer (takes scaled Q1.6 results)
-    relu : entity work.relu_layer
-        generic map (
-            NUM_FILTERS => NODES_OUT,
-            DATA_WIDTH => 8  
-        )
-        port map (
-            clk => clk,
-            rst => rst,
-            data_in => relu_in_data,
-            data_valid => data_valid,
-            data_out => data_out,
-            valid_out => valid_out
-        );
+    -- LAYER_ID = 0: FC1 (hidden layer) uses ReLU
+    -- LAYER_ID = 1: FC2 (output layer) bypasses ReLU to output raw logits
+    gen_with_relu : if LAYER_ID = 0 generate
+        relu : entity work.relu_layer
+            generic map (
+                NUM_FILTERS => NODES_OUT,
+                DATA_WIDTH => 8  
+            )
+            port map (
+                clk => clk,
+                rst => rst,
+                data_in => relu_in_data,
+                data_valid => data_valid,
+                data_out => data_out,
+                valid_out => valid_out
+            );
 
-    -- Connect ReLU output to module output
-    pixel_out_data <= data_out;
-    pixel_out_valid <= valid_out;
-    pixel_out_ready <= valid_out;
+        -- Connect ReLU output to module output
+        pixel_out_data <= data_out;
+        pixel_out_valid <= valid_out;
+        pixel_out_ready <= valid_out;
+    end generate;
+
+    gen_no_relu : if LAYER_ID = 1 generate
+        -- FC2 (output layer): bypass ReLU, output raw logits
+        -- Register the output to match timing with FC1's ReLU path
+        process(clk)
+        begin
+            if rising_edge(clk) then
+                if rst = '1' then
+                    valid_out <= '0';
+                    for i in 0 to NODES_OUT-1 loop
+                        data_out(i) <= (others => '0');
+                    end loop;
+                else
+                    -- Only update outputs when data is valid
+                    valid_out <= data_valid;
+                    if data_valid = '1' then
+                        for i in 0 to NODES_OUT-1 loop
+                            data_out(i) <= biased_results(i)(15 downto 8);
+                        end loop;
+                    end if;
+                end if;
+            end if;
+        end process;
+
+        -- Connect output
+        pixel_out_data <= data_out;
+        pixel_out_valid <= valid_out;
+        pixel_out_ready <= valid_out;
+    end generate;
 
 end RTL;

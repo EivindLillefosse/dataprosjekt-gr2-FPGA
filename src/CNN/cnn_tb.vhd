@@ -36,8 +36,8 @@ architecture Behavioral of cnn_tb is
     -- Test parameters (matching CNN top-level)
     constant IMAGE_SIZE : integer := 28;
     
-    -- Final output will be from CONV_2 with 16 filters
     constant FINAL_NUM_FILTERS : integer := 16;
+    constant FC1_NODES_OUT : integer := 64;
     
     -- Clock period
     constant CLK_PERIOD : time := 10 ns;
@@ -66,6 +66,20 @@ architecture Behavioral of cnn_tb is
     signal output_pixel : WORD_ARRAY_16(0 to FINAL_NUM_FILTERS-1);
     signal output_valid : std_logic;
     signal output_ready : std_logic := '0';
+    signal output_guess : WORD;
+    
+    -- Control signal for Pool2 mux
+    signal use_fc_path  : std_logic := '0';  -- '0' = testbench controls, '1' = calc_index controls
+    
+    -- FC1 output signals (for monitoring)
+    signal fc1_output_data  : WORD_ARRAY_16(0 to FC1_NODES_OUT-1);
+    signal fc1_output_valid : std_logic;
+    signal fc1_output_ready : std_logic := '0';
+    
+    -- FC2 output signals (final classification)
+    signal fc2_output_data  : WORD_ARRAY_16(0 to 9);
+    signal fc2_output_valid : std_logic;
+    signal fc2_output_ready : std_logic := '0';
     
     -- DEBUG: Intermediate layer signals
     signal debug_conv1_pixel : WORD_ARRAY_16(0 to 7);  -- 8 filters
@@ -85,6 +99,18 @@ architecture Behavioral of cnn_tb is
     signal debug_conv2_ready : std_logic := '0';
     signal debug_conv2_row   : natural := 0;
     signal debug_conv2_col   : natural := 0;
+    
+    signal debug_pool2_pixel : WORD_ARRAY_16(0 to 15); -- 16 filters
+    signal debug_pool2_valid : std_logic;
+    signal debug_pool2_ready : std_logic := '0';
+    signal debug_pool2_row   : natural := 0;
+    signal debug_pool2_col   : natural := 0;
+    
+    -- DEBUG: calc_index signals
+    signal debug_calc_index  : integer range 0 to 399;
+    signal debug_calc_pixel  : WORD;
+    signal debug_calc_valid  : std_logic;
+    signal debug_calc_done   : std_logic;
     
     -- Test image data (28x28 image)
     type test_image_type is array (0 to IMAGE_SIZE-1, 0 to IMAGE_SIZE-1) of integer;
@@ -107,8 +133,6 @@ architecture Behavioral of cnn_tb is
     
     -- Test control signals
     signal test_done : boolean := false;
-    -- Verbosity control: set to true to enable detailed console reports
-    constant VERBOSE_DETAIL : boolean := false;
 
 begin
     -- Unit Under Test (UUT) - CNN Top-Level
@@ -140,6 +164,20 @@ begin
             output_pixel     => output_pixel,
             output_valid     => output_valid,
             output_ready     => output_ready,
+            output_guess     => output_guess,
+            
+            -- Control Pool2 mux
+            use_fc_path      => use_fc_path,
+            
+            -- FC1 outputs (new)
+            fc1_output_data  => fc1_output_data,
+            fc1_output_valid => fc1_output_valid,
+            fc1_output_ready => fc1_output_ready,
+            
+            -- FC2 outputs (final classification)
+            fc2_output_data  => fc2_output_data,
+            fc2_output_valid => fc2_output_valid,
+            fc2_output_ready => fc2_output_ready,
             
             -- DEBUG: Intermediate layer outputs
             debug_conv1_pixel => debug_conv1_pixel,
@@ -158,7 +196,19 @@ begin
             debug_conv2_valid => debug_conv2_valid,
             debug_conv2_ready => debug_conv2_ready,
             debug_conv2_row   => debug_conv2_row,
-            debug_conv2_col   => debug_conv2_col
+            debug_conv2_col   => debug_conv2_col,
+            
+            debug_pool2_pixel => debug_pool2_pixel,
+            debug_pool2_valid => debug_pool2_valid,
+            debug_pool2_ready => debug_pool2_ready,
+            debug_pool2_row   => debug_pool2_row,
+            debug_pool2_col   => debug_pool2_col,
+            
+            -- DEBUG: calc_index signals
+            debug_calc_index  => debug_calc_index,
+            debug_calc_pixel  => debug_calc_pixel,
+            debug_calc_valid  => debug_calc_valid,
+            debug_calc_done   => debug_calc_done
         );
 
     -- Clock process
@@ -200,9 +250,9 @@ begin
                 
                 -- Provide data for pending request
                 if req_pending then
-                          if req_row_buf >= 0 and req_row_buf < IMAGE_SIZE and 
-                              req_col_buf >= 0 and req_col_buf < IMAGE_SIZE then
-                                input_pixel(0) <= std_logic_vector(to_unsigned(test_image(req_row_buf, req_col_buf), 16));
+                    if req_row_buf >= 0 and req_row_buf < IMAGE_SIZE and 
+                       req_col_buf >= 0 and req_col_buf < IMAGE_SIZE then
+                        input_pixel(0) <= std_logic_vector(to_unsigned(test_image(req_row_buf, req_col_buf), 8));
                     else
                         -- Provide zero for out-of-bounds pixels (padding)
                         input_pixel(0) <= (others => '0');
@@ -222,26 +272,22 @@ begin
     input_monitor: process(clk)
     begin
         if rising_edge(clk) then
-                if input_req_valid = '1' and input_req_ready = '1' then
-                    if VERBOSE_DETAIL then
-                        if input_req_row >= 0 and input_req_row < IMAGE_SIZE and 
-                           input_req_col >= 0 and input_req_col < IMAGE_SIZE then
-                            report "Input requested [" & integer'image(input_req_row) & "," & integer'image(input_req_col) & "]";
-                        else
-                            report "Input requested (padding) [" & integer'image(input_req_row) & "," & integer'image(input_req_col) & "]";
-                        end if;
-                    end if;
+            if input_req_valid = '1' and input_req_ready = '1' then
+                if input_req_row >= 0 and input_req_row < IMAGE_SIZE and 
+                   input_req_col >= 0 and input_req_col < IMAGE_SIZE then
+                    report "Input requested [" & integer'image(input_req_row) & "," & integer'image(input_req_col) & "]";
+                else
+                    report "Input requested (padding) [" & integer'image(input_req_row) & "," & integer'image(input_req_col) & "]";
                 end if;
-
-                if input_valid = '1' and input_ready = '1' then
-                    if VERBOSE_DETAIL then
-                        report "Input provided: " & integer'image(to_integer(unsigned(input_pixel(0))));
-                    end if;
-                end if;
+            end if;
+            
+            if input_valid = '1' and input_ready = '1' then
+                report "Input provided: " & integer'image(to_integer(unsigned(input_pixel(0))));
+            end if;
         end if;
     end process;
 
-    -- Output monitor process with intermediate value capture
+    -- Output monitor process with FC1 output capture
     output_monitor: process(clk)
         file debug_file : text open write_mode is "cnn_intermediate_debug.txt";
         variable debug_line : line;
@@ -270,7 +316,6 @@ begin
             
             -- Monitor Conv1 outputs (Layer 0)
             if debug_conv1_valid = '1' then
-                -- Always write to debug file; console reports are optional
                 write(debug_line, string'("LAYER0_CONV1_OUTPUT: ["));
                 write(debug_line, debug_conv1_row);
                 write(debug_line, ',');
@@ -283,9 +328,6 @@ begin
                     write(debug_line, string'(": "));
                     write(debug_line, to_integer(signed(debug_conv1_pixel(i))));
                     writeline(debug_file, debug_line);
-                    if VERBOSE_DETAIL then
-                        report "Layer0 Filter " & integer'image(i) & ": " & integer'image(to_integer(signed(debug_conv1_pixel(i))));
-                    end if;
                 end loop;
                 debug_conv1_ready <= '1';
             else
@@ -306,9 +348,6 @@ begin
                     write(debug_line, string'(": "));
                     write(debug_line, to_integer(signed(debug_pool1_pixel(i))));
                     writeline(debug_file, debug_line);
-                    if VERBOSE_DETAIL then
-                        report "Layer1 Filter " & integer'image(i) & ": " & integer'image(to_integer(signed(debug_pool1_pixel(i))));
-                    end if;
                 end loop;
                 debug_pool1_ready <= '1';
             else
@@ -329,41 +368,113 @@ begin
                     write(debug_line, string'(": "));
                     write(debug_line, to_integer(signed(debug_conv2_pixel(i))));
                     writeline(debug_file, debug_line);
-                    if VERBOSE_DETAIL then
-                        report "Layer2 Filter " & integer'image(i) & ": " & integer'image(to_integer(signed(debug_conv2_pixel(i))));
-                    end if;
                 end loop;
                 debug_conv2_ready <= '1';
             else
                 debug_conv2_ready <= '0';
             end if;
             
-            -- Monitor final outputs (Layer 3 - Pool2)
+            -- Monitor Pool2 outputs (Layer 3)
+            if debug_pool2_valid = '1' then
+                write(debug_line, string'("LAYER3_POOL2_OUTPUT: ["));
+                write(debug_line, debug_pool2_row);
+                write(debug_line, ',');
+                write(debug_line, debug_pool2_col);
+                write(debug_line, ']');
+                writeline(debug_file, debug_line);
+                for i in 0 to 15 loop
+                    write(debug_line, string'("  Filter_"));
+                    write(debug_line, i);
+                    write(debug_line, string'(": "));
+                    write(debug_line, to_integer(signed(debug_pool2_pixel(i))));
+                    writeline(debug_file, debug_line);
+                end loop;
+                debug_pool2_ready <= '1';
+            else
+                debug_pool2_ready <= '0';
+            end if;
+            
+            -- Monitor final outputs (from top-level output_pixel port - Pool2 alias)
             if output_valid = '1' and output_ready = '1' then
-                if VERBOSE_DETAIL then
-                    report "CNN Output received";
-                end if;
-
-                -- CNN_OUTPUT header (always written to debug file)
+                report "CNN Output received";
+                
+                -- CNN_OUTPUT header
                 write(debug_line, string'("CNN_OUTPUT: ["));
                 write(debug_line, output_req_row);  -- Use requested output position
                 write(debug_line, ',');
                 write(debug_line, output_req_col);
                 write(debug_line, ']');
                 writeline(debug_file, debug_line);
-
+                
                 for i in 0 to FINAL_NUM_FILTERS-1 loop
-                    if VERBOSE_DETAIL then
-                        report "  Filter " & integer'image(i) & ": " & 
-                            integer'image(to_integer(signed(output_pixel(i))));
-                    end if;
-                    -- Write filter output to debug file
+                    report "  Filter " & integer'image(i) & ": " & 
+                        integer'image(to_integer(signed(output_pixel(i))));
+                    -- Write filter output
                     write(debug_line, string'("Filter_"));
                     write(debug_line, i);
                     write(debug_line, string'(": "));
                     write(debug_line, to_integer(signed(output_pixel(i))));
                     writeline(debug_file, debug_line);
                 end loop;
+            end if;
+            
+            -- Monitor FC1 outputs (Layer 5) - just monitor, don't control ready
+            if fc1_output_valid = '1' and fc1_output_ready = '1' then
+                report "CNN FC1 Output received (64 neurons)";
+                
+                -- FC1_OUTPUT header
+                write(debug_line, string'("FC1_OUTPUT:"));
+                writeline(debug_file, debug_line);
+                
+                for i in 0 to FC1_NODES_OUT-1 loop
+                    report "  Neuron " & integer'image(i) & ": " & 
+                        integer'image(to_integer(signed(fc1_output_data(i))));
+                    -- Write neuron output
+                    write(debug_line, string'("  Neuron_"));
+                    write(debug_line, i);
+                    write(debug_line, string'(": "));
+                    write(debug_line, to_integer(signed(fc1_output_data(i))));
+                    writeline(debug_file, debug_line);
+                end loop;
+            end if;
+            
+            -- Monitor FC2 outputs (Layer 6 - Final classification)
+            if fc2_output_valid = '1' and fc2_output_ready = '1' then
+                report "CNN FC2 Output received (10 classes)";
+                
+                -- FC2_OUTPUT header
+                write(debug_line, string'("FC2_OUTPUT:"));
+                writeline(debug_file, debug_line);
+                
+                for i in 0 to 9 loop
+                    report "  Class " & integer'image(i) & ": " & 
+                        integer'image(to_integer(signed(fc2_output_data(i))));
+                    -- Write class score
+                    write(debug_line, string'("  Class_"));
+                    write(debug_line, i);
+                    write(debug_line, string'(": "));
+                    write(debug_line, to_integer(signed(fc2_output_data(i))));
+                    writeline(debug_file, debug_line);
+                end loop;
+            end if;
+            
+            -- Monitor calc_index activity
+            if debug_calc_valid = '1' then
+                -- Report every 50th pixel to avoid log spam
+                if debug_calc_index mod 50 = 0 then
+                    report "CALC_INDEX: index=" & integer'image(debug_calc_index) & 
+                           " pixel=" & integer'image(to_integer(signed(debug_calc_pixel)));
+                end if;
+                write(debug_line, string'("CALC_INDEX: index="));
+                write(debug_line, debug_calc_index);
+                write(debug_line, string'(" pixel="));
+                write(debug_line, to_integer(signed(debug_calc_pixel)));
+                writeline(debug_file, debug_line);
+            end if;
+            
+            if debug_calc_done = '1' then
+                write(debug_line, string'("CALC_INDEX: DONE - all 400 pixels sent"));
+                writeline(debug_file, debug_line);
             end if;
         end if;
     end process;
@@ -376,27 +487,26 @@ begin
         rst <= '1';
         output_req_valid <= '0';
         output_ready <= '0';
+        fc1_output_ready <= '0';
+        use_fc_path <= '0';  -- Start with testbench controlling Pool2
         
         wait for CLK_PERIOD * 2;
         rst <= '0';
         
         wait for CLK_PERIOD * 2;
         
-     if VERBOSE_DETAIL then
-         report "Starting CNN top-level test...";
-         report "Test image ready - first pixel value: " & integer'image(test_image(0,0));
-         report "Test image pattern - corner values: [0,0]=" & integer'image(test_image(0,0)) & 
-             " [0,27]=" & integer'image(test_image(0,27)) & 
-             " [27,0]=" & integer'image(test_image(27,0)) & 
-             " [27,27]=" & integer'image(test_image(27,27));
-     end if;
+        report "Starting CNN top-level test with FC1...";
+        report "Test image ready - first pixel value: " & integer'image(test_image(0,0));
+        report "Test image pattern - corner values: [0,0]=" & integer'image(test_image(0,0)) & 
+               " [0,27]=" & integer'image(test_image(0,27)) & 
+               " [27,0]=" & integer'image(test_image(27,0)) & 
+               " [27,27]=" & integer'image(test_image(27,27));
         
-        -- Request all output positions (5x5 final output)
+
+        -- Request all output positions (5x5 final output from Pool2)
         for out_row in 0 to FINAL_OUTPUT_SIZE-1 loop
             for out_col in 0 to FINAL_OUTPUT_SIZE-1 loop
-                if VERBOSE_DETAIL then
-                    report "Requesting CNN output position [" & integer'image(out_row) & "," & integer'image(out_col) & "]";
-                end if;
+                report "Requesting CNN output position [" & integer'image(out_row) & "," & integer'image(out_col) & "]";
                 
                 -- Send output position request (robust handshake)
                 output_req_row <= out_row;
@@ -435,17 +545,47 @@ begin
             end loop;
         end loop;
         
-        if VERBOSE_DETAIL then
-            report "All CNN outputs received!";
-        end if;
+        report "All CNN Pool2 outputs received!";
+        
+        -- Now switch to FC path - let calc_index control Pool2
+        report "Switching to FC path - calc_index will now request Pool2 data...";
+        use_fc_path <= '1';
+        
+        -- Wait for FC1 to complete (it processes independently)
+        report "Waiting for FC1 to complete processing...";
+        fc1_output_ready <= '1';
+        
+        -- Wait for FC1 output
+        loop
+            wait until rising_edge(clk);
+            if fc1_output_valid = '1' then
+                exit;
+            end if;
+        end loop;
+        
+        report "FC1 output received!";
+        fc1_output_ready <= '0';
+        
+        -- Wait for FC2 to complete
+        report "Waiting for FC2 to complete processing...";
+        fc2_output_ready <= '1';
+        
+        -- Wait for FC2 output (final classification)
+        loop
+            wait until rising_edge(clk);
+            if fc2_output_valid = '1' then
+                exit;
+            end if;
+        end loop;
+        
+        report "FC2 output received! CNN pipeline complete!";
+        fc2_output_ready <= '0';
         
         -- Wait a few more cycles
         wait for CLK_PERIOD * 10;
         
         -- Test reset functionality
-        if VERBOSE_DETAIL then
-            report "Testing CNN reset functionality...";
-        end if;
+        report "Testing CNN reset functionality...";
         rst <= '1';
         wait for CLK_PERIOD * 2;
         rst <= '0';
@@ -453,9 +593,8 @@ begin
         wait for CLK_PERIOD * 5;
         
         -- Test second run (just first output position)
-        if VERBOSE_DETAIL then
-            report "Testing second CNN run (first position only)...";
-        end if;
+        report "Testing second CNN run (first position only)...";
+        enable <= '1';
         
         output_req_row <= 0;
         output_req_col <= 0;
@@ -482,16 +621,12 @@ begin
         end loop;
         output_ready <= '0';
         
-        if VERBOSE_DETAIL then
-            report "Second CNN run completed!";
-        end if;
+        report "Second CNN run completed!";
         
         wait for CLK_PERIOD * 10;
         
         test_done <= true;
-        if VERBOSE_DETAIL then
-            report "All CNN tests completed successfully!";
-        end if;
+        report "All CNN tests completed successfully!";
         -- Allow signals to settle for one clock period
         wait for CLK_PERIOD;
         -- Explicitly stop simulation when the simulator supports VHDL-2008 std.env

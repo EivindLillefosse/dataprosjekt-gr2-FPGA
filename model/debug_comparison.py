@@ -359,7 +359,8 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
     print("\nPosition | Filter | Python   | VHDL(float) | VHDL(raw) | Error    | Rel.Err")
     print("---------|--------|----------|-------------|-----------|----------|--------")
 
-    # Show first N positions for quick debugging
+    # Show first N positions for quick debugging (non-mutating display)
+    display_count = 0
     for output in vhdl_outputs[:10]:
         row, col = output['row'], output['col']
         for filter_idx, vhdl_raw in output['filters'].items():
@@ -372,23 +373,9 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
             error = abs(python_val - vhdl_relu)
             rel_error = (error / max(abs(python_val), 0.001)) * 100
 
-            total_error += error
-            total_abs_error += abs(error)
-            valid_comparisons += 1
-
-            if error > max_error:
-                max_error = error
-                max_error_pos = (row, col, filter_idx)
-
-            if filter_idx not in filter_errors:
-                filter_errors[filter_idx] = {'count': 0, 'total_error': 0.0, 'zero_count': 0}
-            filter_errors[filter_idx]['count'] += 1
-            filter_errors[filter_idx]['total_error'] += error
-            if vhdl_raw == 0:
-                filter_errors[filter_idx]['zero_count'] += 1
-
-            if valid_comparisons <= 80:
+            if display_count < 80:
                 print(f"[{row:2d},{col:2d}] |   {filter_idx}    | {python_val:8.5f} | {vhdl_relu:11.5f} | {vhdl_raw:9d} | {error:8.5f} | {rel_error:6.1f}%")
+                display_count += 1
 
     # Now compute aggregate statistics across all reported VHDL outputs
     for output in vhdl_outputs:
