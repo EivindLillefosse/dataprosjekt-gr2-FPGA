@@ -45,7 +45,8 @@ entity cnn_top is
         FC1_NODES_IN      : integer := (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
                                         (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
                                         CONV_2_NUM_FILTERS;  -- 5*5*16 = 400
-        FC1_NODES_OUT     : integer := 64
+        FC1_NODES_OUT     : integer := 64;
+        FC2_NODES_OUT     : integer := 10  -- Final classification output
     
     );
     port (
@@ -73,7 +74,12 @@ entity cnn_top is
         -- FC1 outputs (intermediate, for testing/debug)
         fc1_output_data  : out WORD_ARRAY(0 to 63);  -- 64 outputs from FC1
         fc1_output_valid : out std_logic;
-        fc1_output_ready : in  std_logic
+        fc1_output_ready : in  std_logic;
+        
+        -- FC2 outputs (final 10-class classification)
+        fc2_output_data  : out WORD_ARRAY(0 to 9);   -- 10 class scores
+        fc2_output_valid : out std_logic;
+        fc2_output_ready : in  std_logic
     );
 end cnn_top;
 
@@ -153,6 +159,23 @@ architecture Structural of cnn_top is
     signal fc1_out_ready         : std_logic;
     signal fc1_out_data          : WORD_ARRAY(0 to FC1_NODES_OUT-1);
     signal fc1_in_ready          : std_logic;
+
+    -- Signals for buffer between FC1 and FC2
+    signal buf_out_valid         : std_logic;
+    signal buf_out_data          : WORD_ARRAY(0 to FC1_NODES_OUT-1);
+    signal buf_out_ready         : std_logic;
+    signal buf_in_ready          : std_logic;
+    
+    -- Signals for FC2 input sequencer
+    signal fc2_input_index       : integer range 0 to FC1_NODES_OUT-1 := 0;
+    signal fc2_input_valid       : std_logic;
+    signal fc2_input_data        : WORD;
+    signal fc2_sending           : std_logic;  -- State: actively sending to FC2
+    
+    -- Signals for FC2 output
+    signal fc2_out_valid         : std_logic;
+    signal fc2_out_data          : WORD_ARRAY(0 to FC2_NODES_OUT-1);
+    signal fc2_in_ready          : std_logic;
 
 begin
     -- Instantiate 1st convolution layer
@@ -367,20 +390,102 @@ begin
             pixel_in_data   => calc_fc_pixel,
             pixel_in_index  => calc_curr_index,
             
-            -- Output TO external consumer or FC2
+            -- Output TO buffer
             pixel_out_valid => fc1_out_valid,
-            pixel_out_ready => fc1_out_ready,
+            pixel_out_ready => buf_in_ready,
             pixel_out_data  => fc1_out_data
         );
 
-    -- Connect FC1 output to top-level output
+    -- Buffer between FC1 and FC2
+    fc_buffer: entity work.fc_layer_buffer
+        generic map (
+            DATA_WIDTH  => 8,
+            NUM_NEURONS => FC1_NODES_OUT  -- 64
+        )
+        port map (
+            clk          => clk,
+            rst          => rst,
+            
+            -- Input FROM FC1
+            input_valid  => fc1_out_valid,
+            input_data   => fc1_out_data,
+            input_ready  => buf_in_ready,  -- Buffer tells FC1 it's ready
+            
+            -- Output TO FC2 sequencer
+            output_valid => buf_out_valid,
+            output_data  => buf_out_data,
+            output_ready => buf_out_ready
+        );
+
+    -- FC2 input sequencer: send buffered 64 neurons sequentially
+    fc2_input_data <= buf_out_data(fc2_input_index);
+    
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if rst = '1' then
+                fc2_input_index <= 0;
+                fc2_input_valid <= '0';
+                fc2_sending <= '0';
+            elsif buf_out_valid = '1' and fc2_sending = '0' then
+                -- Buffer has full output, start sending to FC2
+                fc2_sending <= '1';
+                fc2_input_valid <= '1';
+                fc2_input_index <= 0;
+            elsif fc2_sending = '1' and fc2_in_ready = '1' then
+                -- FC2 accepted current pixel, advance
+                if fc2_input_index = FC1_NODES_OUT - 1 then
+                    -- Last pixel sent, done
+                    fc2_input_index <= 0;
+                    fc2_input_valid <= '0';
+                    fc2_sending <= '0';
+                else
+                    -- Send next pixel
+                    fc2_input_index <= fc2_input_index + 1;
+                    fc2_input_valid <= '1';  -- Keep valid high
+                end if;
+            end if;
+        end if;
+    end process;
+    
+    -- Tell buffer we're ready to drain it when FC2 finishes
+    buf_out_ready <= '1' when fc2_sending = '1' and fc2_input_index = FC1_NODES_OUT - 1 and fc2_in_ready = '1' else '0';
+
+    -- Instantiate FC2 layer (64 inputs -> 10 outputs)
+    fc2_inst: entity work.fullyconnected
+        generic map (
+            NODES_IN  => FC1_NODES_OUT,  -- 64
+            NODES_OUT => FC2_NODES_OUT,  -- 10
+            LAYER_ID  => 1               -- Second FC layer (uses layer_6_dense_1 weights/biases)
+        )
+        port map (
+            clk             => clk,
+            rst             => rst,
+            
+            -- Input FROM buffer sequencer
+            pixel_in_valid  => fc2_input_valid,
+            pixel_in_ready  => fc2_in_ready,
+            pixel_in_data   => fc2_input_data,
+            pixel_in_index  => fc2_input_index,
+            
+            -- Output (FC2 doesn't use input ready signal)
+            pixel_out_valid => fc2_out_valid,
+            pixel_out_ready => open,  -- Not used, just an indicator
+            pixel_out_data  => fc2_out_data
+        );
+
+    -- Connect FC1 output to top-level output (for debug)
     fc1_output_data  <= fc1_out_data;
     fc1_output_valid <= fc1_out_valid;
     fc1_out_ready    <= fc1_output_ready;  -- Connect ready from top-level port
     
-    -- Placeholder for output_guess (will be driven by argmax after FC2 is added)
+    -- Connect FC2 output to top-level output
+    fc2_output_data  <= fc2_out_data;
+    fc2_output_valid <= fc2_out_valid;
+    
+    -- Placeholder for output_guess (will be driven by argmax)
     output_guess  <= (others => '0');
-    output_valid  <= fc1_out_valid;  -- Use FC1 valid for now
+    output_valid  <= fc2_out_valid;  -- Use FC2 valid for final output
 
     -- Connect top-level input requests to conv1's input requests
     input_req_row    <= conv1_in_req_row;

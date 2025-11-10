@@ -78,6 +78,11 @@ architecture Behavioral of cnn_tb is
     signal fc1_output_valid : std_logic;
     signal fc1_output_ready : std_logic := '0';
     
+    -- FC2 output signals (final classification)
+    signal fc2_output_data  : WORD_ARRAY(0 to 9);
+    signal fc2_output_valid : std_logic;
+    signal fc2_output_ready : std_logic := '0';
+    
     -- DEBUG: Intermediate layer signals
     signal debug_conv1_pixel : WORD_ARRAY(0 to 7);  -- 8 filters
     signal debug_conv1_valid : std_logic;
@@ -171,6 +176,11 @@ begin
             fc1_output_data  => fc1_output_data,
             fc1_output_valid => fc1_output_valid,
             fc1_output_ready => fc1_output_ready,
+            
+            -- FC2 outputs (final classification)
+            fc2_output_data  => fc2_output_data,
+            fc2_output_valid => fc2_output_valid,
+            fc2_output_ready => fc2_output_ready,
             
             -- DEBUG: Intermediate layer outputs
             debug_conv1_pixel => debug_conv1_pixel,
@@ -431,6 +441,26 @@ begin
                 end loop;
             end if;
             
+            -- Monitor FC2 outputs (Layer 6 - Final classification)
+            if fc2_output_valid = '1' and fc2_output_ready = '1' then
+                report "CNN FC2 Output received (10 classes)";
+                
+                -- FC2_OUTPUT header
+                write(debug_line, string'("FC2_OUTPUT:"));
+                writeline(debug_file, debug_line);
+                
+                for i in 0 to 9 loop
+                    report "  Class " & integer'image(i) & ": " & 
+                        integer'image(to_integer(signed(fc2_output_data(i))));
+                    -- Write class score
+                    write(debug_line, string'("  Class_"));
+                    write(debug_line, i);
+                    write(debug_line, string'(": "));
+                    write(debug_line, to_integer(signed(fc2_output_data(i))));
+                    writeline(debug_file, debug_line);
+                end loop;
+            end if;
+            
             -- Monitor calc_index activity
             if debug_calc_valid = '1' then
                 -- Report every 50th pixel to avoid log spam
@@ -541,6 +571,21 @@ begin
         
         report "FC1 output received!";
         fc1_output_ready <= '0';
+        
+        -- Wait for FC2 to complete
+        report "Waiting for FC2 to complete processing...";
+        fc2_output_ready <= '1';
+        
+        -- Wait for FC2 output (final classification)
+        loop
+            wait until rising_edge(clk);
+            if fc2_output_valid = '1' then
+                exit;
+            end if;
+        end loop;
+        
+        report "FC2 output received! CNN pipeline complete!";
+        fc2_output_ready <= '0';
         
         -- Wait a few more cycles
         wait for CLK_PERIOD * 10;
