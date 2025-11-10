@@ -448,8 +448,9 @@ begin
         end if;
     end process;
     
-    -- Tell buffer we're ready to drain it when FC2 finishes
-    buf_out_ready <= '1' when fc2_sending = '1' and fc2_input_index = FC1_NODES_OUT - 1 and fc2_in_ready = '1' else '0';
+    -- Tell buffer we're ready to drain it during FC2 transmission
+    -- Assert ready whenever we're sending data to FC2 (draining the buffer)
+    buf_out_ready <= '1' when fc2_sending = '1' else '0';
 
     -- Instantiate FC2 layer (64 inputs -> 10 outputs)
     fc2_inst: entity work.fullyconnected
