@@ -39,7 +39,13 @@ entity cnn_top_debug is
         CONV_2_BLOCK_SIZE     : integer := 2;
 
         -- Parameters for 2nd pooling layer
-        POOL_2_BLOCK_SIZE     : integer := 2
+        POOL_2_BLOCK_SIZE     : integer := 2;
+        
+        -- Parameters for fully connected layers
+        FC1_NODES_IN      : integer := (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
+                                        (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
+                                        CONV_2_NUM_FILTERS;  -- 5*5*16 = 400
+        FC1_NODES_OUT     : integer := 64
     
     );
     port (
@@ -68,6 +74,15 @@ entity cnn_top_debug is
         output_pixel     : out WORD_ARRAY_16(0 to CONV_2_NUM_FILTERS-1);
         output_valid     : out std_logic;
         output_ready     : in  std_logic;
+        output_guess     : out WORD;  -- Final classification (placeholder)
+        
+        -- Control: Select between testbench requests and calc_index requests for Pool2
+        use_fc_path      : in  std_logic;  -- '1' = calc_index controls Pool2, '0' = testbench controls Pool2
+        
+        -- FC1 outputs (for testing/debug)
+        fc1_output_data  : out WORD_ARRAY(0 to 63);
+        fc1_output_valid : out std_logic;
+        fc1_output_ready : in  std_logic;
 
         -- DEBUG: Intermediate layer outputs
         -- Conv1 output (after convolution, before pool1)
@@ -89,7 +104,20 @@ entity cnn_top_debug is
         debug_conv2_valid       : out std_logic;
         debug_conv2_ready       : in  std_logic;
         debug_conv2_row         : out integer;
-        debug_conv2_col         : out integer
+        debug_conv2_col         : out integer;
+        
+        -- Pool2 output (after second pooling, before FC layers)
+        debug_pool2_pixel       : out WORD_ARRAY(0 to CONV_2_NUM_FILTERS-1);
+        debug_pool2_valid       : out std_logic;
+        debug_pool2_ready       : in  std_logic;
+        debug_pool2_row         : out integer;
+        debug_pool2_col         : out integer;
+        
+        -- DEBUG: calc_index status
+        debug_calc_index        : out integer range 0 to 399;
+        debug_calc_pixel        : out WORD;
+        debug_calc_valid        : out std_logic;
+        debug_calc_done         : out std_logic
     );
 end cnn_top_debug;
 
@@ -149,6 +177,27 @@ architecture Structural of cnn_top_debug is
     signal pool2_in_req_col     : integer;
     signal pool2_in_req_valid   : std_logic;
     signal pool2_in_req_ready   : std_logic;
+    
+    -- Pool2 output signals
+    signal pool2_pixel_out       : WORD_ARRAY(0 to CONV_2_NUM_FILTERS-1);
+    signal pool2_pixel_out_valid : std_logic;
+    signal pool2_pixel_out_ready : std_logic;
+    
+    -- Signals between calc_index and fc1
+    signal calc_index_enable     : std_logic;
+    signal calc_req_row          : integer;
+    signal calc_req_col          : integer;
+    signal calc_req_valid        : std_logic;
+    signal calc_pool_ready       : std_logic;
+    signal calc_fc_pixel         : WORD;
+    signal calc_fc_valid         : std_logic;
+    signal calc_curr_index       : integer range 0 to FC1_NODES_IN-1;
+    signal calc_done             : std_logic;
+
+    -- Signals for FC1 output
+    signal fc1_out_valid         : std_logic;
+    signal fc1_out_data          : WORD_ARRAY(0 to FC1_NODES_OUT-1);
+    signal fc1_in_ready          : std_logic;
 
     -- DEBUG: Register output positions when request handshake completes
     signal conv1_active_out_row : integer := 0;
@@ -292,11 +341,11 @@ begin
             clk                 => clk,
             rst                 => rst,
             
-            -- Request FROM external controller
-            pixel_out_req_row   => output_req_row,
-            pixel_out_req_col   => output_req_col,
-            pixel_out_req_valid => output_req_valid,
-            pixel_out_req_ready => output_req_ready,
+            -- Request FROM external controller OR calc_index (muxed)
+            pixel_out_req_row   => calc_req_row when use_fc_path = '1' else output_req_row,
+            pixel_out_req_col   => calc_req_col when use_fc_path = '1' else output_req_col,
+            pixel_out_req_valid => calc_req_valid when use_fc_path = '1' else output_req_valid,
+            pixel_out_req_ready => open,  -- Not used
 
             -- Request TO conv2
             pixel_in_req_row    => pool2_in_req_row,
@@ -309,10 +358,10 @@ begin
             pixel_in_valid      => conv2_pixel_out_valid,
             pixel_in_ready      => conv2_pixel_out_ready,
 
-            -- Data TO external consumer
-            pixel_out           => output_pixel,
-            pixel_out_valid     => output_valid,
-            pixel_out_ready     => output_ready
+            -- Data output
+            pixel_out           => pool2_pixel_out,
+            pixel_out_valid     => pool2_pixel_out_valid,
+            pixel_out_ready     => calc_pool_ready when use_fc_path = '1' else output_ready
         );
 
     -- Connect pool2 output requests to conv2 input requests
@@ -320,6 +369,80 @@ begin
     conv2_out_req_col   <= pool2_in_req_col;
     conv2_out_req_valid <= pool2_in_req_valid;
     pool2_in_req_ready  <= conv2_out_req_ready;
+    
+    -- Route Pool2 outputs directly to top-level ports
+    output_pixel <= pool2_pixel_out;
+    output_valid <= pool2_pixel_out_valid;
+    output_req_ready <= '1';  -- Always ready to accept requests
+    
+    -- Instantiate calc_index (flattens 3D tensor to 1D for FC layer)
+    calc_index_inst: entity work.calc_index
+        generic map (
+            NODES_IN       => FC1_NODES_IN,      -- 400
+            INPUT_CHANNELS => CONV_2_NUM_FILTERS, -- 16
+            INPUT_SIZE     => (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE)  -- 5
+        )
+        port map (
+            clk             => clk,
+            rst             => rst,
+            enable          => calc_index_enable,
+            
+            -- Request TO pool2
+            req_row         => calc_req_row,
+            req_col         => calc_req_col,
+            req_valid       => calc_req_valid,
+            
+            -- Input FROM pool2 (all 16 channels at once)
+            pool_pixel_data  => pool2_pixel_out,
+            pool_pixel_valid => pool2_pixel_out_valid,
+            pool_pixel_ready => calc_pool_ready,
+            
+            -- Output TO fc1 (selected single channel pixel)
+            fc_pixel_out    => calc_fc_pixel,
+            fc_pixel_valid  => calc_fc_valid,
+            
+            curr_index      => calc_curr_index,
+            done            => calc_done
+        );
+
+    -- Enable calc_index when CNN is enabled
+    calc_index_enable <= enable;
+
+    -- Instantiate FC1 layer (400 inputs -> 64 outputs)
+    fc1_inst: entity work.fullyconnected
+        generic map (
+            NODES_IN  => FC1_NODES_IN,   -- 400
+            NODES_OUT => FC1_NODES_OUT,  -- 64
+            LAYER_ID  => 0               -- First FC layer (uses layer_5_dense weights/biases)
+        )
+        port map (
+            clk             => clk,
+            rst             => rst,
+            
+            -- Input FROM calc_index
+            pixel_in_valid  => calc_fc_valid,
+            pixel_in_ready  => fc1_in_ready,
+            pixel_in_data   => calc_fc_pixel,
+            pixel_in_index  => calc_curr_index,
+            
+            -- Output TO external consumer or FC2
+            pixel_out_valid => fc1_out_valid,
+            pixel_out_ready => open,  -- Not using ready in debug version
+            pixel_out_data  => fc1_out_data
+        );
+
+    -- Connect FC1 output to top-level ports
+    fc1_output_data  <= fc1_out_data;
+    fc1_output_valid <= fc1_out_valid;
+    
+    -- Placeholder for output_guess (will be driven by argmax after FC2 is added)
+    output_guess  <= (others => '0');
+    
+    -- DEBUG: Export calc_index signals
+    debug_calc_index <= calc_curr_index;
+    debug_calc_pixel <= calc_fc_pixel;
+    debug_calc_valid <= calc_fc_valid;
+    debug_calc_done  <= calc_done;
 
     -- Connect top-level input requests to conv1's input requests
     input_req_row    <= conv1_in_req_row;
@@ -433,6 +556,31 @@ begin
                     debug_conv2_col <= conv2_active_out_col;
                 elsif debug_conv2_ready = '1' then
                     debug_conv2_valid <= '0';
+                end if;
+            end if;
+        end if;
+    end process;
+
+    -- Pool2 output tap (for debugging FC path)
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if rst = '1' then
+                debug_pool2_pixel <= (others => (others => '0'));
+                debug_pool2_valid <= '0';
+                debug_pool2_row <= 0;
+                debug_pool2_col <= 0;
+            else
+                -- Just tap the signals directly
+                debug_pool2_pixel <= pool2_pixel_out;
+                debug_pool2_valid <= pool2_pixel_out_valid;
+                -- Capture the request position
+                if use_fc_path = '1' then
+                    debug_pool2_row <= calc_req_row;
+                    debug_pool2_col <= calc_req_col;
+                else
+                    debug_pool2_row <= output_req_row;
+                    debug_pool2_col <= output_req_col;
                 end if;
             end if;
         end if;

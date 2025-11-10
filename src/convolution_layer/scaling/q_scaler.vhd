@@ -24,7 +24,7 @@ entity q_scaler is
         INPUT_WIDTH  : integer := 16;       -- Q2.12 width
         OUTPUT_WIDTH : integer := 8;        -- Q1.6 width
         SHIFT_AMOUNT : integer := 6;        -- Bits to shift (12 - 6 = 6)
-        SKIP_SHIFT   : boolean := TRUE     -- If true, bypass rounding and right shift (pass-through)
+        SKIP_SHIFT   : integer := 0         -- If true, bypass rounding and right shift (pass-through)
     );
     Port (
         clk        : in STD_LOGIC;
@@ -74,7 +74,7 @@ begin
                         -- read input
                         input_s := signed(data_in(i));
 
-                        if SKIP_SHIFT then
+                        if SKIP_SHIFT = 0 then
                             -- Bypass scaling: treat input as already in target Q-format
                             -- Direct conversion to integer (no rounding or shift)
                             shifted_int := to_integer(input_s);
