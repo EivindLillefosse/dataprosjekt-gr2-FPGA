@@ -14,7 +14,7 @@
 *.wdb
 *.lock
 *.tmp
-
+.venv/
 # Vivado-generated directories
 *.cache/
 *.hw/

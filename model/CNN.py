@@ -524,6 +524,10 @@ def export_to_FPGA(model, q_format="Q1.6"):
                         kernel_h, kernel_w, in_channels, num_filters = weights.shape
                         f.write(f"; Memory organization: {kernel_h}x{kernel_w}x{in_channels} addresses × {num_filters*8} bits (packed)\n")
                         f.write(f"; Each address contains all {num_filters} filter weights for one (kernel_pos, channel) combination\n")
+                    elif len(weights.shape) == 2:  # Dense: (inputs, outputs)
+                        num_inputs, num_outputs = weights.shape
+                        f.write(f"; Memory organization: {num_inputs} addresses × {num_outputs*8} bits (packed)\n")
+                        f.write(f"; Each address contains all {num_outputs} node weights for one input\n")
                     f.write(f";\n")
                     
                     # Proper COE format keywords
@@ -570,8 +574,39 @@ def export_to_FPGA(model, q_format="Q1.6"):
                         
                         if depth % 4 != 0:
                             f.write("\n")
+                    elif len(weights.shape) == 2:  # Dense: (num_inputs, num_outputs)
+                        num_inputs, num_outputs = weights.shape
+                        depth = num_inputs
+                        
+                        # Pack weights: for each input, pack all output node weights together
+                        # TensorFlow Dense weight shape: (num_inputs, num_outputs)
+                        for input_idx in range(depth):
+                            # Pack all num_outputs weights for this input into one wide word
+                            packed_value = 0
+                            for output_idx in range(num_outputs):
+                                # Calculate correct index in flattened array
+                                weight_idx = input_idx * num_outputs + output_idx
+                                qw = quantized_weights[weight_idx]
+                                byte_value = int(qw) & 0xFF
+                                packed_value |= (byte_value << (output_idx * 8))
+                            
+                            # Write packed value (same format as Conv2D for consistency)
+                            num_hex_chars = (num_outputs * 8 + 3) // 4
+                            if input_idx == 0:
+                                f.write(f"{packed_value:0{num_hex_chars}X}")
+                            elif input_idx == depth - 1:
+                                f.write(f",{packed_value:0{num_hex_chars}X};")
+                            else:
+                                f.write(f",{packed_value:0{num_hex_chars}X}")
+                            
+                            # Add newline for readability every 4 addresses
+                            if (input_idx + 1) % 4 == 0 and input_idx != depth - 1:
+                                f.write("\n")
+                        
+                        if depth % 4 != 0:
+                            f.write("\n")
                     else:
-                        # Dense layers: write individual values (unpacked)
+                        # Other layers: write individual values (unpacked)
                         for j, qw in enumerate(quantized_weights):
                             if j == 0:
                                 f.write(f"{int8_to_hex(qw)}")
