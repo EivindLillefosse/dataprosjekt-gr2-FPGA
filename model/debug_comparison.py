@@ -30,6 +30,8 @@ def parse_sim_output_file(filename: str, bits: int = 16) -> List[Dict[str, Any]]
     layer0_re = re.compile(r'^LAYER0_CONV1_OUTPUT:\s*\[(\d+),(\d+)\]')
     layer1_re = re.compile(r'^LAYER1_POOL1_OUTPUT:\s*\[(\d+),(\d+)\]')
     layer2_re = re.compile(r'^LAYER2_CONV2_OUTPUT:\s*\[(\d+),(\d+)\]')
+    # Generic pattern to catch other layer debug tags e.g. LAYER3_POOL2_OUTPUT
+    generic_layer_re = re.compile(r'^LAYER(\d+)[A-Z0-9_]*_OUTPUT:\s*\[(\d+),(\d+)\]')
     filter_re1 = re.compile(r'^Filter[_ ]?(\d+):\s*([0-9A-Fa-fx\-]+)')
     filter_re2 = re.compile(r'^Filter\s+(\d+)\s*:\s*([0-9A-Fa-fx\-]+)')
     # New TB format: Filter_<i>_hex: 0x..  dec: N
@@ -298,7 +300,8 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
         'layer_0_output': 'layer0',
         'layer_1_output': 'layer1',
         'layer_2_output': 'layer2',
-        'layer_3_output': 'final',
+        # Pool2 (Python layer_3) is emitted as LAYER3_POOL2_OUTPUT in the TB
+        'layer_3_output': 'layer3',
         'cnn_output': 'final'
     }
 

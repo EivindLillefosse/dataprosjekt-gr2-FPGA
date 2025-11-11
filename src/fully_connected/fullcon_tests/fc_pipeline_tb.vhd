@@ -41,20 +41,21 @@ architecture tb of fc_pipeline_tb is
     signal fc1_output_ready : std_logic;
     signal fc1_output_data  : WORD_ARRAY_16(0 to FC1_OUTPUT_NODES-1);
 
-    -- Buffer Signals
-    signal buf_input_valid  : std_logic;
-    signal buf_input_ready  : std_logic;
-    signal buf_input_data   : WORD_ARRAY_16(0 to FC1_OUTPUT_NODES-1);
+    -- Sequencer Signals (between FC1 and FC2)
+    signal seq_input_valid  : std_logic;
+    signal seq_input_ready  : std_logic;
+    signal seq_input_data   : WORD_ARRAY_16(0 to FC1_OUTPUT_NODES-1);
     
-    signal buf_output_valid : std_logic;
-    signal buf_output_ready : std_logic;
-    signal buf_output_data  : WORD_ARRAY_16(0 to FC1_OUTPUT_NODES-1);
+    signal seq_output_valid : std_logic;
+    signal seq_output_ready : std_logic;
+    signal seq_output_data  : WORD_16;
+    signal seq_output_index : integer range 0 to FC1_OUTPUT_NODES-1;
 
     -- FC2 Layer Signals
     signal fc2_input_valid  : std_logic := '0';
     signal fc2_input_ready  : std_logic;
     signal fc2_input_data   : WORD_16;
-    signal fc2_input_index  : integer range 0 to FC2_INPUT_NODES-1 := 0;
+    signal fc2_input_index  : integer range 0 to FC2_INPUT_NODES-1;
     
     signal fc2_output_valid : std_logic;
     signal fc2_output_ready : std_logic := '1';
@@ -81,21 +82,21 @@ begin
             pixel_out_data  => fc1_output_data
         );
 
-    -- Instantiate Buffer
-    buffer_inst : entity work.fc_layer_buffer
+    -- Instantiate Sequencer (FC1 -> FC2)
+    sequencer_inst : entity work.fc_sequencer
         generic map (
-            DATA_WIDTH  => 8,
             NUM_NEURONS => FC1_OUTPUT_NODES
         )
         port map (
-            clk           => clk,
-            rst           => rst,
-            input_valid   => buf_input_valid,
-            input_data    => buf_input_data,
-            input_ready   => buf_input_ready,
-            output_valid  => buf_output_valid,
-            output_data   => buf_output_data,
-            output_ready  => buf_output_ready
+            clk          => clk,
+            rst          => rst,
+            input_valid  => seq_input_valid,
+            input_ready  => seq_input_ready,
+            input_data   => seq_input_data,
+            output_valid => seq_output_valid,
+            output_ready => seq_output_ready,
+            output_data  => seq_output_data,
+            output_index => seq_output_index
         );
 
     -- Instantiate FC2 Layer
@@ -118,23 +119,19 @@ begin
         );
 
     -- =====================================================================
-    -- Interconnect: FC1 -> Buffer
+    -- Interconnect: FC1 -> Sequencer
     -- =====================================================================
-    buf_input_valid <= fc1_output_valid;
-    buf_input_data  <= fc1_output_data;
-    -- FC1 output ready is driven by buffer input ready
-    -- This tells FC1 when buffer can accept data
-    fc1_output_ready <= buf_input_ready;
+    seq_input_valid <= fc1_output_valid;
+    seq_input_data  <= fc1_output_data;
+    fc1_output_ready <= seq_input_ready;
 
     -- =====================================================================
-    -- Interconnect: Buffer -> FC2
+    -- Interconnect: Sequencer -> FC2
     -- =====================================================================
-    -- Buffer output data flows to FC2
-    buf_output_ready <= fc2_input_ready;
-    fc2_input_valid  <= buf_output_valid;
-    
-    -- Multiplex buffer output by index for FC2 sequential input
-    fc2_input_data <= buf_output_data(fc2_input_index) when buf_output_valid = '1' else (others => '0');
+    fc2_input_valid <= seq_output_valid;
+    fc2_input_data  <= seq_output_data;
+    fc2_input_index <= seq_output_index;
+    seq_output_ready <= fc2_input_ready;
 
     -- Clock generation
     process
@@ -154,7 +151,6 @@ begin
         report "TEST PHASE 1: Reset" severity note;
         rst <= '1';
         fc1_input_valid <= '0';
-        fc2_input_index <= 0;
         wait for 3 * CLK_PERIOD;
         rst <= '0';
         wait for CLK_PERIOD;
@@ -178,11 +174,13 @@ begin
                 wait for CLK_PERIOD;
             end if;
         end loop;
+        
+        fc1_input_valid <= '0';
 
         report "FC1: All 400 inputs sent" severity note;
         wait for CLK_PERIOD;
 
-        -- Phase 3: Wait for FC1 to complete computation and fill buffer
+        -- Phase 3: Wait for FC1 to complete computation
         report "TEST PHASE 3: Waiting for FC1 to complete" severity note;
         wait_cycles := 0;
         while fc1_output_valid = '0' and wait_cycles < 2000 loop
@@ -198,36 +196,26 @@ begin
 
         wait for CLK_PERIOD;
 
-        -- Phase 4: Verify buffer received FC1 data
-        report "TEST PHASE 4: Verifying buffer state" severity note;
-        if buf_output_valid = '1' then
-            report "PASS: Buffer output is valid" severity note;
+        -- Phase 4: Verify sequencer is streaming to FC2
+        report "TEST PHASE 4: Verifying sequencer is streaming" severity note;
+        if seq_output_valid = '1' then
+            report "PASS: Sequencer output is valid" severity note;
         else
-            report "ERROR: Buffer output should be valid" severity error;
+            report "ERROR: Sequencer output should be valid" severity error;
         end if;
 
         wait for CLK_PERIOD;
 
-        -- Phase 5: Feed buffered data to FC2 (64 inputs)
-        -- Note: fc2_input_valid is driven by the concurrent interconnect (buf_output_valid)
-        -- so the procedural testbench must not drive fc2_input_valid (avoids multiple drivers).
-        report "TEST PHASE 5: Sending 64 buffered outputs to FC2" severity note;
-        input_count := 0;
-
-        while input_count < FC2_INPUT_NODES loop
-            -- Wait until buffer has valid data and FC2 is ready to accept it
-            if buf_output_valid = '1' and fc2_input_ready = '1' then
-                -- Set the index for FC2 to read the correct element from buffer
-                fc2_input_index <= input_count;
-                -- Advance one clock so FC2 samples the data/index
-                wait until rising_edge(clk);
-                input_count := input_count + 1;
-            else
-                wait until rising_edge(clk);
-            end if;
+        -- Phase 5: Wait for sequencer to stream all 64 values to FC2
+        -- The sequencer automatically streams, FC2 automatically consumes
+        report "TEST PHASE 5: Waiting for sequencer to stream 64 outputs to FC2" severity note;
+        wait_cycles := 0;
+        while seq_output_valid = '1' and wait_cycles < 1000 loop
+            wait for CLK_PERIOD;
+            wait_cycles := wait_cycles + 1;
         end loop;
 
-        report "FC2: All 64 inputs sent" severity note;
+        report "Sequencer finished streaming after cycles:" & integer'image(wait_cycles) severity note;
         wait for CLK_PERIOD;
 
         -- Phase 6: Wait for FC2 to complete
@@ -249,10 +237,10 @@ begin
         -- Phase 7: Verify pipeline reset
         report "TEST PHASE 7: Verify pipeline can accept new data" severity note;
         
-        if buf_input_ready = '1' then
-            report "PASS: Buffer is ready for new data" severity note;
+        if seq_input_ready = '1' then
+            report "PASS: Sequencer is ready for new data" severity note;
         else
-            report "ERROR: Buffer should be ready after FC2 consumed data" severity error;
+            report "ERROR: Sequencer should be ready after streaming complete" severity error;
         end if;
 
         wait for 500 * CLK_PERIOD;

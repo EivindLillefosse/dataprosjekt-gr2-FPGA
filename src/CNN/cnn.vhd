@@ -364,6 +364,7 @@ begin
             -- Output TO fc1 (selected single channel pixel)
             fc_pixel_out    => calc_fc_pixel,
             fc_pixel_valid  => calc_fc_valid,
+            fc_pixel_ready  => fc1_in_ready,
             
             curr_index      => calc_curr_index,
             done            => calc_done

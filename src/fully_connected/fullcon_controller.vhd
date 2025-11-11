@@ -44,7 +44,7 @@ end fullcon_controller;
 
 architecture RTL of fullcon_controller is
 
-    type state_type is (IDLE, PROCESSING, WAITING_MAC);
+    type state_type is (IDLE, PROCESSING, WAITING_MAC, DONE);
     signal state        : state_type := IDLE;
     
     signal all_macs_done : std_logic;
@@ -66,47 +66,43 @@ begin
         elsif rising_edge(clk) then
             calc_compute_en  <= '0';
             calc_clear       <= '0';
+            output_valid     <= '0';
+            input_ready      <= '0';
 
            case state is
                 when IDLE =>
-                    input_ready  <= '1';
                     output_valid <= '0';
-                    
-                    if input_valid = '1' and input_index = 0 then
-                        calc_clear      <= '1';
+
+                    if input_valid = '1' then
                         calc_compute_en <= '1';
-                        state           <= PROCESSING;
+                        state           <= WAITING_MAC;
                     end if;
                 
                 when PROCESSING =>
-                    input_ready <= '1';
-                    output_valid <= '0';
-                    
                     if input_valid = '1' then
                         calc_compute_en <= '1';
-                        
-                        if input_index = NODES_IN - 1 then
-                            state        <= WAITING_MAC;
-                        end if;
+                        state           <= WAITING_MAC;
                     end if;                        
-                
+                    
                 when WAITING_MAC =>
-                    input_ready  <= '0';  -- Block new inputs during MAC completion
-                    output_valid <= '0';
-                    
-                    -- Wait for all MACs to complete, then assert output_valid
+                -- Wait for all MACs to complete their computations
                     if all_macs_done = '1' then
-                        output_valid <= '1';
-                        -- Stay in WAITING_MAC with output_valid high
-                        -- until new frame starts
+                        -- Guard against off-by-one: treat any index at or beyond the
+                        -- final node as the last element so we don't advance past it.
+                        if input_index >= NODES_IN - 1 then
+                            output_valid <= '1';
+                            state <= DONE;
+                        else
+                            input_ready <= '1';
+                            state <= PROCESSING;
+                        end if;
                     end if;
-                    
-                    -- Return to IDLE when new frame starts
-                    if input_valid = '1' and input_index = 0 then
-                        output_valid <= '0';
-                        state <= IDLE;
+                
+                when DONE =>
+                    if input_valid = '0' then
+                        calc_clear <= '1';
+                        state      <= IDLE;
                     end if;
-                    
             end case;
         end if;
     end process;end RTL;

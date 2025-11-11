@@ -54,12 +54,6 @@ entity cnn_top_debug is
         clk          : in  std_logic;
         rst          : in  std_logic;
 
-        -- Request FROM external controller (what output position is needed)
-        output_req_row   : in  integer;
-        output_req_col   : in  integer;
-        output_req_valid : in  std_logic;
-        output_req_ready : out std_logic;
-
         -- Request TO input provider (what input positions we need)
         input_req_row    : out integer;
         input_req_col    : out integer;
@@ -76,13 +70,13 @@ entity cnn_top_debug is
         output_ready     : in  std_logic;
         output_guess     : out WORD;  -- Final classification (placeholder)
         
-    -- Control: (removed) Pool2 now always controlled by calc_index (FC) path
-        
-    -- FC1 outputs (for testing/debug)
-    fc1_output_data  : out WORD_ARRAY_16(0 to 63);
-    fc1_output_valid : out std_logic;
-    -- FC1 ready is driven by the internal buffer (exported for TB visibility)
-    fc1_output_ready : out std_logic;
+        -- Control: (removed) Pool2 now always controlled by calc_index (FC) path
+            
+        -- FC1 outputs (for testing/debug)
+        fc1_output_data  : out WORD_ARRAY_16(0 to 63);
+        fc1_output_valid : out std_logic;
+        -- FC1 ready is driven by the internal buffer (exported for TB visibility)
+        fc1_output_ready : out std_logic;
         
         -- FC2 outputs (final 10-class classification)
         fc2_output_data  : out WORD_ARRAY_16(0 to 9);
@@ -120,7 +114,7 @@ entity cnn_top_debug is
         
         -- DEBUG: calc_index status
         debug_calc_index        : out integer range 0 to 399;
-    debug_calc_pixel        : out WORD_16;
+        debug_calc_pixel        : out WORD_16;
         debug_calc_valid        : out std_logic;
         debug_calc_done         : out std_logic
     );
@@ -204,17 +198,15 @@ architecture Structural of cnn_top_debug is
     signal fc1_out_data          : WORD_ARRAY_16(0 to FC1_NODES_OUT-1);
     signal fc1_in_ready          : std_logic;
 
-    -- Signals for buffer between FC1 and FC2
-    signal buf_out_valid         : std_logic;
-    signal buf_out_data          : WORD_ARRAY_16(0 to FC1_NODES_OUT-1);
-    signal buf_out_ready         : std_logic;
-    signal buf_in_ready          : std_logic;
+    -- Signals for sequencer between FC1 and FC2
+    signal seq_input_valid       : std_logic;
+    signal seq_input_ready       : std_logic;
+    signal seq_input_data        : WORD_ARRAY_16(0 to FC1_NODES_OUT-1);
     
-    -- Signals for FC2 input sequencer
-    signal fc2_input_index       : integer range 0 to FC1_NODES_OUT-1 := 0;
-    signal fc2_input_valid       : std_logic;
-    signal fc2_input_data        : WORD_16;
-    signal fc2_sending           : std_logic;  -- State: actively sending to FC2
+    signal seq_output_valid      : std_logic;
+    signal seq_output_ready      : std_logic;
+    signal seq_output_data       : WORD_16;
+    signal seq_output_index      : integer range 0 to FC1_NODES_OUT-1;
     
     -- Signals for FC2 output
     signal fc2_out_valid         : std_logic;
@@ -417,6 +409,7 @@ begin
             -- Output TO fc1 (selected single channel pixel)
             fc_pixel_out    => calc_fc_pixel,
             fc_pixel_valid  => calc_fc_valid,
+            fc_pixel_ready  => fc1_in_ready,
             
             curr_index      => calc_curr_index,
             done            => calc_done
@@ -439,16 +432,15 @@ begin
             pixel_in_data   => calc_fc_pixel,
             pixel_in_index  => calc_curr_index,
             
-            -- Output TO buffer
+            -- Output TO sequencer
             pixel_out_valid => fc1_out_valid,
-            pixel_out_ready => buf_in_ready,
+            pixel_out_ready => seq_input_ready,
             pixel_out_data  => fc1_out_data
         );
 
-    -- Buffer between FC1 and FC2
-    fc_buffer: entity work.fc_layer_buffer
+    -- Sequencer between FC1 and FC2
+    fc_sequencer: entity work.fc_sequencer
         generic map (
-            DATA_WIDTH  => 8,
             NUM_NEURONS => FC1_NODES_OUT  -- 64
         )
         port map (
@@ -456,45 +448,27 @@ begin
             rst          => rst,
             
             -- Input FROM FC1
-            input_valid  => fc1_out_valid,
-            input_data   => fc1_out_data,
-            input_ready  => buf_in_ready,  
+            input_valid  => seq_input_valid,
+            input_ready  => seq_input_ready,
+            input_data   => seq_input_data,
             
-            -- Output TO FC2 sequencer
-            output_valid => buf_out_valid,
-            output_data  => buf_out_data,
-            output_ready => buf_out_ready
+            -- Output TO FC2
+            output_valid => seq_output_valid,
+            output_ready => seq_output_ready,
+            output_data  => seq_output_data,
+            output_index => seq_output_index
         );
 
     -- =====================================================================
-    -- Interconnect: Buffer -> FC2 (match fc_pipeline_tb pattern exactly)
+    -- Interconnect: FC1 -> Sequencer
     -- =====================================================================
-    -- Buffer output ready driven by FC2 input ready
-    buf_out_ready <= fc2_in_ready;
-    
-    -- FC2 input valid driven by buffer output valid
-    fc2_input_valid <= buf_out_valid;
-    
-    -- Multiplex buffer output by index for FC2 sequential input
-    fc2_input_data <= buf_out_data(fc2_input_index) when buf_out_valid = '1' else (others => '0');
-    
-    -- Index advance process: increment when buffer has valid data and FC2 accepts it
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if rst = '1' then
-                fc2_input_index <= 0;
-            else
-                if buf_out_valid = '1' and fc2_in_ready = '1' then
-                    if fc2_input_index = FC1_NODES_OUT - 1 then
-                        fc2_input_index <= 0;
-                    else
-                        fc2_input_index <= fc2_input_index + 1;
-                    end if;
-                end if;
-            end if;
-        end if;
-    end process;
+    seq_input_valid <= fc1_out_valid;
+    seq_input_data  <= fc1_out_data;
+
+    -- =====================================================================
+    -- Interconnect: Sequencer -> FC2
+    -- =====================================================================
+    -- (Already connected via port maps above)
 
     -- Instantiate FC2 layer (64 inputs -> 10 outputs)
     fc2_inst: entity work.fullyconnected
@@ -507,11 +481,11 @@ begin
             clk             => clk,
             rst             => rst,
             
-            -- Input FROM buffer sequencer
-            pixel_in_valid  => fc2_input_valid,
-            pixel_in_ready  => fc2_in_ready,
-            pixel_in_data   => fc2_input_data,
-            pixel_in_index  => fc2_input_index,
+            -- Input FROM sequencer
+            pixel_in_valid  => seq_output_valid,
+            pixel_in_ready  => seq_output_ready,
+            pixel_in_data   => seq_output_data,
+            pixel_in_index  => seq_output_index,
             
             -- Output (FC2 doesn't use input ready signal)
             pixel_out_valid => fc2_out_valid,
@@ -522,15 +496,15 @@ begin
     -- Connect FC1 output to top-level ports
     fc1_output_data  <= fc1_out_data;
     fc1_output_valid <= fc1_out_valid;
-    -- Expose internal buffer input-ready as the top-level FC1 ready signal so TB/DUT ownership is clear
-    fc1_output_ready <= buf_in_ready;
+    -- Expose internal sequencer input-ready as the top-level FC1 ready signal
+    fc1_output_ready <= seq_input_ready;
     
     -- Connect FC2 output to top-level ports
     fc2_output_data  <= fc2_out_data;
     fc2_output_valid <= fc2_out_valid;
     
-    -- Placeholder for output_guess (will be driven by argmax)
-    output_guess  <= (others => '0');
+    -- Output guess: lower 8 bits of first FC2 output (index 0)
+    output_guess  <= fc2_out_data(0)(7 downto 0);
     
     -- DEBUG: Export calc_index signals
     debug_calc_index <= calc_curr_index;

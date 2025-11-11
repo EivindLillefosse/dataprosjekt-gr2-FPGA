@@ -40,6 +40,7 @@ entity calc_index is
         -- Output to FC layer: selected single channel pixel
         fc_pixel_out    : out WORD_16;
         fc_pixel_valid  : out std_logic;
+        fc_pixel_ready  : in  std_logic;
         
         -- Current index being requested (for debugging/monitoring)
         curr_index  : out integer range 0 to NODES_IN-1;
@@ -85,22 +86,22 @@ begin
                     end if;
                     
                     -- Send captured channels sequentially to FC1
-                    if data_valid = '1' then
-                        if channel_counter = INPUT_CHANNELS - 1 then
+                    if data_valid = '1' and fc_pixel_ready = '1' then
+                        if channel_counter < INPUT_CHANNELS - 1 then
+                            -- Move to next channel
+                            channel_counter <= channel_counter + 1;
+                        else
                             -- Sent all 16 channels for this position
                             channel_counter <= 0;
                             data_valid <= '0';
                             
-                            if position_counter = NUM_POSITIONS - 1 then
+                            if position_counter = NUM_POSITIONS - 2 then
                                 -- All positions done
                                 internal_done <= '1';
                             else
                                 -- Move to next position
                                 position_counter <= position_counter + 1;
                             end if;
-                        else
-                            -- Move to next channel
-                            channel_counter <= channel_counter + 1;
                         end if;
                     end if;
                 end if;

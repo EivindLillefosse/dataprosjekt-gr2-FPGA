@@ -36,10 +36,13 @@ architecture Behavioral of calc_index_tb is
             req_col     : out integer range 0 to INPUT_SIZE-1;
             req_valid   : out std_logic;
             
-            pool_pixel_data : in WORD_ARRAY_16(0 to INPUT_CHANNELS-1);
+            pool_pixel_data  : in  WORD_ARRAY_16(0 to INPUT_CHANNELS-1);
+            pool_pixel_valid : in  std_logic;
+            pool_pixel_ready : out std_logic;
             
             fc_pixel_out    : out WORD_16;
             fc_pixel_valid  : out std_logic;
+            fc_pixel_ready  : in  std_logic;
             
             curr_index  : out integer range 0 to NODES_IN-1;
             done        : out std_logic
@@ -61,10 +64,13 @@ architecture Behavioral of calc_index_tb is
     signal req_col     : integer range 0 to INPUT_SIZE-1;
     signal req_valid   : std_logic;
     
-    signal pool_pixel_data : WORD_ARRAY_16(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
+    signal pool_pixel_data  : WORD_ARRAY_16(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
+    signal pool_pixel_valid : std_logic := '0';
+    signal pool_pixel_ready : std_logic;
     
     signal fc_pixel_out    : WORD_16;
     signal fc_pixel_valid  : std_logic;
+    signal fc_pixel_ready  : std_logic := '1';  -- Default ready
     
     signal curr_index  : integer range 0 to NODES_IN-1;
     signal done        : std_logic;
@@ -98,10 +104,13 @@ begin
             req_col     => req_col,
             req_valid   => req_valid,
             
-            pool_pixel_data => pool_pixel_data,
+            pool_pixel_data  => pool_pixel_data,
+            pool_pixel_valid => pool_pixel_valid,
+            pool_pixel_ready => pool_pixel_ready,
             
             fc_pixel_out    => fc_pixel_out,
             fc_pixel_valid  => fc_pixel_valid,
+            fc_pixel_ready  => fc_pixel_ready,
             
             curr_index  => curr_index,
             done        => done
@@ -123,10 +132,16 @@ begin
     pixel_supply: process(clk)
     begin
         if rising_edge(clk) then
-            -- Generate pixel data based on current requested position
-            for ch in 0 to INPUT_CHANNELS-1 loop
-                pool_pixel_data(ch) <= gen_pixel_value(req_row, req_col, ch);
-            end loop;
+            -- Respond to requests with valid data on the next cycle
+            if req_valid = '1' and pool_pixel_ready = '1' then
+                pool_pixel_valid <= '1';
+                -- Generate pixel data based on current requested position
+                for ch in 0 to INPUT_CHANNELS-1 loop
+                    pool_pixel_data(ch) <= gen_pixel_value(req_row, req_col, ch);
+                end loop;
+            else
+                pool_pixel_valid <= '0';
+            end if;
         end if;
     end process;
 
