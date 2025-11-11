@@ -160,10 +160,7 @@ architecture Structural of cnn_top is
     signal fc1_out_data          : WORD_ARRAY(0 to FC1_NODES_OUT-1);
     signal fc1_in_ready          : std_logic;
 
-    -- Signals for buffer between FC1 and FC2
-    signal buf_out_valid         : std_logic;
-    signal buf_out_data          : WORD_ARRAY(0 to FC1_NODES_OUT-1);
-    signal buf_out_ready         : std_logic;
+    -- FC1 output signals (no buffer, direct to FC2)
     signal buf_in_ready          : std_logic;
     
     -- Signals for FC2 input sequencer
@@ -396,29 +393,12 @@ begin
             pixel_out_data  => fc1_out_data
         );
 
-    -- Buffer between FC1 and FC2
-    fc_buffer: entity work.fc_layer_buffer
-        generic map (
-            DATA_WIDTH  => 8,
-            NUM_NEURONS => FC1_NODES_OUT  -- 64
-        )
-        port map (
-            clk          => clk,
-            rst          => rst,
-            
-            -- Input FROM FC1
-            input_valid  => fc1_out_valid,
-            input_data   => fc1_out_data,
-            input_ready  => buf_in_ready,  -- Buffer tells FC1 it's ready
-            
-            -- Output TO FC2 sequencer
-            output_valid => buf_out_valid,
-            output_data  => buf_out_data,
-            output_ready => buf_out_ready
-        );
-
-    -- FC2 input sequencer: send buffered 64 neurons sequentially
-    fc2_input_data <= buf_out_data(fc2_input_index);
+    -- FC2 input sequencer: send FC1 output 64 neurons sequentially (no buffer)
+    -- Read directly from FC1's registered output
+    fc2_input_data <= fc1_out_data(fc2_input_index);
+    
+    -- FC1 ready signal: always ready to accept next neuron (no buffer)
+    buf_in_ready <= '1';
     
     process(clk)
     begin
@@ -427,8 +407,8 @@ begin
                 fc2_input_index <= 0;
                 fc2_input_valid <= '0';
                 fc2_sending <= '0';
-            elsif buf_out_valid = '1' and fc2_sending = '0' then
-                -- Buffer has full output, start sending to FC2
+            elsif fc1_out_valid = '1' and fc2_sending = '0' then
+                -- FC1 has output available, start sending to FC2
                 fc2_sending <= '1';
                 fc2_input_valid <= '1';
                 fc2_input_index <= 0;
@@ -447,10 +427,6 @@ begin
             end if;
         end if;
     end process;
-    
-    -- Tell buffer we're ready to drain it during FC2 transmission
-    -- Assert ready whenever we're sending data to FC2 (draining the buffer)
-    buf_out_ready <= '1' when fc2_sending = '1' else '0';
 
     -- Instantiate FC2 layer (64 inputs -> 10 outputs)
     fc2_inst: entity work.fullyconnected
