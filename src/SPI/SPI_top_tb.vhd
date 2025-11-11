@@ -16,7 +16,7 @@ architecture Behavioral of SPI_top_tb is
     -- Constants
     constant CLK_PERIOD : time := 10 ns;
     constant SCLK_PERIOD : time := 100 ns; -- SPI clock slower than system clock
-    constant IMAGE_WIDTH : integer := 3; -- Small 3x3 for testing
+    constant IMAGE_WIDTH : integer := 3; -- Small 3x3 for fast simulation testing
     constant BUFFER_SIZE : integer := IMAGE_WIDTH * IMAGE_WIDTH;
     constant WORD_SIZE : integer := 8;
     
@@ -31,6 +31,8 @@ architecture Behavioral of SPI_top_tb is
     signal DATA_OUT : std_logic_vector(WORD_SIZE-1 downto 0);
     
     -- Handshakes
+    signal COL_ROW_REQ_READY : std_logic;
+    signal COL_ROW_REQ_VALID : std_logic := '0';
     signal DATA_IN_VALID : std_logic := '0';
     signal DATA_IN_READY : std_logic;
     signal DATA_OUT_VALID : std_logic;
@@ -41,6 +43,13 @@ architecture Behavioral of SPI_top_tb is
     signal CS_N : std_logic := '1';
     signal MOSI : std_logic := '0';
     signal MISO : std_logic;
+    
+    -- VGA interface (not tested, just connected)
+    signal VGA_HS_O : std_logic;
+    signal VGA_VS_O : std_logic;
+    signal VGA_R : std_logic_vector(3 downto 0);
+    signal VGA_G : std_logic_vector(3 downto 0);
+    signal VGA_B : std_logic_vector(3 downto 0);
     
     -- Test control
     signal test_done : boolean := false;
@@ -91,6 +100,8 @@ begin
             DATA_OUT_ROW => DATA_OUT_ROW,
             DATA_IN => DATA_IN,
             DATA_OUT => DATA_OUT,
+            COL_ROW_REQ_READY => COL_ROW_REQ_READY,
+            COL_ROW_REQ_VALID => COL_ROW_REQ_VALID,
             DATA_IN_VALID => DATA_IN_VALID,
             DATA_IN_READY => DATA_IN_READY,
             DATA_OUT_VALID => DATA_OUT_VALID,
@@ -98,7 +109,12 @@ begin
             SCLK => SCLK,
             CS_N => CS_N,
             MOSI => MOSI,
-            MISO => MISO
+            MISO => MISO,
+            VGA_HS_O => VGA_HS_O,
+            VGA_VS_O => VGA_VS_O,
+            VGA_R => VGA_R,
+            VGA_G => VGA_G,
+            VGA_B => VGA_B
         );
 
     -- Main test process
@@ -157,15 +173,20 @@ begin
         report "--- Reading data from memory ---";
         
         for read_test in 0 to 49 loop  -- 50 read tests
+            -- Set column and row
             DATA_OUT_COL <= (read_test * 7) mod IMAGE_WIDTH;
             DATA_OUT_ROW <= (read_test * 13) mod IMAGE_WIDTH;
-            wait for CLK_PERIOD * 3;
             
+            -- Assert COL_ROW_REQ_VALID to request the position
+            COL_ROW_REQ_VALID <= '1';
+            
+            -- Also assert DATA_OUT_READY (both need to be high to read)
             DATA_OUT_READY <= '1';
             wait for CLK_PERIOD;
             
-            -- Wait for valid data
-            wait until DATA_OUT_VALID = '1';
+            -- Wait for controller to acknowledge and provide valid data
+            wait until COL_ROW_REQ_READY = '1' and DATA_OUT_VALID = '1';
+            wait for CLK_PERIOD;
             
             if read_test mod 10 = 0 then
                 report "  Read test " & integer'image(read_test) & 
@@ -174,6 +195,8 @@ begin
                        " data=0x" & integer'image(to_integer(unsigned(DATA_OUT)));
             end if;
             
+            -- Deassert both signals
+            COL_ROW_REQ_VALID <= '0';
             DATA_OUT_READY <= '0';
             wait for CLK_PERIOD * 10;
         end loop;

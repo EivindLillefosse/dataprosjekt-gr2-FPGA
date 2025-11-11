@@ -55,8 +55,17 @@ entity SPI_top is
             SCLK     : in  std_logic; 
             CS_N     : in  std_logic;
             MOSI     : in  std_logic; 
-            MISO     : out std_logic 
-         );
+            MISO     : out std_logic;
+            
+          -- VGA INTERFACE
+            VGA_HS_O : out std_logic;
+            VGA_VS_O : out std_logic;
+            VGA_R    : out std_logic_vector(3 downto 0);
+            VGA_G    : out std_logic_vector(3 downto 0);
+            VGA_B    : out std_logic_vector(3 downto 0)
+    );
+
+          
 end SPI_top;
 
 
@@ -64,6 +73,9 @@ architecture Behavioral of SPI_top is
 
 signal data_out_spi_in_memory : std_logic_vector(WORD_SIZE-1 downto 0) := (others => '0');
 signal valid_out_spi_in_memory : std_logic := '0';
+signal VGA_ADDR : std_logic_vector(9 downto 0);
+signal VGA_DATA : std_logic_vector(7 downto 0);
+signal VGA_FRAME_START : std_logic;
 
   
 begin
@@ -89,7 +101,12 @@ controller_memory_inst : entity work.SPI_memory_controller
     data_out_col    => DATA_OUT_COL,
     data_out_row    => DATA_OUT_ROW,
     col_row_req_ready => COL_ROW_REQ_READY,
-    col_row_req_valid => COL_ROW_REQ_VALID
+    col_row_req_valid => COL_ROW_REQ_VALID,
+
+    vga_addr       => VGA_ADDR,
+    vga_data       => VGA_DATA,
+    vga_frame_start => VGA_FRAME_START
+
   );
 
 SPI_slave_inst : entity work.SPI_SLAVE
@@ -112,6 +129,26 @@ SPI_slave_inst : entity work.SPI_SLAVE
     DATA_OUT    => data_out_spi_in_memory,
     DATA_OUT_VALID => valid_out_spi_in_memory
   );
+
+VGA_inst : entity work.VGA_top
+  GENERIC MAP (
+    IMAGE_WIDTH => IMAGE_WIDTH,
+    IMAGE_HEIGHT => IMAGE_WIDTH
+  )
+  PORT MAP (
+    CLK_I       => clk,
+    RST         => rst,
+    
+    VGA_HS_O    => VGA_HS_O,
+    VGA_VS_O    => VGA_VS_O,
+    VGA_R       => VGA_R,
+    VGA_G       => VGA_G,
+    VGA_B       => VGA_B,
+
+    spi_vga_addr => VGA_ADDR,
+    spi_vga_data => VGA_DATA,
+    vga_frame_start => VGA_FRAME_START
+  );  
 
 end Behavioral;
 

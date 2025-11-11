@@ -46,7 +46,12 @@ entity SPI_memory_controller is
              data_out_col   : in  integer;
              data_out_row   : in  integer;
              col_row_req_ready : out std_logic;
-             col_row_req_valid : in  std_logic
+             col_row_req_valid : in  std_logic;
+             
+             -- VGA port B interface (reads from busy buffer)
+             vga_addr    : in  std_logic_vector(9 downto 0);
+             vga_data    : out std_logic_vector(7 downto 0);
+             vga_frame_start : in std_logic  -- Pulse at start of each VGA frame
          );
 end SPI_memory_controller;
 
@@ -66,18 +71,23 @@ architecture Behavioral of SPI_memory_controller is
     end function;
 
 
-COMPONENT SPI_bram_A
-     PORT (
+
+COMPONENT BRAM_dual_port
+  PORT (
     clka : IN STD_LOGIC;
     ena : IN STD_LOGIC;
     wea : IN STD_LOGIC_VECTOR(0 DOWNTO 0);
     addra : IN STD_LOGIC_VECTOR(9 DOWNTO 0);
     dina : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-    douta : OUT STD_LOGIC_VECTOR(7 DOWNTO 0) 
+    douta : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+    clkb : IN STD_LOGIC;
+    enb : IN STD_LOGIC;
+    web : IN STD_LOGIC_VECTOR(0 DOWNTO 0);
+    addrb : IN STD_LOGIC_VECTOR(9 DOWNTO 0);
+    dinb : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
+    doutb : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
   );
 END COMPONENT;
-
-
 
 
 
@@ -91,31 +101,52 @@ END COMPONENT;
     signal read_state : read_state_type := READ_IDLE;
 
     -- bram A signals
-    signal bram_A_en : std_logic := '0';
-    signal bram_A_we : std_logic_vector(0 downto 0) := (others => '0');
-    signal bram_A_addr : std_logic_vector(9 downto 0) := (others => '0');
-    signal bram_A_din : std_logic_vector(7 downto 0) := (others => '0');
-    signal bram_A_dout : std_logic_vector(7 downto 0) := (others => '0');
-    signal bram_A_addr_write : std_logic_vector(9 downto 0) := (others => '0'); -- Write address
-    signal bram_A_addr_read : std_logic_vector(9 downto 0) := (others => '0');  -- Read address
+    signal bram_A_ena : std_logic := '0';
+    signal bram_A_wea : std_logic_vector(0 downto 0) := (others => '0');
+    signal bram_A_addra : std_logic_vector(9 downto 0) := (others => '0');
+    signal bram_A_dina : std_logic_vector(7 downto 0) := (others => '0');
+    signal bram_A_douta : std_logic_vector(7 downto 0) := (others => '0');
+    signal bram_A_addr_writea : std_logic_vector(9 downto 0) := (others => '0'); -- Write address
+    signal bram_A_addr_reada : std_logic_vector(9 downto 0) := (others => '0');  -- Read address
+    signal bram_A_enb : std_logic := '0';
+    signal bram_A_web : std_logic_vector(0 downto 0) := (others => '0');
+    signal bram_A_addrb : std_logic_vector(9 downto 0) := (others => '0');
+    signal bram_A_dinb : std_logic_vector(7 downto 0) := (others => '0');
+    signal bram_A_doutb : std_logic_vector(7 downto 0) := (others => '0');
+    signal bram_A_addr_writeb : std_logic_vector(9 downto 0) := (others => '0'); -- Write address
+    signal bram_A_addr_readb : std_logic_vector(9 downto 0) := (others => '0');  -- Read address
 
     -- bram B signals
-    signal bram_B_en : std_logic := '0';
-    signal bram_B_we : std_logic_vector(0 downto 0) := (others => '0');
-    signal bram_B_addr : std_logic_vector(9 downto 0) := (others => '0');
-    signal bram_B_din : std_logic_vector(7 downto 0) := (others => '0');
-    signal bram_B_dout : std_logic_vector(7 downto 0) := (others => '0');
-    signal bram_B_addr_write : std_logic_vector(9 downto 0) := (others => '0'); -- Write address
-    signal bram_B_addr_read : std_logic_vector(9 downto 0) := (others => '0');  -- Read address
+    signal bram_B_ena : std_logic := '0';
+    signal bram_B_wea: std_logic_vector(0 downto 0) := (others => '0');
+    signal bram_B_addra : std_logic_vector(9 downto 0) := (others => '0');
+    signal bram_B_dina : std_logic_vector(7 downto 0) := (others => '0');
+    signal bram_B_douta : std_logic_vector(7 downto 0) := (others => '0');
+    signal bram_B_addr_writea : std_logic_vector(9 downto 0) := (others => '0'); -- Write address
+    signal bram_B_addr_reada : std_logic_vector(9 downto 0) := (others => '0');  -- Read address
+    signal bram_B_enb : std_logic := '0';
+    signal bram_B_web : std_logic_vector(0 downto 0) := (others => '0');
+    signal bram_B_addrb : std_logic_vector(9 downto 0) := (others => '0');
+    signal bram_B_dinb : std_logic_vector(7 downto 0) := (others => '0');
+    signal bram_B_doutb : std_logic_vector(7 downto 0) := (others => '0');
+    signal bram_B_addr_writeb : std_logic_vector(9 downto 0) := (others => '0'); -- Write address
+    signal bram_B_addr_readb : std_logic_vector(9 downto 0) := (others => '0');  -- Read address
 
     -- bram C signals
-    signal bram_C_en : std_logic := '0';
-    signal bram_C_we : std_logic_vector(0 downto 0) := (others => '0');
-    signal bram_C_addr : std_logic_vector(9 downto 0) := (others => '0');
-    signal bram_C_din : std_logic_vector(7 downto 0) := (others => '0');
-    signal bram_C_dout : std_logic_vector(7 downto 0) := (others => '0');
-    signal bram_C_addr_write : std_logic_vector(9 downto 0) := (others => '0'); -- Write address
-    signal bram_C_addr_read : std_logic_vector(9 downto 0) := (others => '0');  -- Read address
+    signal bram_C_ena : std_logic := '0';
+    signal bram_C_wea : std_logic_vector(0 downto 0) := (others => '0');
+    signal bram_C_addra : std_logic_vector(9 downto 0) := (others => '0');
+    signal bram_C_dina : std_logic_vector(7 downto 0) := (others => '0');
+    signal bram_C_douta : std_logic_vector(7 downto 0) := (others => '0');
+    signal bram_C_addr_writea : std_logic_vector(9 downto 0) := (others => '0'); -- Write address
+    signal bram_C_addr_reada : std_logic_vector(9 downto 0) := (others => '0');  -- Read address
+    signal bram_C_enb : std_logic := '0';
+    signal bram_C_web : std_logic_vector(0 downto 0) := (others => '0');
+    signal bram_C_addrb : std_logic_vector(9 downto 0) := (others => '0');
+    signal bram_C_dinb : std_logic_vector(7 downto 0) := (others => '0');
+    signal bram_C_doutb : std_logic_vector(7 downto 0) := (others => '0');
+    signal bram_C_addr_writeb : std_logic_vector(9 downto 0) := (others => '0'); -- Write address
+    signal bram_C_addr_readb : std_logic_vector(9 downto 0) := (others => '0');  -- Read address
 
     -- Control signals
     signal write_addr_A    : unsigned(9 downto 0) := (others => '0'); -- Address counter for BRAM A (0 to 783)
@@ -141,6 +172,10 @@ END COMPONENT;
     -- Track which buffer just completed (for transition state)
     signal completed_buffer : std_logic_vector(1 downto 0) := "00";             -- 00=A, 01=B, 10=C
     
+    -- VGA interface signals
+    signal vga_data_mux : std_logic_vector(7 downto 0);
+    signal vga_buffer_select : std_logic_vector(1 downto 0) := "00";  -- Latched at frame start: 00=A, 01=B, 10=C
+    
     -- Dynamic buffer size calculation
     signal MAX_PIXELS    : unsigned(9 downto 0);
 
@@ -149,47 +184,119 @@ begin
    
     MAX_PIXELS <= to_unsigned(BUFFER_SIZE, 10);
     
-    bram_A_en <= '1';
-    bram_B_en <= '1';
-    bram_C_en <= '1';
+    bram_A_ena <= '1';
+    bram_B_ena <= '1';
+    bram_C_ena <= '1';
+    bram_A_enb <= '1';
+    bram_B_enb <= '1';
+    bram_C_enb <= '1';
+    bram_A_web <= "0";  -- Port B is read-only for VGA
+    bram_B_web <= "0";
+    bram_C_web <= "0";
+    
+    -- Connect VGA address to all port B's (port B is dedicated to VGA display)
+    bram_A_addrb <= vga_addr;
+    bram_B_addrb <= vga_addr;
+    bram_C_addrb <= vga_addr;
+    bram_A_dinb <= (others => '0');
+    bram_B_dinb <= (others => '0');
+    bram_C_dinb <= (others => '0');
     
     -- col_row_req_ready is high when at least one buffer is complete
     col_row_req_ready <= BRAM_A_last_written or BRAM_B_last_written or BRAM_C_last_written;
     
     -- Address multiplexers: Select read or write address based on we signal
     -- When writing (we='1'), use write address; when reading (we='0'), use read address
-    bram_A_addr <= bram_A_addr_write when bram_A_we = "1" else bram_A_addr_read;
-    bram_B_addr <= bram_B_addr_write when bram_B_we = "1" else bram_B_addr_read;
-    bram_C_addr <= bram_C_addr_write when bram_C_we = "1" else bram_C_addr_read;
+    bram_A_addra <= bram_A_addr_writea when bram_A_wea = "1" else bram_A_addr_reada;
+    bram_B_addra <= bram_B_addr_writea when bram_B_wea = "1" else bram_B_addr_reada;
+    bram_C_addra <= bram_C_addr_writea when bram_C_wea = "1" else bram_C_addr_reada;
+    
+    -- Latch which buffer VGA should read from at the start of each frame
+    -- This prevents tearing when buffers switch mid-frame
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if rst = '1' then
+                vga_buffer_select <= "00";  -- Default to buffer A
+            elsif vga_frame_start = '1' then
+                -- At frame start, select the last written buffer
+                if BRAM_A_last_written = '1' then
+                    vga_buffer_select <= "00";
+                elsif BRAM_B_last_written = '1' then
+                    vga_buffer_select <= "01";
+                elsif BRAM_C_last_written = '1' then
+                    vga_buffer_select <= "10";
+                -- else keep previous selection if no buffer written yet
+                end if;
+            end if;
+        end if;
+    end process;
+    
+    -- VGA reads from the latched buffer selection (stable for entire frame)
+    -- Route data based on the buffer latched at frame start
+    process(vga_buffer_select, bram_A_doutb, bram_B_doutb, bram_C_doutb)
+    begin
+        case vga_buffer_select is
+            when "00" =>
+                vga_data_mux <= bram_A_doutb;
+            when "01" =>
+                vga_data_mux <= bram_B_doutb;
+            when "10" =>
+                vga_data_mux <= bram_C_doutb;
+            when others =>
+                vga_data_mux <= (others => '0');
+        end case;
+    end process;
+    
+    -- VGA output assignments
+    vga_data <= vga_data_mux;
 
-  BRAM_A_inst : SPI_bram_A
+  BRAM_A_inst : BRAM_dual_port
   PORT MAP (
     clka => clk,
-    ena => bram_A_en,
-    wea => bram_A_we,
-    addra => bram_A_addr,
-    dina => bram_A_din,
-    douta => bram_A_dout
+    ena => bram_A_ena,
+    wea => bram_A_wea,
+    addra => bram_A_addra,
+    dina => bram_A_dina,
+    douta => bram_A_douta,
+    clkb => clk,
+    enb => bram_A_enb,
+    web => bram_A_web,
+    addrb => bram_A_addrb,
+    dinb => bram_A_dinb,
+    doutb => bram_A_doutb
   );
 
-  BRAM_B_inst : SPI_bram_A
+  BRAM_B_inst : BRAM_dual_port
   PORT MAP (
     clka => clk,
-    ena => bram_B_en,
-    wea => bram_B_we,
-    addra => bram_B_addr,
-    dina => bram_B_din,
-    douta => bram_B_dout
+    ena => bram_B_ena,
+    wea => bram_B_wea,
+    addra => bram_B_addra,
+    dina => bram_B_dina,
+    douta => bram_B_douta,
+    clkb => clk,
+    enb => bram_B_enb,
+    web => bram_B_web,
+    addrb => bram_B_addrb,
+    dinb => bram_B_dinb,
+    doutb => bram_B_doutb
   );
 
-  BRAM_C_inst : SPI_bram_A
+  BRAM_C_inst : BRAM_dual_port
   PORT MAP (
     clka => clk,
-    ena => bram_C_en,
-    wea => bram_C_we,
-    addra => bram_C_addr,
-    dina => bram_C_din,
-    douta => bram_C_dout
+    ena => bram_C_ena,
+    wea => bram_C_wea,
+    addra => bram_C_addra,
+    dina => bram_C_dina,
+    douta => bram_C_douta,
+    clkb => clk,
+    enb => bram_C_enb,
+    web => bram_C_web,
+    addrb => bram_C_addrb,
+    dinb => bram_C_dinb,
+    doutb => bram_C_doutb
   );
 
     -- Main control process for three-buffer write management with flexible transitions
@@ -213,22 +320,22 @@ begin
             completed_buffer <= "00";
             
             
-            bram_A_we <= (others => '0');
-            bram_B_we <= (others => '0');
-            bram_C_we <= (others => '0');
-            bram_A_addr_write <= (others => '0');
-            bram_B_addr_write <= (others => '0');
-            bram_C_addr_write <= (others => '0');
-            bram_A_din <= (others => '0');
-            bram_B_din <= (others => '0');
-            bram_C_din <= (others => '0');
+            bram_A_wea <= (others => '0');
+            bram_B_wea <= (others => '0');
+            bram_C_wea <= (others => '0');
+            bram_A_addr_writea <= (others => '0');
+            bram_B_addr_writea <= (others => '0');
+            bram_C_addr_writea <= (others => '0');
+            bram_A_dina <= (others => '0');
+            bram_B_dina <= (others => '0');
+            bram_C_dina <= (others => '0');
             data_in_ready <= '0';
         
         elsif rising_edge(clk) then
             -- Default: no write unless explicitly set
-            bram_A_we <= "0";
-            bram_B_we <= "0";
-            bram_C_we <= "0";
+            bram_A_wea <= "0";
+            bram_B_wea <= "0";
+            bram_C_wea <= "0";
             
             data_in_ready <= not (BRAM_A_busy and BRAM_B_busy and BRAM_C_busy);
         
@@ -242,9 +349,9 @@ begin
                         -- Initialize BRAM A for writing
                         write_addr_A <= (others => '0');
                         pixel_count_A <= (others => '0');
-                        bram_A_we <= "1";
-                        bram_A_din <= data_in;
-                        bram_A_addr_write <= (others => '0');
+                        bram_A_wea <= "1";
+                        bram_A_dina <= data_in;
+                        bram_A_addr_writea <= (others => '0');
                         
                         -- Increment for next write
                         write_addr_A <= to_unsigned(1, 10);
@@ -267,9 +374,9 @@ begin
                         -- Complete handshake: write when BOTH valid and ready are high
                         if data_in_valid = '1' and data_in_ready = '1' then
                           
-                            bram_A_we <= "1";
-                            bram_A_din <= data_in;
-                            bram_A_addr_write <= std_logic_vector(write_addr_A);
+                            bram_A_wea <= "1";
+                            bram_A_dina <= data_in;
+                            bram_A_addr_writea <= std_logic_vector(write_addr_A);
                             
                             -- Check if THIS write completes the buffer
                             if write_addr_A = (MAX_PIXELS - 1) then
@@ -298,9 +405,9 @@ begin
                         -- Complete handshake: write when BOTH valid and ready are high
                         if data_in_valid = '1' and data_in_ready = '1' then
                            
-                            bram_B_we <= "1";
-                            bram_B_din <= data_in;
-                            bram_B_addr_write <= std_logic_vector(write_addr_B);
+                            bram_B_wea <= "1";
+                            bram_B_dina <= data_in;
+                            bram_B_addr_writea <= std_logic_vector(write_addr_B);
                             
                             -- Check if THIS write completes the buffer
                             if write_addr_B = (MAX_PIXELS - 1) then
@@ -329,9 +436,9 @@ begin
                         -- Complete handshake: write when BOTH valid and ready are high
                         if data_in_valid = '1' and data_in_ready = '1' then
         
-                            bram_C_we <= "1";
-                            bram_C_din <= data_in;
-                            bram_C_addr_write <= std_logic_vector(write_addr_C);
+                            bram_C_wea <= "1";
+                            bram_C_dina <= data_in;
+                            bram_C_addr_writea <= std_logic_vector(write_addr_C);
                             
                             -- Check if THIS write completes the buffer
                             if write_addr_C = (MAX_PIXELS - 1) then
@@ -349,19 +456,19 @@ begin
                     -- Update last_written flags based on completed buffer
                     case completed_buffer is
                         when "00" => -- A completed
-                            bram_A_we <= "0";
+                            bram_A_wea <= "0";
                             BRAM_A_last_written <= '1';
                             BRAM_B_last_written <= '0';
                             BRAM_C_last_written <= '0';
                             
                         when "01" => -- B completed
-                            bram_B_we <= "0";
+                            bram_B_wea <= "0";
                             BRAM_A_last_written <= '0';
                             BRAM_B_last_written <= '1';
                             BRAM_C_last_written <= '0';
                             
                         when "10" => -- C completed
-                            bram_C_we <= "0";
+                            bram_C_wea <= "0";
                             BRAM_A_last_written <= '0';
                             BRAM_B_last_written <= '0';
                             BRAM_C_last_written <= '1';
@@ -403,9 +510,9 @@ begin
         read_state <= READ_IDLE;
         read_count <= (others => '0');
         active_read_buffer <= "00";
-        bram_A_addr_read <= (others => '0');
-        bram_B_addr_read <= (others => '0');
-        bram_C_addr_read <= (others => '0');
+        bram_A_addr_reada <= (others => '0');
+        bram_B_addr_reada <= (others => '0');
+        bram_C_addr_reada <= (others => '0');
         data_out_valid <= '0';
         data_out <= (others => '0');
         BRAM_A_busy <= '0';
@@ -498,11 +605,11 @@ begin
                 -- Address will be registered at END of this cycle
                 case active_read_buffer is
                     when "00" =>
-                        bram_A_addr_read <= std_logic_vector(calc_address(data_out_col, data_out_row, IMAGE_WIDTH));
+                        bram_A_addr_reada <= std_logic_vector(calc_address(data_out_col, data_out_row, IMAGE_WIDTH));
                     when "01" =>
-                        bram_B_addr_read <= std_logic_vector(calc_address(data_out_col, data_out_row, IMAGE_WIDTH));
+                        bram_B_addr_reada <= std_logic_vector(calc_address(data_out_col, data_out_row, IMAGE_WIDTH));
                     when "10" =>
-                        bram_C_addr_read <= std_logic_vector(calc_address(data_out_col, data_out_row, IMAGE_WIDTH));
+                        bram_C_addr_reada <= std_logic_vector(calc_address(data_out_col, data_out_row, IMAGE_WIDTH));
                     when others =>
                         null;
                 end case;
@@ -529,13 +636,13 @@ begin
                 -- Load data from the selected buffer
                 case active_read_buffer is
                     when "00" =>
-                        data_out <= std_logic_vector(resize(unsigned(bram_A_dout), WORD'length));
+                        data_out <= std_logic_vector(resize(unsigned(bram_A_douta), WORD'length));
                     when "01" =>
                         
-                        data_out <= std_logic_vector(resize(unsigned(bram_B_dout), WORD'length));
+                        data_out <= std_logic_vector(resize(unsigned(bram_B_douta), WORD'length));
                     when "10" =>
                         
-                        data_out <= std_logic_vector(resize(unsigned(bram_C_dout), WORD'length));
+                        data_out <= std_logic_vector(resize(unsigned(bram_C_douta), WORD'length));
                     when others =>
                         null;
                 end case;
