@@ -159,9 +159,6 @@ architecture Structural of cnn_top is
     signal fc1_out_ready         : std_logic;
     signal fc1_out_data          : WORD_ARRAY(0 to FC1_NODES_OUT-1);
     signal fc1_in_ready          : std_logic;
-
-    -- FC1 output signals (no buffer, direct to FC2)
-    signal buf_in_ready          : std_logic;
     
     -- Signals for FC2 input sequencer
     signal fc2_input_index       : integer range 0 to FC1_NODES_OUT-1 := 0;
@@ -387,18 +384,15 @@ begin
             pixel_in_data   => calc_fc_pixel,
             pixel_in_index  => calc_curr_index,
             
-            -- Output TO buffer
+            -- Output (directly to FC2 sequencer, no buffer)
             pixel_out_valid => fc1_out_valid,
-            pixel_out_ready => buf_in_ready,
+            pixel_out_ready => '1',  -- Always ready (no buffer)
             pixel_out_data  => fc1_out_data
         );
 
     -- FC2 input sequencer: send FC1 output 64 neurons sequentially (no buffer)
     -- Read directly from FC1's registered output
     fc2_input_data <= fc1_out_data(fc2_input_index);
-    
-    -- FC1 ready signal: always ready to accept next neuron (no buffer)
-    buf_in_ready <= '1';
     
     process(clk)
     begin
