@@ -38,18 +38,18 @@ entity SPI_top is
             rst       : in  std_logic;
 
           -- USER INTERFACE
-            DATA_OUT_COL   : in  integer;
-            DATA_OUT_ROW   : in  integer;
-            DATA_IN      : in  std_logic_vector(WORD_SIZE-1 downto 0); 
-            DATA_OUT     : out std_logic_vector(WORD_SIZE-1 downto 0); 
+            --DATA_OUT_COL   : in  integer;
+            --DATA_OUT_ROW   : in  integer;
+            --DATA_IN      : in  std_logic_vector(WORD_SIZE-1 downto 0); 
+            --DATA_OUT     : out std_logic_vector(WORD_SIZE-1 downto 0); 
 
           -- Handshakes
-            COL_ROW_REQ_READY : out std_logic;
-            COL_ROW_REQ_VALID : in  std_logic;
-            DATA_IN_VALID  : in  std_logic; 
-            DATA_IN_READY  : out std_logic; 
-            DATA_OUT_VALID : out std_logic; 
-            DATA_OUT_READY : in  std_logic; 
+           -- COL_ROW_REQ_READY : out std_logic;
+           -- COL_ROW_REQ_VALID : in  std_logic;
+           -- DATA_IN_VALID  : in  std_logic; 
+           -- DATA_IN_READY  : out std_logic; 
+           -- DATA_OUT_VALID : out std_logic; 
+           -- DATA_OUT_READY : in  std_logic; 
 
           -- SPI INTERFACE
             SCLK     : in  std_logic; 
@@ -77,6 +77,11 @@ signal VGA_ADDR : std_logic_vector(9 downto 0);
 signal VGA_DATA : std_logic_vector(7 downto 0);
 signal VGA_FRAME_START : std_logic;
 
+-- Internal signals for unused CNN interface
+signal data_out_internal : std_logic_vector(WORD_SIZE-1 downto 0);
+signal data_out_col_internal : integer := 0;
+signal data_out_row_internal : integer := 0;
+
   
 begin
 
@@ -94,13 +99,13 @@ controller_memory_inst : entity work.SPI_memory_controller
     data_in_valid   => valid_out_spi_in_memory,
     data_in_ready   => open,
     
-    data_out        => DATA_OUT,
-    data_out_valid  => DATA_OUT_VALID,
-    data_out_ready  => DATA_OUT_READY,
-    data_out_col    => DATA_OUT_COL,
-    data_out_row    => DATA_OUT_ROW,
-    col_row_req_ready => COL_ROW_REQ_READY,
-    col_row_req_valid => COL_ROW_REQ_VALID,
+    data_out        => data_out_internal,
+    data_out_valid  => open,
+    data_out_ready  => '0',
+    data_out_col    => data_out_col_internal,
+    data_out_row    => data_out_row_internal,
+    col_row_req_ready => open,
+    col_row_req_valid => '0',
 
     vga_addr       => VGA_ADDR,
     vga_data       => VGA_DATA,
@@ -121,9 +126,9 @@ SPI_slave_inst : entity work.SPI_SLAVE
     MOSI        => MOSI,
     MISO        => MISO,
     
-    DATA_IN     => DATA_IN,
-    DATA_IN_VALID => DATA_IN_VALID,
-    DATA_IN_READY => DATA_IN_READY,
+    DATA_IN     => (others => '0'),
+    DATA_IN_VALID => '0',
+    DATA_IN_READY => open,
     
     DATA_OUT    => data_out_spi_in_memory,
     DATA_OUT_VALID => valid_out_spi_in_memory
@@ -150,4 +155,3 @@ VGA_inst : entity work.VGA_top
   );  
 
 end Behavioral;
-

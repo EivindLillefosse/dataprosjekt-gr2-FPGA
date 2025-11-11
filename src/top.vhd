@@ -32,8 +32,12 @@ entity top is
         MISO     : out std_logic;
         
         -- Debug output to prevent optimization
-        debug_keep : out std_logic
-
+       
+        VGA_HS_O : out std_logic;
+        VGA_VS_O : out std_logic;
+        VGA_R    : out std_logic_vector(3 downto 0);
+        VGA_G    : out std_logic_vector(3 downto 0);
+        VGA_B    : out std_logic_vector(3 downto 0)
 
     );
 end top;
@@ -54,22 +58,7 @@ architecture Behavioral of top is
     signal col_row_req_ready : std_logic;
     signal col_row_req_valid : std_logic;
     
-    -- Dummy signals to prevent optimization
-    signal dummy_or : std_logic;
-    
-    -- Synthesis attributes to prevent optimization
-    attribute KEEP : string;
-    
-    attribute KEEP of data_tx : signal is "TRUE";
-    attribute KEEP of data_rx : signal is "TRUE";
-    attribute KEEP of valid_out_spi_in_cnn : signal is "TRUE";
-    attribute KEEP of valid_out_cnn_in_spi : signal is "TRUE";
-    attribute KEEP of ready_out_spi_in_cnn : signal is "TRUE";
-    attribute KEEP of ready_out_cnn_in_spi : signal is "TRUE";
-    attribute KEEP of col_row_req_ready : signal is "TRUE";
-    attribute KEEP of col_row_req_valid : signal is "TRUE";
-    attribute KEEP of dummy_or : signal is "TRUE";
-
+  
 begin 
 
 SPI_inst : entity work.SPI_top
@@ -99,6 +88,13 @@ SPI_inst : entity work.SPI_top
         CS_N         => CS_N,
         MOSI         => MOSI,
         MISO         => MISO
+
+        --VGA INTERFACE
+        VGA_HS_O    => VGA_HS_O,
+        VGA_VS_O    => VGA_VS_O,
+        VGA_R       => VGA_R,
+        VGA_G       => VGA_G,
+        VGA_B       => VGA_B
     );
 
 CNN_inst : entity work.CNN_top
@@ -123,18 +119,5 @@ CNN_inst : entity work.CNN_top
         input_req_col        => data_col
     );
 
-    -- Create a dummy OR of all critical signals to prevent optimization
-    -- This forces Vivado to keep all the logic
-    -- Include all 8 bits of data_tx and data_rx to force CNN computation
-    dummy_or <= data_tx(0) or data_tx(1) or data_tx(2) or data_tx(3) or 
-                data_tx(4) or data_tx(5) or data_tx(6) or data_tx(7) or
-                data_rx(0) or data_rx(1) or data_rx(2) or data_rx(3) or 
-                data_rx(4) or data_rx(5) or data_rx(6) or data_rx(7) or
-                valid_out_spi_in_cnn or valid_out_cnn_in_spi or 
-                ready_out_spi_in_cnn or ready_out_cnn_in_spi or 
-                col_row_req_ready or col_row_req_valid;
-    
-    -- Connect dummy to actual output port to force synthesis to keep everything
-    debug_keep <= dummy_or;
 
 end Behavioral;

@@ -3,11 +3,11 @@
 ## Connected to Pmod Port JA (change to JB/JC/JD if using different port)
 
 ## Clock signal (100 MHz)
-set_property -dict { PACKAGE_PIN E3    IOSTANDARD LVCMOS33 } [get_ports { CLK_I }];
-create_clock -add -name sys_clk_pin -period 10.00 -waveform {0 5} [get_ports { CLK_I }];
+set_property -dict { PACKAGE_PIN E3    IOSTANDARD LVCMOS33 } [get_ports { clk }];
+create_clock -add -name sys_clk_pin -period 10.00 -waveform {0 5} [get_ports { clk }];
 
 ## Reset button (active high) - using BTN0
-set_property -dict { PACKAGE_PIN D9    IOSTANDARD LVCMOS33 } [get_ports { RST }];
+set_property -dict { PACKAGE_PIN D9    IOSTANDARD LVCMOS33 } [get_ports { rst }];
 
 ## Pmod Header JA - VGA Signals
 ## JA1-JA4 (top row) and JA7-JA10 (bottom row)
@@ -50,12 +50,12 @@ set_property -dict { PACKAGE_PIN C15   IOSTANDARD LVCMOS33 } [get_ports { VGA_B[
 set_property -dict { PACKAGE_PIN J17   IOSTANDARD LVCMOS33 } [get_ports { VGA_HS_O }]; #JB7
 set_property -dict { PACKAGE_PIN J18   IOSTANDARD LVCMOS33 } [get_ports { VGA_VS_O }]; #JB8
 
-## SPI Signals (if you have an external SPI master connected)
-## Using Pmod JC as an example - adjust as needed
-# set_property -dict { PACKAGE_PIN U12   IOSTANDARD LVCMOS33 } [get_ports { SCLK }];  #JC1
-# set_property -dict { PACKAGE_PIN V12   IOSTANDARD LVCMOS33 } [get_ports { MOSI }];  #JC2
-# set_property -dict { PACKAGE_PIN V10   IOSTANDARD LVCMOS33 } [get_ports { MISO }];  #JC3
-# set_property -dict { PACKAGE_PIN V11   IOSTANDARD LVCMOS33 } [get_ports { CS_N }];  #JC4
+## SPI Signals - Pmod JC
+## Using Pmod JC for SPI interface
+set_property -dict { PACKAGE_PIN U12   IOSTANDARD LVCMOS33 } [get_ports { SCLK }];  #JC1
+set_property -dict { PACKAGE_PIN V12   IOSTANDARD LVCMOS33 } [get_ports { MOSI }];  #JC2
+set_property -dict { PACKAGE_PIN V10   IOSTANDARD LVCMOS33 } [get_ports { MISO }];  #JC3
+set_property -dict { PACKAGE_PIN V11   IOSTANDARD LVCMOS33 } [get_ports { CS_N }];  #JC4
 
 ## Configuration options
 set_property CFGBVS VCCO [current_design]

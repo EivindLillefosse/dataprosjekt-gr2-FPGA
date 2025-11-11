@@ -113,8 +113,6 @@ END COMPONENT;
     signal bram_A_addrb : std_logic_vector(9 downto 0) := (others => '0');
     signal bram_A_dinb : std_logic_vector(7 downto 0) := (others => '0');
     signal bram_A_doutb : std_logic_vector(7 downto 0) := (others => '0');
-    signal bram_A_addr_writeb : std_logic_vector(9 downto 0) := (others => '0'); -- Write address
-    signal bram_A_addr_readb : std_logic_vector(9 downto 0) := (others => '0');  -- Read address
 
     -- bram B signals
     signal bram_B_ena : std_logic := '0';
@@ -129,8 +127,6 @@ END COMPONENT;
     signal bram_B_addrb : std_logic_vector(9 downto 0) := (others => '0');
     signal bram_B_dinb : std_logic_vector(7 downto 0) := (others => '0');
     signal bram_B_doutb : std_logic_vector(7 downto 0) := (others => '0');
-    signal bram_B_addr_writeb : std_logic_vector(9 downto 0) := (others => '0'); -- Write address
-    signal bram_B_addr_readb : std_logic_vector(9 downto 0) := (others => '0');  -- Read address
 
     -- bram C signals
     signal bram_C_ena : std_logic := '0';
@@ -145,8 +141,6 @@ END COMPONENT;
     signal bram_C_addrb : std_logic_vector(9 downto 0) := (others => '0');
     signal bram_C_dinb : std_logic_vector(7 downto 0) := (others => '0');
     signal bram_C_doutb : std_logic_vector(7 downto 0) := (others => '0');
-    signal bram_C_addr_writeb : std_logic_vector(9 downto 0) := (others => '0'); -- Write address
-    signal bram_C_addr_readb : std_logic_vector(9 downto 0) := (others => '0');  -- Read address
 
     -- Control signals
     signal write_addr_A    : unsigned(9 downto 0) := (others => '0'); -- Address counter for BRAM A (0 to 783)
@@ -178,6 +172,12 @@ END COMPONENT;
     
     -- Dynamic buffer size calculation
     signal MAX_PIXELS    : unsigned(9 downto 0);
+    
+    -- Memory reset state machine
+    type reset_state_type is (RESET_IDLE, RESET_CLEAR_A, RESET_CLEAR_B, RESET_CLEAR_C, RESET_DONE);
+    signal reset_state : reset_state_type := RESET_IDLE;
+    signal reset_addr : unsigned(9 downto 0) := (others => '0');
+    signal reset_in_progress : std_logic := '0';
 
   
 begin
@@ -250,6 +250,57 @@ begin
     
     -- VGA output assignments
     vga_data <= vga_data_mux;
+    
+    -- Memory reset process: clears all BRAMs when reset is asserted
+    memory_reset_process: process(clk)
+    begin
+        if rising_edge(clk) then
+            if rst = '1' then
+                reset_state <= RESET_CLEAR_A;
+                reset_addr <= (others => '0');
+                reset_in_progress <= '1';
+            else
+                case reset_state is
+                    when RESET_IDLE =>
+                        reset_in_progress <= '0';
+                        
+                    when RESET_CLEAR_A =>
+                        -- Clear BRAM A
+                        if reset_addr < MAX_PIXELS then
+                            -- Don't assert write enable yet, let main process handle it
+                            reset_addr <= reset_addr + 1;
+                        else
+                            reset_addr <= (others => '0');
+                            reset_state <= RESET_CLEAR_B;
+                        end if;
+                        
+                    when RESET_CLEAR_B =>
+                        -- Clear BRAM B
+                        if reset_addr < MAX_PIXELS then
+                            reset_addr <= reset_addr + 1;
+                        else
+                            reset_addr <= (others => '0');
+                            reset_state <= RESET_CLEAR_C;
+                        end if;
+                        
+                    when RESET_CLEAR_C =>
+                        -- Clear BRAM C
+                        if reset_addr < MAX_PIXELS then
+                            reset_addr <= reset_addr + 1;
+                        else
+                            reset_state <= RESET_DONE;
+                        end if;
+                        
+                    when RESET_DONE =>
+                        reset_state <= RESET_IDLE;
+                        reset_in_progress <= '0';
+                        
+                    when others =>
+                        reset_state <= RESET_IDLE;
+                end case;
+            end if;
+        end if;
+    end process;
 
   BRAM_A_inst : BRAM_dual_port
   PORT MAP (
@@ -337,7 +388,30 @@ begin
             bram_B_wea <= "0";
             bram_C_wea <= "0";
             
-            data_in_ready <= not (BRAM_A_busy and BRAM_B_busy and BRAM_C_busy);
+            -- Handle memory reset: write zeros to all locations
+            if reset_in_progress = '1' then
+                case reset_state is
+                    when RESET_CLEAR_A =>
+                        bram_A_wea <= "1";
+                        bram_A_dina <= (others => '0');
+                        bram_A_addr_writea <= std_logic_vector(reset_addr);
+                        
+                    when RESET_CLEAR_B =>
+                        bram_B_wea <= "1";
+                        bram_B_dina <= (others => '0');
+                        bram_B_addr_writea <= std_logic_vector(reset_addr);
+                        
+                    when RESET_CLEAR_C =>
+                        bram_C_wea <= "1";
+                        bram_C_dina <= (others => '0');
+                        bram_C_addr_writea <= std_logic_vector(reset_addr);
+                        
+                    when others =>
+                        null;
+                end case;
+            else
+                -- Normal operation: handle SPI writes
+                data_in_ready <= not (BRAM_A_busy and BRAM_B_busy and BRAM_C_busy);
         
             -- FSM state switching
             case current_state is
@@ -499,6 +573,7 @@ begin
                 when others =>
                     current_state <= IDLE;
             end case;
+            end if; -- End of reset_in_progress check
         end if;
     end process control_process_ABC;
 
