@@ -73,6 +73,10 @@ architecture Behavioral of cnn_real_data_tb is
     signal output_pixel : WORD_ARRAY_16(0 to FINAL_NUM_FILTERS-1);
     signal output_valid : std_logic;
     signal output_ready : std_logic := '0';
+    -- FC2 output signals (debug top provides fc2 outputs)
+    signal fc2_output_data  : WORD_ARRAY_16(0 to 9);
+    signal fc2_output_valid : std_logic;
+    signal fc2_output_ready : std_logic := '0';
     
     -- DEBUG: Intermediate layer signals
     signal debug_conv1_pixel : WORD_ARRAY_16(0 to 7);  -- 8 filters
@@ -142,9 +146,10 @@ begin
             input_valid      => input_valid,
             input_ready      => input_ready,
             
-            output_pixel     => output_pixel,
-            output_valid     => output_valid,
-            output_ready     => output_ready,
+            -- Final classification outputs (FC2)
+            fc2_output_data  => fc2_output_data,
+            fc2_output_valid => fc2_output_valid,
+            fc2_output_ready => fc2_output_ready,
             
             -- DEBUG: Intermediate layer outputs
             debug_conv1_pixel => debug_conv1_pixel,
@@ -165,7 +170,7 @@ begin
             debug_conv2_row   => debug_conv2_row,
             debug_conv2_col   => debug_conv2_col
         );
-
+    signal debug_calc_pixel : WORD_16;  -- Updated to match cnn_debug port
     -- Clock process
     clk_process: process
     begin
@@ -329,26 +334,22 @@ begin
                 debug_conv2_ready <= '0';
             end if;
             
-            -- Monitor final outputs (Layer 3 - Pool2)
-            if output_valid = '1' and output_ready = '1' then
-                report "CNN Output received";
+            -- Monitor final outputs (FC2 final classification)
+            if fc2_output_valid = '1' and fc2_output_ready = '1' then
+                report "CNN Final FC2 Output received";
                 
-                -- CNN_OUTPUT header
-                write(debug_line, string'("CNN_OUTPUT: ["));
-                write(debug_line, output_req_row);  -- Use requested output position
-                write(debug_line, ',');
-                write(debug_line, output_req_col);
-                write(debug_line, ']');
+                -- FC2_OUTPUT header
+                write(debug_line, string'("FC2_OUTPUT: "));
                 writeline(debug_file, debug_line);
                 
-                for i in 0 to FINAL_NUM_FILTERS-1 loop
-                    report "  Filter " & integer'image(i) & ": " & 
-                        integer'image(to_integer(signed(output_pixel(i))));
-                    -- Write filter output
-                    write(debug_line, string'("  Filter_"));
+                for i in 0 to 9 loop
+                    report "  Class " & integer'image(i) & ": " & 
+                        integer'image(to_integer(signed(fc2_output_data(i))));
+                    -- Write class score
+                    write(debug_line, string'("  Class_"));
                     write(debug_line, i);
                     write(debug_line, string'(": "));
-                    write(debug_line, to_integer(signed(output_pixel(i))));
+                    write(debug_line, to_integer(signed(fc2_output_data(i))));
                     writeline(debug_file, debug_line);
                 end loop;
             end if;

@@ -23,7 +23,7 @@ architecture Behavioral of calculation_tb is
 
     -- Test parameters
     constant NODES           : integer := 64;
-    constant MAC_DATA_WIDTH  : integer := 8;
+    constant MAC_DATA_WIDTH  : integer := 16;
     constant MAC_RESULT_WIDTH: integer := 16;
     
     -- Clock period
@@ -90,7 +90,8 @@ begin
         
         -- Initialize weight data
         for i in 0 to NODES-1 loop
-            weight_data(i) <= std_logic_vector(to_unsigned(i + 1, MAC_DATA_WIDTH)); -- Weights: 1, 2, 3, ..., 64
+            -- weight_data elements are type WORD (8 bits). Use WORD_SIZE for correct width.
+            weight_data(i) <= std_logic_vector(to_unsigned(i + 1, WORD_SIZE)); -- Weights: 1, 2, 3, ..., 64
         end loop;
         
         wait for CLK_PERIOD * 2;
@@ -222,7 +223,8 @@ begin
         -- Use pixel = -0.5 (Q1.6 => -0.5 * 64 = -32) and weight = +1.0 (Q1.6 => 64)
         pixel_data <= std_logic_vector(to_signed(-32, MAC_DATA_WIDTH)); -- -0.5 in Q1.6
         for i in 0 to NODES-1 loop
-            weight_data(i) <= std_logic_vector(to_signed(64, MAC_DATA_WIDTH)); -- 1.0 in Q1.6
+            -- 1.0 in Q1.6 = 64. Fit into WORD (8 bits) and use signed representation.
+            weight_data(i) <= std_logic_vector(to_signed(64, WORD_SIZE)); -- 1.0 in Q1.6
         end loop;
         compute_en <= '1';
         wait for CLK_PERIOD;

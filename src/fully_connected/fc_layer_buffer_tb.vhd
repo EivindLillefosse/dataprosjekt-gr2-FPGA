@@ -26,10 +26,10 @@ architecture tb of fc_layer_buffer_tb is
     signal clk           : std_logic := '0';
     signal rst           : std_logic := '1';
     signal input_valid   : std_logic := '0';
-    signal input_data    : WORD_ARRAY(0 to NUM_NEURONS-1);
+    signal input_data    : WORD_ARRAY_16(0 to NUM_NEURONS-1);
     signal input_ready   : std_logic;
     signal output_valid  : std_logic;
-    signal output_data   : WORD_ARRAY(0 to NUM_NEURONS-1);
+    signal output_data   : WORD_ARRAY_16(0 to NUM_NEURONS-1);
     signal output_ready  : std_logic := '0';
 
 begin
@@ -77,7 +77,7 @@ begin
         report "Test 2: Write data to buffer" severity note;
         -- Create test data
         for i in 0 to NUM_NEURONS-1 loop
-            input_data(i) <= std_logic_vector(to_unsigned(i, 8));
+            input_data(i) <= std_logic_vector(to_unsigned(i, WORD_SIZE*2));
         end loop;
         input_valid <= '1';
         wait for CLK_PERIOD;
@@ -115,7 +115,7 @@ begin
         report "Test 8: Multiple writes and reads" severity note;
         -- First write
         for i in 0 to NUM_NEURONS-1 loop
-            input_data(i) <= std_logic_vector(to_unsigned(i + 10, 8));
+            input_data(i) <= std_logic_vector(to_unsigned(i + 10, 16));
         end loop;
         input_valid <= '1';
         wait for CLK_PERIOD;
@@ -124,7 +124,7 @@ begin
 
         -- Verify data
         for i in 0 to NUM_NEURONS-1 loop
-            assert output_data(i) = std_logic_vector(to_unsigned(i + 10, 8)) 
+            assert output_data(i) = std_logic_vector(to_unsigned(i + 10, 16)) 
                 report "Second write: data mismatch at index " & integer'image(i) severity error;
         end loop;
 

@@ -50,67 +50,65 @@ architecture Behavioral of cnn_tb is
     signal output_req_row   : integer := 0;
     signal output_req_col   : integer := 0;
     signal output_req_valid : std_logic := '0';
-    signal output_req_ready : std_logic;
+    signal output_req_ready : std_logic := '0';
     
     -- Request/response signals for input
-    signal input_req_row    : integer;
-    signal input_req_col    : integer;
-    signal input_req_valid  : std_logic;
+    signal input_req_row    : integer := 0;
+    signal input_req_col    : integer := 0;
+    signal input_req_valid  : std_logic := '0';
     signal input_req_ready  : std_logic := '0';
     
     -- Data signals
     signal input_pixel : WORD_ARRAY_16(0 to 0) := (others => (others => '0'));
     signal input_valid : std_logic := '0';
-    signal input_ready : std_logic;
+    signal input_ready : std_logic := '0';
     
-    signal output_pixel : WORD_ARRAY_16(0 to FINAL_NUM_FILTERS-1);
-    signal output_valid : std_logic;
+    signal output_pixel : WORD_ARRAY_16(0 to FINAL_NUM_FILTERS-1) := (others => (others => '0'));
+    signal output_valid : std_logic := '0';
     signal output_ready : std_logic := '0';
-    signal output_guess : WORD;
+    signal output_guess : WORD := (others => '0');
     
-    -- Control signal for Pool2 mux
-    signal use_fc_path  : std_logic := '0';  -- '0' = testbench controls, '1' = calc_index controls
     
     -- FC1 output signals (for monitoring)
-    signal fc1_output_data  : WORD_ARRAY_16(0 to FC1_NODES_OUT-1);
-    signal fc1_output_valid : std_logic;
+    signal fc1_output_data  : WORD_ARRAY_16(0 to FC1_NODES_OUT-1) := (others => (others => '0'));
+    signal fc1_output_valid : std_logic := '0';
     signal fc1_output_ready : std_logic := '0';
     
     -- FC2 output signals (final classification)
-    signal fc2_output_data  : WORD_ARRAY_16(0 to 9);
-    signal fc2_output_valid : std_logic;
+    signal fc2_output_data  : WORD_ARRAY_16(0 to 9) := (others => (others => '0'));
+    signal fc2_output_valid : std_logic := '0';
     signal fc2_output_ready : std_logic := '0';
     
     -- DEBUG: Intermediate layer signals
-    signal debug_conv1_pixel : WORD_ARRAY_16(0 to 7);  -- 8 filters
-    signal debug_conv1_valid : std_logic;
+    signal debug_conv1_pixel : WORD_ARRAY_16(0 to 7) := (others => (others => '0'));  -- 8 filters
+    signal debug_conv1_valid : std_logic := '0';
     signal debug_conv1_ready : std_logic := '0';
     signal debug_conv1_row   : natural := 0;
     signal debug_conv1_col   : natural := 0;
     
-    signal debug_pool1_pixel : WORD_ARRAY_16(0 to 7);  -- 8 filters
-    signal debug_pool1_valid : std_logic;
+    signal debug_pool1_pixel : WORD_ARRAY_16(0 to 7) := (others => (others => '0'));  -- 8 filters
+    signal debug_pool1_valid : std_logic := '0';
     signal debug_pool1_ready : std_logic := '0';
     signal debug_pool1_row   : natural := 0;
     signal debug_pool1_col   : natural := 0;
     
-    signal debug_conv2_pixel : WORD_ARRAY_16(0 to 15); -- 16 filters
-    signal debug_conv2_valid : std_logic;
+    signal debug_conv2_pixel : WORD_ARRAY_16(0 to 15) := (others => (others => '0')); -- 16 filters
+    signal debug_conv2_valid : std_logic := '0';
     signal debug_conv2_ready : std_logic := '0';
     signal debug_conv2_row   : natural := 0;
     signal debug_conv2_col   : natural := 0;
     
-    signal debug_pool2_pixel : WORD_ARRAY_16(0 to 15); -- 16 filters
-    signal debug_pool2_valid : std_logic;
+    signal debug_pool2_pixel : WORD_ARRAY_16(0 to 15) := (others => (others => '0')); -- 16 filters
+    signal debug_pool2_valid : std_logic := '0';
     signal debug_pool2_ready : std_logic := '0';
     signal debug_pool2_row   : natural := 0;
     signal debug_pool2_col   : natural := 0;
     
     -- DEBUG: calc_index signals
-    signal debug_calc_index  : integer range 0 to 399;
-    signal debug_calc_pixel  : WORD;
-    signal debug_calc_valid  : std_logic;
-    signal debug_calc_done   : std_logic;
+    signal debug_calc_index  : integer range 0 to 399 := 0;
+    signal debug_calc_pixel  : WORD_16 := (others => '0');
+    signal debug_calc_valid  : std_logic := '0';
+    signal debug_calc_done   : std_logic := '0';
     
     -- Test image data (28x28 image)
     type test_image_type is array (0 to IMAGE_SIZE-1, 0 to IMAGE_SIZE-1) of integer;
@@ -161,18 +159,16 @@ begin
             input_valid      => input_valid,
             input_ready      => input_ready,
             
-            output_pixel     => output_pixel,
             output_valid     => output_valid,
             output_ready     => output_ready,
             output_guess     => output_guess,
             
-            -- Control Pool2 mux
-            use_fc_path      => use_fc_path,
             
             -- FC1 outputs (new)
             fc1_output_data  => fc1_output_data,
             fc1_output_valid => fc1_output_valid,
-            fc1_output_ready => fc1_output_ready,
+            -- fc1_output_ready is driven by internal buffer in DUT
+            fc1_output_ready => open,
             
             -- FC2 outputs (final classification)
             fc2_output_data  => fc2_output_data,
@@ -252,7 +248,8 @@ begin
                 if req_pending then
                     if req_row_buf >= 0 and req_row_buf < IMAGE_SIZE and 
                        req_col_buf >= 0 and req_col_buf < IMAGE_SIZE then
-                        input_pixel(0) <= std_logic_vector(to_unsigned(test_image(req_row_buf, req_col_buf), 8));
+                        -- Produce a 16-bit vector to match WORD_16 signal width
+                        input_pixel(0) <= std_logic_vector(to_unsigned(test_image(req_row_buf, req_col_buf), 16));
                     else
                         -- Provide zero for out-of-bounds pixels (padding)
                         input_pixel(0) <= (others => '0');
@@ -484,11 +481,12 @@ begin
         constant FINAL_OUTPUT_SIZE : integer := 5;  -- After Conv1(26x26)->Pool1(13x13)->Conv2(11x11)->Pool2(5x5)
     begin
         -- Initialize
-        rst <= '1';
-        output_req_valid <= '0';
-        output_ready <= '0';
-        fc1_output_ready <= '0';
-        use_fc_path <= '0';  -- Start with testbench controlling Pool2
+    rst <= '1';
+    output_req_valid <= '0';
+    output_ready <= '0';
+    -- Make testbench ready to accept FC outputs so top-level signals are driven
+    fc1_output_ready <= '1';
+    fc2_output_ready <= '1';
         
         wait for CLK_PERIOD * 2;
         rst <= '0';
@@ -547,11 +545,10 @@ begin
         
         report "All CNN Pool2 outputs received!";
         
-        -- Now switch to FC path - let calc_index control Pool2
-        report "Switching to FC path - calc_index will now request Pool2 data...";
-        use_fc_path <= '1';
+    -- Now switch to FC path - calc_index will control Pool2 (cnn_top_debug is wired to calc_index)
+    report "Switching to FC path - calc_index will now request Pool2 data...";
         
-        -- Wait for FC1 to complete (it processes independently)
+    -- Wait for FC1 to complete (it processes independently)
         report "Waiting for FC1 to complete processing...";
         fc1_output_ready <= '1';
         
@@ -594,7 +591,6 @@ begin
         
         -- Test second run (just first output position)
         report "Testing second CNN run (first position only)...";
-        enable <= '1';
         
         output_req_row <= 0;
         output_req_col <= 0;

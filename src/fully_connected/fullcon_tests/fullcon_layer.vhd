@@ -29,13 +29,13 @@ entity fullcon_layer is
         
         -- Input interface
         input_valid : in  std_logic;
-        input_pixel : in  WORD;
+        input_pixel : in  WORD_16;
         input_index : in  integer range 0 to NODES_IN-1;
         input_ready : out std_logic;
         
         -- Output interface
         output_valid : out std_logic;
-        output_pixel : out WORD_ARRAY(0 to NODES_OUT-1);
+        output_pixel : out WORD_ARRAY_16(0 to NODES_OUT-1);
         output_ready : in  std_logic;
         
         layer_done   : out std_logic
@@ -65,11 +65,11 @@ architecture Behavioral of fullcon_layer is
     
     -- Q-format scaling signals (Q2.12 -> Q1.6)
     signal scaler_valid_in  : std_logic;
-    signal scaler_data_out  : WORD_ARRAY(0 to NODES_OUT-1);
+    signal scaler_data_out  : WORD_ARRAY_16(0 to NODES_OUT-1);
     signal scaler_valid_out : std_logic;
     
     -- ReLU activation signals
-    signal relu_data_out  : WORD_ARRAY(0 to NODES_OUT-1);
+    signal relu_data_out  : WORD_ARRAY_16(0 to NODES_OUT-1);
     signal relu_valid_out : std_logic;
 
 begin
@@ -91,7 +91,7 @@ begin
     calc_inst : entity work.calculation
         generic map (
             NODES            => NODES_OUT,
-            MAC_DATA_WIDTH   => WORD_SIZE,
+            MAC_DATA_WIDTH   => WORD_SIZE*2,
             MAC_RESULT_WIDTH => WORD_SIZE*2
         )
         port map (
@@ -132,7 +132,7 @@ begin
     end generate;
 
     -- Add bias to calculation results before ReLU
-    -- CRITICAL: Convert bias from Q1.6 to Q2.12 before adding to calc results
+    -- CRITICAL: Convert bias from Q1.6 to Q9.6 before adding to calc results
     biased_results_proc: process(calc_results, bias_regs)
     begin
         for i in 0 to NODES_OUT-1 loop
@@ -141,38 +141,28 @@ begin
         end loop;
     end process;
 
-    -- Q-Format Scaler: Q2.12 -> Q1.6
-    -- Scales down the biased results before ReLU activation
-    q_scale : entity work.q_scaler
-        generic map (
-            NUM_CHANNELS => NODES_OUT,
-            INPUT_WIDTH  => 16,  -- Q2.12
-            OUTPUT_WIDTH => 8,   -- Q1.6
-            SHIFT_AMOUNT => 6    -- 12 - 6 = 6 bits to shift
-        )
-        port map (
-            clk       => clk,
-            rst       => rst,
-            data_in   => biased_results,
-            valid_in  => scaler_valid_in,
-            data_out  => scaler_data_out,
-            valid_out => scaler_valid_out
-        );
-
     -- ReLU Activation Layer (takes scaled Q1.6 results)
-    relu : entity work.relu_layer
-        generic map (
-            NUM_FILTERS => NODES_OUT,
-            DATA_WIDTH  => 8
-        )
-        port map (
-            clk        => clk,
-            rst        => rst,
-            data_in    => scaler_data_out,
-            data_valid => scaler_valid_out,
-            data_out   => relu_data_out,
-            valid_out  => relu_valid_out
-        );
+    -- Instantiate only for LAYER_ID = 0 (FC1). For LAYER_ID = 1 (FC2)
+    -- bypass the ReLU and present biased_results directly.
+    gen_relu_inst : if LAYER_ID = 0 generate
+        relu : entity work.relu_layer
+            generic map (
+                NUM_FILTERS => NODES_OUT,
+                DATA_WIDTH  => 8
+            )
+            port map (
+                clk        => clk,
+                rst        => rst,
+                data_in    => biased_results,
+                data_valid => ctrl_output_valid,
+                data_out   => relu_data_out,
+                valid_out  => relu_valid_out
+            );
+    end generate;
+
+    -- For LAYER_ID = 1 bypass ReLU: no relu instance is created here.
+    -- The wrapper will drive outputs directly from biased_results in that case.
+    -- (No concurrent statements required here.)
 
     -- Main Controller FSM
     controller : entity work.fullcon_controller
@@ -188,12 +178,10 @@ begin
             input_index     => input_index,
             calc_clear      => calc_clear,
             calc_compute_en => calc_compute_en,
+            calc_done       => calc_done,
             output_valid    => ctrl_output_valid,
             input_ready     => input_ready
         );
-
-    -- Connect scaler control signals
-    scaler_valid_in <= ctrl_output_valid;
     
     -- Connect outputs
     output_pixel <= relu_data_out;

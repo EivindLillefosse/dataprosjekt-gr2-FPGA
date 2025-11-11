@@ -29,12 +29,12 @@ entity fc_layer_buffer is
         
         -- Input side (from FC1)
         input_valid   : in  std_logic;  -- FC1 output is valid
-        input_data    : in  WORD_ARRAY(0 to NUM_NEURONS-1);  -- 64x 8-bit neurons
+        input_data    : in  WORD_ARRAY_16(0 to NUM_NEURONS-1);  -- 64x 8-bit neurons
         input_ready   : out std_logic;  -- Buffer ready to accept
         
         -- Output side (to FC2)
         output_valid  : out std_logic;  -- Buffered data is valid
-        output_data   : out WORD_ARRAY(0 to NUM_NEURONS-1);  -- 64x 8-bit neurons
+        output_data   : out WORD_ARRAY_16(0 to NUM_NEURONS-1);  -- 64x 8-bit neurons
         output_ready  : in  std_logic   -- FC2 is ready to accept
     );
 end fc_layer_buffer;
@@ -46,12 +46,12 @@ architecture RTL of fc_layer_buffer is
     signal next_state : state_type;
     
     -- Storage register for buffered data (512 bits total)
-    signal buffer_data : WORD_ARRAY(0 to NUM_NEURONS-1) := (others => (others => '0'));
+    signal buffer_data : WORD_ARRAY_16(0 to NUM_NEURONS-1) := (others => (others => '0'));
     
     -- Next-value signals for outputs (combinational)
     signal v_input_ready : std_logic;
     signal v_output_valid : std_logic;
-    signal v_output_data : WORD_ARRAY(0 to NUM_NEURONS-1);
+    signal v_output_data : WORD_ARRAY_16(0 to NUM_NEURONS-1);
 
 begin
 

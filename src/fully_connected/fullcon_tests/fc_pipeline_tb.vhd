@@ -34,31 +34,31 @@ architecture tb of fc_pipeline_tb is
     -- FC1 Layer Signals
     signal fc1_input_valid  : std_logic := '0';
     signal fc1_input_ready  : std_logic;
-    signal fc1_input_data   : WORD;
+    signal fc1_input_data   : WORD_16;
     signal fc1_input_index  : integer range 0 to FC1_INPUT_NODES-1 := 0;
     
     signal fc1_output_valid : std_logic;
     signal fc1_output_ready : std_logic;
-    signal fc1_output_data  : WORD_ARRAY(0 to FC1_OUTPUT_NODES-1);
+    signal fc1_output_data  : WORD_ARRAY_16(0 to FC1_OUTPUT_NODES-1);
 
     -- Buffer Signals
     signal buf_input_valid  : std_logic;
     signal buf_input_ready  : std_logic;
-    signal buf_input_data   : WORD_ARRAY(0 to FC1_OUTPUT_NODES-1);
+    signal buf_input_data   : WORD_ARRAY_16(0 to FC1_OUTPUT_NODES-1);
     
     signal buf_output_valid : std_logic;
     signal buf_output_ready : std_logic;
-    signal buf_output_data  : WORD_ARRAY(0 to FC1_OUTPUT_NODES-1);
+    signal buf_output_data  : WORD_ARRAY_16(0 to FC1_OUTPUT_NODES-1);
 
     -- FC2 Layer Signals
     signal fc2_input_valid  : std_logic := '0';
     signal fc2_input_ready  : std_logic;
-    signal fc2_input_data   : WORD;
+    signal fc2_input_data   : WORD_16;
     signal fc2_input_index  : integer range 0 to FC2_INPUT_NODES-1 := 0;
     
     signal fc2_output_valid : std_logic;
-    signal fc2_output_ready : std_logic;
-    signal fc2_output_data  : WORD_ARRAY(0 to FC2_OUTPUT_NODES-1);
+    signal fc2_output_ready : std_logic := '1';
+    signal fc2_output_data  : WORD_ARRAY_16(0 to FC2_OUTPUT_NODES-1);
 
 begin
 
@@ -167,7 +167,7 @@ begin
             if fc1_input_ready = '1' then
                 fc1_input_valid <= '1';
                 fc1_input_index <= input_count;
-                fc1_input_data <= std_logic_vector(to_unsigned(input_count mod 256, 8));
+                fc1_input_data <= std_logic_vector(to_unsigned(input_count mod 256, 16));
                 
                 wait for CLK_PERIOD;
                 fc1_input_valid <= '0';
@@ -209,20 +209,21 @@ begin
         wait for CLK_PERIOD;
 
         -- Phase 5: Feed buffered data to FC2 (64 inputs)
+        -- Note: fc2_input_valid is driven by the concurrent interconnect (buf_output_valid)
+        -- so the procedural testbench must not drive fc2_input_valid (avoids multiple drivers).
         report "TEST PHASE 5: Sending 64 buffered outputs to FC2" severity note;
         input_count := 0;
 
         while input_count < FC2_INPUT_NODES loop
-            if fc2_input_ready = '1' then
-                fc2_input_valid <= '1';
+            -- Wait until buffer has valid data and FC2 is ready to accept it
+            if buf_output_valid = '1' and fc2_input_ready = '1' then
+                -- Set the index for FC2 to read the correct element from buffer
                 fc2_input_index <= input_count;
-                wait for CLK_PERIOD;
-                fc2_input_valid <= '0';
+                -- Advance one clock so FC2 samples the data/index
+                wait until rising_edge(clk);
                 input_count := input_count + 1;
-                
-                wait for CLK_PERIOD;
             else
-                wait for CLK_PERIOD;
+                wait until rising_edge(clk);
             end if;
         end loop;
 

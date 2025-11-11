@@ -76,13 +76,13 @@ entity cnn_top_debug is
         output_ready     : in  std_logic;
         output_guess     : out WORD;  -- Final classification (placeholder)
         
-        -- Control: Select between testbench requests and calc_index requests for Pool2
-        use_fc_path      : in  std_logic;  -- '1' = calc_index controls Pool2, '0' = testbench controls Pool2
+    -- Control: (removed) Pool2 now always controlled by calc_index (FC) path
         
-        -- FC1 outputs (for testing/debug)
-        fc1_output_data  : out WORD_ARRAY_16(0 to 63);
-        fc1_output_valid : out std_logic;
-        fc1_output_ready : in  std_logic;
+    -- FC1 outputs (for testing/debug)
+    fc1_output_data  : out WORD_ARRAY_16(0 to 63);
+    fc1_output_valid : out std_logic;
+    -- FC1 ready is driven by the internal buffer (exported for TB visibility)
+    fc1_output_ready : out std_logic;
         
         -- FC2 outputs (final 10-class classification)
         fc2_output_data  : out WORD_ARRAY_16(0 to 9);
@@ -120,7 +120,7 @@ entity cnn_top_debug is
         
         -- DEBUG: calc_index status
         debug_calc_index        : out integer range 0 to 399;
-        debug_calc_pixel        : out WORD;
+    debug_calc_pixel        : out WORD_16;
         debug_calc_valid        : out std_logic;
         debug_calc_done         : out std_logic
     );
@@ -194,7 +194,7 @@ architecture Structural of cnn_top_debug is
     signal calc_req_col          : integer;
     signal calc_req_valid        : std_logic;
     signal calc_pool_ready       : std_logic;
-    signal calc_fc_pixel         : WORD;
+    signal calc_fc_pixel         : WORD_16;
     signal calc_fc_valid         : std_logic;
     signal calc_curr_index       : integer range 0 to FC1_NODES_IN-1;
     signal calc_done             : std_logic;
@@ -213,7 +213,7 @@ architecture Structural of cnn_top_debug is
     -- Signals for FC2 input sequencer
     signal fc2_input_index       : integer range 0 to FC1_NODES_OUT-1 := 0;
     signal fc2_input_valid       : std_logic;
-    signal fc2_input_data        : WORD;
+    signal fc2_input_data        : WORD_16;
     signal fc2_sending           : std_logic;  -- State: actively sending to FC2
     
     -- Signals for FC2 output
@@ -363,10 +363,10 @@ begin
             clk                 => clk,
             rst                 => rst,
             
-            -- Request FROM external controller OR calc_index (muxed)
-            pixel_out_req_row   => calc_req_row when use_fc_path = '1' else output_req_row,
-            pixel_out_req_col   => calc_req_col when use_fc_path = '1' else output_req_col,
-            pixel_out_req_valid => calc_req_valid when use_fc_path = '1' else output_req_valid,
+            -- Request FROM calc_index (FC path)
+            pixel_out_req_row   => calc_req_row,
+            pixel_out_req_col   => calc_req_col,
+            pixel_out_req_valid => calc_req_valid,
             pixel_out_req_ready => open,  -- Not used
 
             -- Request TO conv2
@@ -380,10 +380,10 @@ begin
             pixel_in_valid      => conv2_pixel_out_valid,
             pixel_in_ready      => conv2_pixel_out_ready,
 
-            -- Data output
+            -- Data output (FC path)
             pixel_out           => pool2_pixel_out,
             pixel_out_valid     => pool2_pixel_out_valid,
-            pixel_out_ready     => calc_pool_ready when use_fc_path = '1' else output_ready
+            pixel_out_ready     => calc_pool_ready
         );
 
     -- Connect pool2 output requests to conv2 input requests
@@ -391,11 +391,6 @@ begin
     conv2_out_req_col   <= pool2_in_req_col;
     conv2_out_req_valid <= pool2_in_req_valid;
     pool2_in_req_ready  <= conv2_out_req_ready;
-    
-    -- Route Pool2 outputs directly to top-level ports
-    output_pixel <= pool2_pixel_out;
-    output_valid <= pool2_pixel_out_valid;
-    output_req_ready <= '1';  -- Always ready to accept requests
     
     -- Instantiate calc_index (flattens 3D tensor to 1D for FC layer)
     calc_index_inst: entity work.calc_index
@@ -407,7 +402,7 @@ begin
         port map (
             clk             => clk,
             rst             => rst,
-            enable          => calc_index_enable,
+            enable          => '1',  -- Always enabled
             
             -- Request TO pool2
             req_row         => calc_req_row,
@@ -426,9 +421,6 @@ begin
             curr_index      => calc_curr_index,
             done            => calc_done
         );
-
-    -- Enable calc_index when CNN is enabled
-    calc_index_enable <= enable;
 
     -- Instantiate FC1 layer (400 inputs -> 64 outputs)
     fc1_inst: entity work.fullyconnected
@@ -449,7 +441,7 @@ begin
             
             -- Output TO buffer
             pixel_out_valid => fc1_out_valid,
-            pixel_out_ready => open,  -- Status output, not used
+            pixel_out_ready => buf_in_ready,
             pixel_out_data  => fc1_out_data
         );
 
@@ -466,7 +458,7 @@ begin
             -- Input FROM FC1
             input_valid  => fc1_out_valid,
             input_data   => fc1_out_data,
-            input_ready  => buf_in_ready,  -- Buffer tells FC1 it's ready
+            input_ready  => buf_in_ready,  
             
             -- Output TO FC2 sequencer
             output_valid => buf_out_valid,
@@ -474,39 +466,35 @@ begin
             output_ready => buf_out_ready
         );
 
-    -- FC2 input sequencer: send buffered 64 neurons sequentially
-    fc2_input_data <= buf_out_data(fc2_input_index);
+    -- =====================================================================
+    -- Interconnect: Buffer -> FC2 (match fc_pipeline_tb pattern exactly)
+    -- =====================================================================
+    -- Buffer output ready driven by FC2 input ready
+    buf_out_ready <= fc2_in_ready;
     
+    -- FC2 input valid driven by buffer output valid
+    fc2_input_valid <= buf_out_valid;
+    
+    -- Multiplex buffer output by index for FC2 sequential input
+    fc2_input_data <= buf_out_data(fc2_input_index) when buf_out_valid = '1' else (others => '0');
+    
+    -- Index advance process: increment when buffer has valid data and FC2 accepts it
     process(clk)
     begin
         if rising_edge(clk) then
             if rst = '1' then
                 fc2_input_index <= 0;
-                fc2_input_valid <= '0';
-                fc2_sending <= '0';
-            elsif buf_out_valid = '1' and fc2_sending = '0' then
-                -- Buffer has full output, start sending to FC2
-                fc2_sending <= '1';
-                fc2_input_valid <= '1';
-                fc2_input_index <= 0;
-            elsif fc2_sending = '1' and fc2_in_ready = '1' then
-                -- FC2 accepted current pixel, advance
-                if fc2_input_index = FC1_NODES_OUT - 1 then
-                    -- Last pixel sent, done
-                    fc2_input_index <= 0;
-                    fc2_input_valid <= '0';
-                    fc2_sending <= '0';
-                else
-                    -- Send next pixel
-                    fc2_input_index <= fc2_input_index + 1;
-                    fc2_input_valid <= '1';  -- Keep valid high
+            else
+                if buf_out_valid = '1' and fc2_in_ready = '1' then
+                    if fc2_input_index = FC1_NODES_OUT - 1 then
+                        fc2_input_index <= 0;
+                    else
+                        fc2_input_index <= fc2_input_index + 1;
+                    end if;
                 end if;
             end if;
         end if;
     end process;
-    
-    -- Tell buffer we're ready to drain it when FC2 finishes
-    buf_out_ready <= '1' when fc2_sending = '1' and fc2_input_index = FC1_NODES_OUT - 1 and fc2_in_ready = '1' else '0';
 
     -- Instantiate FC2 layer (64 inputs -> 10 outputs)
     fc2_inst: entity work.fullyconnected
@@ -527,13 +515,15 @@ begin
             
             -- Output (FC2 doesn't use input ready signal)
             pixel_out_valid => fc2_out_valid,
-            pixel_out_ready => open,  -- Not used, just an indicator
+            pixel_out_ready => fc2_output_ready,
             pixel_out_data  => fc2_out_data
         );
 
     -- Connect FC1 output to top-level ports
     fc1_output_data  <= fc1_out_data;
     fc1_output_valid <= fc1_out_valid;
+    -- Expose internal buffer input-ready as the top-level FC1 ready signal so TB/DUT ownership is clear
+    fc1_output_ready <= buf_in_ready;
     
     -- Connect FC2 output to top-level ports
     fc2_output_data  <= fc2_out_data;
@@ -675,17 +665,12 @@ begin
                 debug_pool2_row <= 0;
                 debug_pool2_col <= 0;
             else
-                -- Just tap the signals directly
+                -- Just tap the signals directly and expose FC calc_index position
                 debug_pool2_pixel <= pool2_pixel_out;
                 debug_pool2_valid <= pool2_pixel_out_valid;
-                -- Capture the request position
-                if use_fc_path = '1' then
-                    debug_pool2_row <= calc_req_row;
-                    debug_pool2_col <= calc_req_col;
-                else
-                    debug_pool2_row <= output_req_row;
-                    debug_pool2_col <= output_req_col;
-                end if;
+                -- Capture the FC request position (calc_index)
+                debug_pool2_row <= calc_req_row;
+                debug_pool2_col <= calc_req_col;
             end if;
         end if;
     end process;

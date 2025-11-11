@@ -46,11 +46,11 @@ architecture Behavioral of fullcon_layer_tb is
     signal rst_fc1 : std_logic := '0';
     signal enable_fc1 : std_logic := '0';
     signal input_valid_fc1 : std_logic := '0';
-    signal input_pixel_fc1 : WORD := (others => '0');
+    signal input_pixel_fc1 : WORD_16 := (others => '0');
     signal input_index_fc1 : integer range 0 to FC1_INPUTS-1 := 0;
     signal input_ready_fc1 : std_logic;
     signal output_valid_fc1 : std_logic;
-    signal output_pixel_fc1 : WORD_ARRAY(0 to FC1_OUTPUTS-1);
+    signal output_pixel_fc1 : WORD_ARRAY_16(0 to FC1_OUTPUTS-1);
     signal output_ready_fc1 : std_logic := '1';
     signal layer_done_fc1 : std_logic;
     
@@ -59,11 +59,11 @@ architecture Behavioral of fullcon_layer_tb is
     signal rst_fc2 : std_logic := '0';
     signal enable_fc2 : std_logic := '0';
     signal input_valid_fc2 : std_logic := '0';
-    signal input_pixel_fc2 : WORD := (others => '0');
+    signal input_pixel_fc2 : WORD_16 := (others => '0');
     signal input_index_fc2 : integer range 0 to FC2_INPUTS-1 := 0;
     signal input_ready_fc2 : std_logic;
     signal output_valid_fc2 : std_logic;
-    signal output_pixel_fc2 : WORD_ARRAY(0 to FC2_OUTPUTS-1);
+    signal output_pixel_fc2 : WORD_ARRAY_16(0 to FC2_OUTPUTS-1);
     signal output_ready_fc2 : std_logic := '1';
     signal layer_done_fc2 : std_logic;
     
@@ -71,11 +71,12 @@ architecture Behavioral of fullcon_layer_tb is
     signal test_done : boolean := false;
     
     -- Helper function to generate test data
-    function gen_pixel_value(index : integer) return WORD is
-        variable result : WORD;
+    function gen_pixel_value(index : integer) return WORD_16 is
+        variable result : WORD_16;
     begin
         -- Generate pattern based on index
-        result := std_logic_vector(to_unsigned((index * 7 + 13) mod 256, 8));
+        -- Generate an 16-bit pattern and zero-extend to 16 bits by producing a 16-bit vector
+        result := std_logic_vector(to_unsigned((index * 7 + 13) mod 256, 16));
         return result;
     end function;
 

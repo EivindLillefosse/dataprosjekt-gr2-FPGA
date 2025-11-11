@@ -36,9 +36,9 @@ architecture Behavioral of calc_index_tb is
             req_col     : out integer range 0 to INPUT_SIZE-1;
             req_valid   : out std_logic;
             
-            pool_pixel_data : in WORD_ARRAY(0 to INPUT_CHANNELS-1);
+            pool_pixel_data : in WORD_ARRAY_16(0 to INPUT_CHANNELS-1);
             
-            fc_pixel_out    : out WORD;
+            fc_pixel_out    : out WORD_16;
             fc_pixel_valid  : out std_logic;
             
             curr_index  : out integer range 0 to NODES_IN-1;
@@ -61,9 +61,9 @@ architecture Behavioral of calc_index_tb is
     signal req_col     : integer range 0 to INPUT_SIZE-1;
     signal req_valid   : std_logic;
     
-    signal pool_pixel_data : WORD_ARRAY(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
+    signal pool_pixel_data : WORD_ARRAY_16(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
     
-    signal fc_pixel_out    : WORD;
+    signal fc_pixel_out    : WORD_16;
     signal fc_pixel_valid  : std_logic;
     
     signal curr_index  : integer range 0 to NODES_IN-1;
@@ -73,7 +73,7 @@ architecture Behavioral of calc_index_tb is
     signal test_running : boolean := true;
 
     -- Helper function to generate test pixel data based on position and channel
-    function gen_pixel_value(row : integer; col : integer; channel : integer) return WORD is
+    function gen_pixel_value(row : integer; col : integer; channel : integer) return WORD_16 is
         variable temp : integer;
     begin
         temp := (row * 100 + col * 10 + channel) mod 256;
@@ -135,7 +135,7 @@ begin
         variable expected_row : integer;
         variable expected_col : integer;
         variable expected_channel : integer;
-        variable expected_pixel : WORD;
+        variable expected_pixel : WORD_16;
     begin
         -- Initial reset
         report "========================================" severity note;

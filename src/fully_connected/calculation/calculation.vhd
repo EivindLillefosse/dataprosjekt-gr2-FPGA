@@ -18,16 +18,16 @@ use work.types_pkg.all;
 
 entity calculation is
     generic (
-        NODES : integer := 64;
-        MAC_DATA_WIDTH  : integer := 8;
-        MAC_RESULT_WIDTH: integer := 16
+        NODES             : integer := 64;
+        MAC_DATA_WIDTH    : integer := 16;
+        MAC_RESULT_WIDTH  : integer := 16
     );
     port (
         clk          : in  std_logic;
         rst          : in  std_logic;
         clear        : in  std_logic;
         -- Input data
-        pixel_data   : in  std_logic_vector(MAC_DATA_WIDTH-1 downto 0);
+        pixel_data   : in  WORD_16;
         weight_data  : in  WORD_ARRAY(0 to NODES-1);
         compute_en   : in  std_logic;
         -- Results
@@ -37,9 +37,11 @@ entity calculation is
 end calculation;
 
 architecture Structural of calculation is
-    -- Intermediate signals for type conversion
-    type MAC_RESULT_ARRAY is array (0 to NODES-1) of signed(MAC_RESULT_WIDTH-1 downto 0);
-    signal mac_results : MAC_RESULT_ARRAY;
+
+    -- MAC.result is a signed vector; declare a local signed-array type so
+    -- we can connect the MAC result port directly without casting issues.
+    type signed_result_array_t is array (natural range <>) of signed(MAC_RESULT_WIDTH-1 downto 0);
+    signal mac_results : signed_result_array_t(0 to NODES-1);
 
 begin
 
@@ -47,20 +49,21 @@ begin
     mac_gen : for i in 0 to NODES-1 generate
         mac_inst : entity work.MAC
             generic map (
-                width_a => MAC_DATA_WIDTH,
-                width_b => MAC_DATA_WIDTH,
-                width_p => MAC_RESULT_WIDTH
+                WIDTH_A => MAC_DATA_WIDTH,
+                WIDTH_B => 8,
+                WIDTH_P => MAC_RESULT_WIDTH
             )
             port map (
                 clk      => clk,
                 start    => compute_en,
                 clear    => clear,
+                
                 pixel_in => signed(pixel_data),
                 weights  => signed(weight_data(i)),
                 done     => compute_done(i),
                 result   => mac_results(i)
             );
-            
+
         -- Convert signed MAC output to std_logic_vector for output port
         results(i) <= std_logic_vector(mac_results(i));
     end generate;

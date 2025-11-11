@@ -33,12 +33,12 @@ entity calc_index is
         req_valid   : out std_logic;
         
         -- Input from max pooling: all 16 channels at once (16x8 bits)
-        pool_pixel_data  : in WORD_ARRAY(0 to INPUT_CHANNELS-1);
+        pool_pixel_data  : in WORD_ARRAY_16(0 to INPUT_CHANNELS-1);
         pool_pixel_valid : in std_logic;
         pool_pixel_ready : out std_logic;
         
         -- Output to FC layer: selected single channel pixel
-        fc_pixel_out    : out WORD;
+        fc_pixel_out    : out WORD_16;
         fc_pixel_valid  : out std_logic;
         
         -- Current index being requested (for debugging/monitoring)
@@ -55,7 +55,7 @@ architecture Structural of calc_index is
     signal position_counter : integer range 0 to NUM_POSITIONS-1 := 0;
     signal channel_counter  : integer range 0 to INPUT_CHANNELS-1 := 0;
     signal internal_done    : std_logic := '0';
-    signal pool_data_captured : WORD_ARRAY(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
+    signal pool_data_captured : WORD_ARRAY_16(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
     signal data_valid       : std_logic := '0';
 begin
     

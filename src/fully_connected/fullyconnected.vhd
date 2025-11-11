@@ -26,24 +26,24 @@ entity fullyconnected is
     );
 
     port (
-        clk           : in  std_logic;
-        rst           : in  std_logic;
+        clk               : in  std_logic;
+        rst               : in  std_logic;
         -- Input interface
-        pixel_in_valid   : in  std_logic;   
-        pixel_in_ready   : out std_logic;                  -- Input pixel is valid
-        pixel_in_data    : in  WORD;                       -- Input pixel value (8 bits)
-        pixel_in_index   : in  integer range 0 to  NODES_IN-1;     -- Position in input (0-399)
+        pixel_in_valid    : in  std_logic;   
+        pixel_in_ready    : out std_logic;                         -- Input pixel is valid
+        pixel_in_data     : in  WORD_16;                           -- Input pixel value (16 bits)
+        pixel_in_index    : in  integer range 0 to  NODES_IN-1;    -- Position in input (0-399)
         -- Output interface
-        pixel_out_valid   : out std_logic;                  -- Output pixel is valid
-        pixel_out_ready   : out std_logic;                  -- All 64 outputs ready
-        pixel_out_data    : out WORD_ARRAY(0 to NODES_OUT-1)        -- Output neurons after ReLU (8 bits each)
+        pixel_out_valid   : out std_logic;                         -- Output pixel is valid
+        pixel_out_ready   : in  std_logic;                         -- Downstream ready for outputs
+        pixel_out_data    : out WORD_ARRAY_16(0 to NODES_OUT-1)    -- Output neurons after ReLU (16 bits each)
     );
 end fullyconnected;
 
 architecture RTL of fullyconnected is
     -- Signals for calculation module
     signal calc_clear      : std_logic;
-    signal calc_pixel_data : std_logic_vector(WORD_SIZE-1 downto 0);
+    signal calc_pixel_data : WORD_16;
     signal calc_weights    : WORD_ARRAY(0 to NODES_OUT-1);
     signal calc_compute_en : std_logic;
     signal calc_results    : WORD_ARRAY_16(0 to NODES_OUT-1);
@@ -55,10 +55,16 @@ architecture RTL of fullyconnected is
     signal biased_results  : WORD_ARRAY_16(0 to NODES_OUT-1);
     
     -- Signals for ReLU
-    signal relu_in_data    : WORD_ARRAY(0 to NODES_OUT-1);
+    signal relu_in_data    : WORD_ARRAY_16(0 to NODES_OUT-1);
     signal data_valid      : std_logic;
-    signal data_out        : WORD_ARRAY(0 to NODES_OUT-1);
+    signal data_out        : WORD_ARRAY_16(0 to NODES_OUT-1);
     signal valid_out       : std_logic;
+    -- Signals for optional argmax (used when LAYER_ID = 1)
+    signal arg_done_s      : std_logic := '0';
+    -- argmax returns a 9-bit index; store as unsigned(8 downto 0)
+    signal arg_max_idx_s   : unsigned(8 downto 0) := (others => '0');
+    signal fc2_pixel_out   : WORD_ARRAY_16(0 to NODES_OUT-1) := (others => (others => '0'));
+    signal fc2_pixel_valid : std_logic := '0';
 
 begin
 
@@ -66,18 +72,18 @@ begin
     calc_inst : entity work.calculation
         generic map (
             NODES            => NODES_OUT,
-            MAC_DATA_WIDTH   => WORD_SIZE,
-            MAC_RESULT_WIDTH => WORD_SIZE*2
+            MAC_DATA_WIDTH   => WORD_SIZE*2, -- 16 bits input
+            MAC_RESULT_WIDTH => WORD_SIZE*2  -- 16 bits output
         )
         port map (
-            clk          => clk,
-            rst          => rst,
-            clear        => calc_clear,
-            pixel_data   => calc_pixel_data,
-            weight_data  => calc_weights,
-            compute_en   => calc_compute_en,
-            results      => calc_results,
-            compute_done => calc_done
+            clk              => clk,
+            rst              => rst,
+            clear            => calc_clear,
+            pixel_data       => calc_pixel_data,
+            weight_data      => calc_weights,
+            compute_en       => calc_compute_en,
+            results          => calc_results,
+            compute_done     => calc_done
         );
 
 
@@ -97,19 +103,20 @@ begin
     -- Instantiate controller
     ctrl_inst : entity work.fullcon_controller
         generic map (
-            NODES_IN   => NODES_IN,
-            NODES_OUT  => NODES_OUT,
-            LAYER_ID   => LAYER_ID
+            NODES_IN        => NODES_IN,
+            NODES_OUT       => NODES_OUT,
+            LAYER_ID        => LAYER_ID
         )
         port map (
-            clk           => clk,
-            rst           => rst,
-            input_valid   => pixel_in_valid,
-            input_index   => pixel_in_index,
-            calc_clear    => calc_clear,
+            clk             => clk,
+            rst             => rst,
+            input_valid     => pixel_in_valid,
+            input_index     => pixel_in_index,
+            calc_clear      => calc_clear,
             calc_compute_en => calc_compute_en,
-            output_valid  => data_valid,
-            input_ready   => pixel_in_ready
+            calc_done       => calc_done,
+            output_valid    => data_valid,
+            input_ready     => pixel_in_ready
         );
 
     -- Connect input pixel data to calculation module
@@ -128,24 +135,15 @@ begin
         end generate;
     end generate;
 
-    -- Add bias to calculation results before ReLU
-    -- CRITICAL: Convert bias from Q1.6 to Q2.12 before adding to calc results
-    -- Q1.6 format: value / 64 = value × 2^(-6)
-    -- Q2.12 format: value / 4096 = value × 2^(-12)
-    -- To convert Q1.6 to Q2.12, shift left by 6 bits (multiply by 2^6)
+    -- Add bias to calculation results before ReLU 
     biased_results_proc: process(calc_results, bias_regs)
     begin
         for i in 0 to NODES_OUT-1 loop
-            -- Add bias in Q2.12 format to calc_results (which are Q2.12)
-            -- Shift bias left by 6 bits to scale from Q1.6 to Q2.12
-            biased_results(i) <= std_logic_vector(signed(calc_results(i)) + shift_left(resize(bias_regs(i), 16), 6));
+            biased_results(i) <= std_logic_vector(
+                signed(calc_results(i)) + resize(bias_regs(i), 16)
+            );
         end loop;
     end process;
-
-    -- Scale biased results from Q2.12 to Q1.6 (8-bit) for ReLU
-    gen_relu_input: for i in 0 to NODES_OUT-1 generate
-        relu_in_data(i) <= biased_results(i)(15 downto 8);  -- Take middle 8 bits
-    end generate;
 
     -- ReLU Activation Layer (takes scaled Q1.6 results)
     -- LAYER_ID = 0: FC1 (hidden layer) uses ReLU
@@ -154,50 +152,78 @@ begin
         relu : entity work.relu_layer
             generic map (
                 NUM_FILTERS => NODES_OUT,
-                DATA_WIDTH => 8  
+                DATA_WIDTH => WORD_SIZE*2  
             )
             port map (
                 clk => clk,
                 rst => rst,
-                data_in => relu_in_data,
+                data_in => biased_results,
                 data_valid => data_valid,
                 data_out => data_out,
                 valid_out => valid_out
             );
 
-        -- Connect ReLU output to module output
-        pixel_out_data <= data_out;
-        pixel_out_valid <= valid_out;
-        pixel_out_ready <= valid_out;
     end generate;
 
-    gen_no_relu : if LAYER_ID = 1 generate
-        -- FC2 (output layer): bypass ReLU, output raw logits
-        -- Register the output to match timing with FC1's ReLU path
-        process(clk)
+    -- For FC2 (LAYER_ID = 1) use ARGMAX on biased results
+    gen_without_relu : if LAYER_ID = 1 generate
+        signal arg_result_latched : std_logic := '0';
+    begin
+        -- Keep internal data path so the raw logits remain available
+        data_out <= biased_results;
+        valid_out <= data_valid;
+
+        -- Instantiate arg_max: start when biased results become valid
+        arg_inst: entity work.arg_max
+          generic map (
+            N_INPUTS => NODES_OUT,
+            DATA_W   => WORD_SIZE*2,
+            IDX_W    => 9
+          )
+          port map (
+            clk     => clk,
+            rst     => rst,
+            start   => data_valid,
+            data_in => biased_results,
+            done    => arg_done_s,
+            max_idx => arg_max_idx_s
+          );
+
+        -- Present argmax result on the module output port 0 as a 16-bit value
+        -- Latch the result once argmax completes and hold until new computation starts
+        fc2_out_proc: process(clk)
         begin
             if rising_edge(clk) then
                 if rst = '1' then
-                    valid_out <= '0';
-                    for i in 0 to NODES_OUT-1 loop
-                        data_out(i) <= (others => '0');
-                    end loop;
+                    fc2_pixel_out   <= (others => (others => '0'));
+                    fc2_pixel_valid <= '0';
+                    arg_result_latched <= '0';
                 else
-                    -- Only update outputs when data is valid
-                    valid_out <= data_valid;
+                    -- Clear latch when new computation starts (controller will pulse data_valid)
                     if data_valid = '1' then
-                        for i in 0 to NODES_OUT-1 loop
-                            data_out(i) <= biased_results(i)(15 downto 8);
-                        end loop;
+                        arg_result_latched <= '0';
+                        fc2_pixel_valid <= '0';
+                    -- Latch argmax result on first done assertion
+                    elsif arg_done_s = '1' and arg_result_latched = '0' then
+                        fc2_pixel_out <= (others => (others => '0'));
+                        -- Place the 9-bit index in the lower bits of the 16-bit word
+                        fc2_pixel_out(0) <= std_logic_vector(resize(arg_max_idx_s, 16));
+                        fc2_pixel_valid <= '1';
+                        arg_result_latched <= '1';
                     end if;
                 end if;
             end if;
-        end process;
+        end process fc2_out_proc;
 
-        -- Connect output
-        pixel_out_data <= data_out;
+        -- Drive module outputs for LAYER_ID = 1
+        pixel_out_data  <= fc2_pixel_out;
+        pixel_out_valid <= fc2_pixel_valid;
+    end generate;
+
+    -- For LAYER_ID = 0 the outputs are driven by the ReLU path
+    gen_outputs_layer0 : if LAYER_ID = 0 generate
+        pixel_out_data  <= data_out;
         pixel_out_valid <= valid_out;
-        pixel_out_ready <= valid_out;
     end generate;
 
 end RTL;

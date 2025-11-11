@@ -336,7 +336,7 @@ begin
             -- Data TO calc_index (all 16 channels)
             pixel_out           => pool2_pixel_out,
             pixel_out_valid     => pool2_pixel_out_valid,
-            pixel_out_ready     => '1'  -- calc_index always ready
+            pixel_out_ready     => pool2_pixel_out_ready
         );
 
     -- Instantiate calc_index (flattens 3D tensor to 1D for FC layer)
@@ -358,6 +358,8 @@ begin
             
             -- Input FROM pool2 (all 16 channels at once)
             pool_pixel_data => pool2_pixel_out,
+            pool_pixel_valid => pool2_pixel_out_valid,
+            pool_pixel_ready => pool2_pixel_out_ready,
             
             -- Output TO fc1 (selected single channel pixel)
             fc_pixel_out    => calc_fc_pixel,
