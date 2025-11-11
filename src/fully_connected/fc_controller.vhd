@@ -15,11 +15,10 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 use work.types_pkg.all;
 
-entity fullcon_controller is
+entity fc_controller is
     generic (
         NODES_IN  : integer := 400;
-        NODES_OUT : integer := 64;
-        LAYER_ID  : integer := 0
+        NODES_OUT : integer := 64
     );
 
     port (
@@ -39,14 +38,13 @@ entity fullcon_controller is
         input_ready  : out std_logic  -- Ready to accept new inputs
     );
 
-end fullcon_controller;
+end fc_controller;
 
-architecture RTL of fullcon_controller is
+architecture RTL of fc_controller is
 
-    type state_type is (IDLE, PROCESSING, WAITING_MAC, DONE);
+    type state_type is (IDLE, PROCESSING, WAITING_MAC);
     signal state : state_type := IDLE;
     
-    signal input_count : integer range 0 to NODES_IN := 0;
     signal wait_counter : integer range 0 to 10 := 0;
 
 begin
@@ -54,7 +52,6 @@ begin
     begin
         if rst = '1' then
             state <= IDLE;
-            input_count <= 0;
             calc_clear <= '0';
             calc_compute_en <= '0';
             output_valid <= '0';

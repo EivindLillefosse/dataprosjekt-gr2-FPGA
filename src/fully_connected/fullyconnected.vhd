@@ -34,8 +34,7 @@ entity fullyconnected is
         pixel_in_data    : in  WORD;                       -- Input pixel value (8 bits)
         pixel_in_index   : in  integer range 0 to  NODES_IN-1;     -- Position in input (0-399)
         -- Output interface
-        pixel_out_valid   : out std_logic;                  -- Output pixel is valid
-        pixel_out_ready   : out std_logic;                  -- All 64 outputs ready
+        pixel_out_valid   : out std_logic;                  -- Output pixels are valid
         pixel_out_data    : out WORD_ARRAY(0 to NODES_OUT-1)        -- Output neurons after ReLU (8 bits each)
     );
 end fullyconnected;
@@ -47,7 +46,6 @@ architecture RTL of fullyconnected is
     signal calc_weights    : WORD_ARRAY(0 to NODES_OUT-1);
     signal calc_compute_en : std_logic;
     signal calc_results    : WORD_ARRAY_16(0 to NODES_OUT-1);
-    signal calc_done       : std_logic_vector(NODES_OUT-1 downto 0);
     
     -- Signals for bias addition
     type bias_array_t is array (natural range <>) of signed(7 downto 0);
@@ -77,12 +75,12 @@ begin
             weight_data  => calc_weights,
             compute_en   => calc_compute_en,
             results      => calc_results,
-            compute_done => calc_done
+            compute_done => open  -- Not used
         );
 
 
     -- Instantiate fulcon_memory_controller
-    mem_ctrl_inst : entity work.fullcon_memory_controller
+    mem_ctrl_inst : entity work.fc_memory_controller
         generic map (
             NUM_NODES  => NODES_OUT,
             NUM_INPUTS => NODES_IN,
@@ -95,11 +93,10 @@ begin
         );
 
     -- Instantiate controller
-    ctrl_inst : entity work.fullcon_controller
+    ctrl_inst : entity work.fc_controller
         generic map (
             NODES_IN   => NODES_IN,
-            NODES_OUT  => NODES_OUT,
-            LAYER_ID   => LAYER_ID
+            NODES_OUT  => NODES_OUT
         )
         port map (
             clk           => clk,
@@ -168,7 +165,6 @@ begin
         -- Connect ReLU output to module output
         pixel_out_data <= data_out;
         pixel_out_valid <= valid_out;
-        pixel_out_ready <= valid_out;
     end generate;
 
     gen_no_relu : if LAYER_ID = 1 generate
@@ -197,7 +193,6 @@ begin
         -- Connect output
         pixel_out_data <= data_out;
         pixel_out_valid <= valid_out;
-        pixel_out_ready <= valid_out;
     end generate;
 
 end RTL;

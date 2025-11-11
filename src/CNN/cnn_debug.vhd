@@ -205,13 +205,11 @@ architecture Structural of cnn_top_debug is
     signal fc1_out_valid         : std_logic;
     signal fc1_out_data          : WORD_ARRAY(0 to FC1_NODES_OUT-1);
     signal fc1_in_ready          : std_logic;
-    signal fc1_out_ready         : std_logic := '1';  -- Always ready (no buffer)
     
-    -- Signals for FC2 input sequencer
+    -- Signals for FC2 input (from sequencer)
     signal fc2_input_index       : integer range 0 to FC1_NODES_OUT-1 := 0;
     signal fc2_input_valid       : std_logic;
     signal fc2_input_data        : WORD;
-    signal fc2_sending           : std_logic;  -- State: actively sending to FC2
     
     -- Signals for FC2 output
     signal fc2_out_valid         : std_logic;
@@ -448,41 +446,28 @@ begin
             
             -- Output (directly to FC2 sequencer, no buffer)
             pixel_out_valid => fc1_out_valid,
-            pixel_out_ready => fc1_out_ready,  -- Always ready (no buffer)
             pixel_out_data  => fc1_out_data
         );
 
-    -- FC2 input sequencer: send FC1 output 64 neurons sequentially (no buffer)
-    -- Read directly from FC1's registered output
-    fc2_input_data <= fc1_out_data(fc2_input_index);
-    
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if rst = '1' then
-                fc2_input_index <= 0;
-                fc2_input_valid <= '0';
-                fc2_sending <= '0';
-            elsif fc1_out_valid = '1' and fc2_sending = '0' then
-                -- FC1 has output available, start sending to FC2
-                fc2_sending <= '1';
-                fc2_input_valid <= '1';
-                fc2_input_index <= 0;
-            elsif fc2_sending = '1' and fc2_in_ready = '1' then
-                -- FC2 accepted current pixel, advance
-                if fc2_input_index = FC1_NODES_OUT - 1 then
-                    -- Last pixel sent, done
-                    fc2_input_index <= 0;
-                    fc2_input_valid <= '0';
-                    fc2_sending <= '0';
-                else
-                    -- Send next pixel
-                    fc2_input_index <= fc2_input_index + 1;
-                    fc2_input_valid <= '1';  -- Keep valid high
-                end if;
-            end if;
-        end if;
-    end process;
+    -- Sequencer: Convert FC1's parallel output to sequential stream for FC2
+    fc_seq_inst: entity work.fc_sequencer
+        generic map (
+            NUM_NEURONS => FC1_NODES_OUT  -- 64
+        )
+        port map (
+            clk          => clk,
+            rst          => rst,
+            
+            -- Parallel input FROM FC1
+            input_valid  => fc1_out_valid,
+            input_data   => fc1_out_data,
+            
+            -- Sequential output TO FC2
+            output_valid => fc2_input_valid,
+            output_ready => fc2_in_ready,
+            output_data  => fc2_input_data,
+            output_index => fc2_input_index
+        );
 
     -- Instantiate FC2 layer (64 inputs -> 10 outputs)
     fc2_inst: entity work.fullyconnected
@@ -501,9 +486,8 @@ begin
             pixel_in_data   => fc2_input_data,
             pixel_in_index  => fc2_input_index,
             
-            -- Output (FC2 doesn't use input ready signal)
+            -- Output
             pixel_out_valid => fc2_out_valid,
-            pixel_out_ready => open,  -- Not used, just an indicator
             pixel_out_data  => fc2_out_data
         );
 

@@ -4,7 +4,7 @@
 -- 
 -- Create Date: 11.04.2025
 -- Design Name: Fully Connected Layer Testbench
--- Module Name: fullcon_layer_tb - Behavioral
+-- Module Name: fc_layer_tb - Behavioral
 -- Project Name: CNN Accelerator
 -- Description: Testbench for modular fully connected layer
 -- 
@@ -21,10 +21,10 @@ use IEEE.STD_LOGIC_TEXTIO.ALL;
 -- Optional: VHDL-2008 simulator control
 use std.env.all;
 
-entity fullcon_layer_tb is
-end fullcon_layer_tb;
+entity fc_layer_tb is
+end fc_layer_tb;
 
-architecture Behavioral of fullcon_layer_tb is
+architecture Behavioral of fc_layer_tb is
 
     -- Test parameters
     -- FC1: 400 inputs -> 64 outputs (Layer 5)
@@ -82,7 +82,7 @@ architecture Behavioral of fullcon_layer_tb is
 begin
 
     -- Unit Under Test FC1 (Layer 5: 400->64)
-    uut_fc1: entity work.fullcon_layer
+    uut_fc1: entity work.fc_layer
         generic map (
             NODES_IN  => FC1_INPUTS,
             NODES_OUT => FC1_OUTPUTS,
@@ -103,7 +103,7 @@ begin
         );
 
     -- Unit Under Test FC2 (Layer 6: 64->10)
-    uut_fc2: entity work.fullcon_layer
+    uut_fc2: entity work.fc_layer
         generic map (
             NODES_IN  => FC2_INPUTS,
             NODES_OUT => FC2_OUTPUTS,

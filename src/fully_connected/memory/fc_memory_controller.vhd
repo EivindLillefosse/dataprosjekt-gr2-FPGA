@@ -4,7 +4,7 @@
 -- 
 -- Create Date: 11.03.2025
 -- Design Name: Fully Connected Weight Memory Controller
--- Module Name: fullcon_memory_controller - Behavioral
+-- Module Name: fc_memory_controller - Behavioral
 -- Project Name: CNN Accelerator
 -- Target Devices: Xilinx FPGA
 -- Description: Weight memory management controller for fully connected layers
@@ -16,7 +16,7 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 use work.types_pkg.all;
 
-entity fullcon_memory_controller is
+entity fc_memory_controller is
     generic (
         NUM_NODES   : integer := 64;
         NUM_INPUTS  : integer := 400;
@@ -29,9 +29,9 @@ entity fullcon_memory_controller is
         -- Data interface (Ex. 64 bits = 8 nodes * 8 bits per weight)
         weight_data : out WORD_ARRAY(0 to NUM_NODES-1)
     );
-end fullcon_memory_controller;
+end fc_memory_controller;
 
-architecture Behavioral of fullcon_memory_controller is
+architecture Behavioral of fc_memory_controller is
 
     -- helper: compute ceiling(log2(n)) for address width
     function clog2(n : natural) return natural is

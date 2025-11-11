@@ -4,7 +4,7 @@
 -- 
 -- Create Date: 11.04.2025
 -- Design Name: Fully Connected Layer
--- Module Name: fullcon_layer - Behavioral
+-- Module Name: fc_layer - Behavioral
 -- Project Name: CNN Accelerator
 -- Description: Modular fully connected layer using separate components
 -- 
@@ -16,7 +16,7 @@ use IEEE.NUMERIC_STD.ALL;
 use work.types_pkg.all;
 use work.bias_pkg.all;
 
-entity fullcon_layer is
+entity fc_layer is
     generic (
         NODES_IN  : integer := 400;
         NODES_OUT : integer := 64;
@@ -40,9 +40,9 @@ entity fullcon_layer is
         
         layer_done   : out std_logic
     );
-end fullcon_layer;
+end fc_layer;
 
-architecture Behavioral of fullcon_layer is
+architecture Behavioral of fc_layer is
 
     -- Internal connection signals
     
@@ -75,7 +75,7 @@ architecture Behavioral of fullcon_layer is
 begin
 
     -- Weight Memory Controller
-    weight_mem_ctrl : entity work.fullcon_memory_controller
+    weight_mem_ctrl : entity work.fc_memory_controller
         generic map (
             NUM_NODES  => NODES_OUT,
             NUM_INPUTS => NODES_IN,
@@ -122,13 +122,13 @@ begin
     gen_check_layer5 : if LAYER_ID = 0 generate
     begin
         assert NODES_OUT = layer_5_dense_BIAS'length
-            report "fullcon_layer: NODES_OUT must equal layer_5_dense_BIAS length when LAYER_ID=0" severity failure;
+            report "fc_layer: NODES_OUT must equal layer_5_dense_BIAS length when LAYER_ID=0" severity failure;
     end generate;
     
     gen_check_layer6 : if LAYER_ID = 1 generate
     begin
         assert NODES_OUT = layer_6_dense_1_BIAS'length
-            report "fullcon_layer: NODES_OUT must equal layer_6_dense_1_BIAS length when LAYER_ID=1" severity failure;
+            report "fc_layer: NODES_OUT must equal layer_6_dense_1_BIAS length when LAYER_ID=1" severity failure;
     end generate;
 
     -- Add bias to calculation results before ReLU
@@ -175,7 +175,7 @@ begin
         );
 
     -- Main Controller FSM
-    controller : entity work.fullcon_controller
+    controller : entity work.fc_controller
         generic map (
             NODES_IN  => NODES_IN,
             NODES_OUT => NODES_OUT,

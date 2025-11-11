@@ -14,7 +14,6 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 use work.types_pkg.all;
-use work.bias_pkg.all;
 
 entity calc_index is
     generic (

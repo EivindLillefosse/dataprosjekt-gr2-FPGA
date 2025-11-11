@@ -4,7 +4,7 @@
 -- 
 -- Create Date: 11.03.2025
 -- Design Name: Fully Connected Memory Controller Testbench
--- Module Name: fullcon_memory_controller_tb - Behavioral
+-- Module Name: fc_memory_controller_tb - Behavioral
 -- Project Name: CNN Accelerator
 -- Target Devices: Xilinx FPGA
 -- Description: Testbench for fully connected weight memory controller
@@ -16,10 +16,10 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 use work.types_pkg.all;
 
-entity fullcon_memory_controller_tb is
-end fullcon_memory_controller_tb;
+entity fc_memory_controller_tb is
+end fc_memory_controller_tb;
 
-architecture Behavioral of fullcon_memory_controller_tb is
+architecture Behavioral of fc_memory_controller_tb is
 
     -- Test parameters
     -- Layer 0 (FC1): 400 inputs -> 64 outputs
@@ -49,7 +49,7 @@ architecture Behavioral of fullcon_memory_controller_tb is
 begin
 
     -- Unit Under Test - Layer 0 (FC1: 400 -> 64)
-    uut: entity work.fullcon_memory_controller
+    uut: entity work.fc_memory_controller
         generic map (
             NUM_NODES  => NUM_NODES_0,
             NUM_INPUTS => NUM_INPUTS_0,
@@ -62,7 +62,7 @@ begin
         );
 
     -- Second instance to test Layer 1 (FC2: 64 -> 10)
-    uut_layer1: entity work.fullcon_memory_controller
+    uut_layer1: entity work.fc_memory_controller
         generic map (
             NUM_NODES  => NUM_NODES_1,
             NUM_INPUTS => NUM_INPUTS_1,

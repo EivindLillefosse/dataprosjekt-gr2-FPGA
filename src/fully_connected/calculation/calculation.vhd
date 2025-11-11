@@ -32,7 +32,7 @@ entity calculation is
         compute_en   : in  std_logic;
         -- Results
         results      : out WORD_ARRAY_16(0 to NODES-1);
-        compute_done : out std_logic_vector(NODES-1 downto 0)
+        compute_done : out std_logic_vector(NODES-1 downto 0)  -- Optional monitoring
     );
 end calculation;
 
