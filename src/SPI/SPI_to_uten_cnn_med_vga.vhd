@@ -26,7 +26,7 @@ use IEEE.NUMERIC_STD.ALL;
 
 
 
-entity SPI_top is
+entity SPI_top_vga is
     Generic (
        
         IMAGE_WIDTH : integer := 28;
@@ -66,10 +66,10 @@ entity SPI_top is
     );
 
           
-end SPI_top;
+end SPI_top_vga;
 
 
-architecture Behavioral of SPI_top is
+architecture Behavioral of SPI_top_vga is
 
 signal data_out_spi_in_memory : std_logic_vector(WORD_SIZE-1 downto 0) := (others => '0');
 signal valid_out_spi_in_memory : std_logic := '0';

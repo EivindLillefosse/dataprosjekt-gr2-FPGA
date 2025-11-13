@@ -87,7 +87,7 @@ SPI_inst : entity work.SPI_top
         SCLK         => SCLK,
         CS_N         => CS_N,
         MOSI         => MOSI,
-        MISO         => MISO
+        MISO         => MISO,
 
         --VGA INTERFACE
         VGA_HS_O    => VGA_HS_O,
@@ -104,7 +104,7 @@ CNN_inst : entity work.CNN_top
     port map (
         clk       => clk,
         rst       => rst,
-        enable    => '1',
+       
 
         input_pixel      => data_rx,
         output_guess     => data_tx,
