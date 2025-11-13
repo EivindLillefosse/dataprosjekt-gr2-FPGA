@@ -61,7 +61,7 @@ entity cnn_top is
         input_req_ready  : in  std_logic;
 
         -- Data FROM input provider
-        input_pixel      : in  WORD_ARRAY_16(0 to CONV_1_INPUT_CHANNELS-1);
+        input_pixel      : in  WORD;
         input_valid      : in  std_logic;
         input_ready      : out std_logic;
 
@@ -441,8 +441,9 @@ begin
     input_req_valid  <= conv1_in_req_valid;
     conv1_in_req_ready <= input_req_ready;
 
+    
     -- Connect top-level input data to conv1's input data
-    conv1_pixel_in       <= input_pixel;
+    conv1_pixel_in(0) <= std_logic_vector(resize(signed(input_pixel), 16));
     conv1_pixel_in_valid <= input_valid;
     input_ready          <= conv1_pixel_in_ready;
 
