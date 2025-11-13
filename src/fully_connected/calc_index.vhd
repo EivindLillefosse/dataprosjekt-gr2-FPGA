@@ -95,8 +95,8 @@ begin
                             channel_counter <= 0;
                             data_valid <= '0';
                             
-                            if position_counter = NUM_POSITIONS - 2 then
-                                -- All positions done
+                            if position_counter = NUM_POSITIONS - 1 then
+                                -- All positions done (we just finished the last position)
                                 internal_done <= '1';
                             else
                                 -- Move to next position

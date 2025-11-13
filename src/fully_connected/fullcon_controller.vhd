@@ -44,7 +44,7 @@ end fullcon_controller;
 
 architecture RTL of fullcon_controller is
 
-    type state_type is (IDLE, PROCESSING, WAITING_MAC, DONE);
+    type state_type is (IDLE, WAIT_WEIGHTS, PROCESSING, WAITING_MAC, DONE);
     signal state        : state_type := IDLE;
     
     signal all_macs_done : std_logic;
@@ -77,6 +77,8 @@ begin
                         calc_compute_en <= '1';
                         state           <= WAITING_MAC;
                     end if;
+                when WAIT_WEIGHTS =>
+                    state <= PROCESSING;
                 
                 when PROCESSING =>
                     if input_valid = '1' then
@@ -94,7 +96,7 @@ begin
                             state <= DONE;
                         else
                             input_ready <= '1';
-                            state <= PROCESSING;
+                            state <= WAIT_WEIGHTS;
                         end if;
                     end if;
                 
