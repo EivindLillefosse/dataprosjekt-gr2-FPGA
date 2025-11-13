@@ -30,13 +30,13 @@ architecture sim of max_pooling_tb is
     signal pixel_in_req_valid  : std_logic;
     signal pixel_in_req_ready  : std_logic := '0';
     
-    -- Input data from upstream
-    signal pixel_in            : WORD_ARRAY(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
+    -- Input data from upstream (16-bit for Q9.6 format)
+    signal pixel_in            : WORD_ARRAY_16(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
     signal pixel_in_valid      : std_logic := '0';
     signal pixel_in_ready      : std_logic;
     
-    -- Output data to downstream
-    signal pixel_out           : WORD_ARRAY(0 to INPUT_CHANNELS-1);
+    -- Output data to downstream (16-bit for Q9.6 format)
+    signal pixel_out           : WORD_ARRAY_16(0 to INPUT_CHANNELS-1);
     signal pixel_out_valid     : std_logic;
     signal pixel_out_ready     : std_logic := '0';
     
@@ -154,9 +154,8 @@ begin
 
                     when PROV_SEND_DATA =>
                         for ch in 0 to INPUT_CHANNELS-1 loop
-                            pixel_in(ch) <= std_logic_vector(to_signed(
-                                TEST_MATRIX(pending_row, pending_col) + ch,
-                                WORD'length));
+                            pixel_in(ch) <= std_logic_vector(resize(to_signed(
+                                TEST_MATRIX(pending_row, pending_col) + ch, 8), 16));
                         end loop;
                         pixel_in_valid <= '1';
                         state          := PROV_IDLE;
@@ -168,17 +167,17 @@ begin
     -- Main test stimulus (acts as downstream consumer requesting outputs)
     stim_proc: process
         variable test_pass    : boolean := true;
-        variable tmp_result   : WORD_ARRAY(0 to INPUT_CHANNELS-1);
-        variable baseline     : WORD_ARRAY(0 to INPUT_CHANNELS-1);
+        variable tmp_result   : WORD_ARRAY_16(0 to INPUT_CHANNELS-1);
+        variable baseline     : WORD_ARRAY_16(0 to INPUT_CHANNELS-1);
 
         procedure execute_request(
             constant out_row      : integer;
             constant out_col      : integer;
             constant hold_cycles  : integer;
             constant tag          : string;
-            variable captured     : out WORD_ARRAY(0 to INPUT_CHANNELS-1);
+            variable captured     : out WORD_ARRAY_16(0 to INPUT_CHANNELS-1);
             variable local_status : inout boolean) is
-            variable first_capture : WORD_ARRAY(0 to INPUT_CHANNELS-1);
+            variable first_capture : WORD_ARRAY_16(0 to INPUT_CHANNELS-1);
             variable received_val  : integer;
             variable expected_val  : integer;
         begin

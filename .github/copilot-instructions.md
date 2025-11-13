@@ -359,6 +359,15 @@ Key flags:
 - `--layer`: Python layer key (for example `layer_0_output`, `layer_1_output`, `layer_2_output`). The script prints available keys when loading the NPZ.
 - `--vhdl_layer`: optional explicit VHDL layer type to filter (e.g. `final`, `layer0`, `layer1`, `layer2`) — useful when the TB emits `MODULAR_OUTPUT` entries which are parsed as type `final`.
 
+Note on bit-width parsing and TB format:
+
+- The comparison parser (`model/debug_comparison.py`) now respects the `--vhdl_bits` flag when interpreting raw numeric fields from the VHDL debug log. This controls the two's‑complement bit width used for signed conversion. Use `--vhdl_bits 16` when your TB prints Q9.6 (16‑bit) intermediate values.
+- If your TB prints decimal integers, make sure to pass the matching `--vhdl_bits` so values like `161` are interpreted as signed 16‑bit (161 → 161/64 = 2.515625) instead of being misinterpreted as 8‑bit. Alternatively, prefer printing hex values with an explicit tag (recommended):
+  - Example TB line: `Filter_4_hex: 0x00A1  dec: 161  bits:16`
+  - The parser recognises `Filter_<n>_hex:` patterns; hex with an explicit `bits` or `dec` field avoids ambiguity.
+
+If you want maximum robustness, change the TB debug prints to include both hex and decimal and a bits tag so the comparison tool can unambiguously parse the output.
+
 Interpreting results:
 
 - The script prints per-position per-filter comparisons and overall statistics (average error, max error, per-filter zero counts).

@@ -11,7 +11,7 @@ import re
 import os
 from typing import List, Dict, Any, Optional
 
-def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
+def parse_sim_output_file(filename: str, bits: int = 16) -> List[Dict[str, Any]]:
     """
     Parse Vivado simulation log and accept either:
       - machine-friendly lines like: SIM_OUT layer=layer0 r=0 c=1 filter=0 raw=0xffea scale=4096
@@ -30,6 +30,8 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
     layer0_re = re.compile(r'^LAYER0_CONV1_OUTPUT:\s*\[(\d+),(\d+)\]')
     layer1_re = re.compile(r'^LAYER1_POOL1_OUTPUT:\s*\[(\d+),(\d+)\]')
     layer2_re = re.compile(r'^LAYER2_CONV2_OUTPUT:\s*\[(\d+),(\d+)\]')
+    # Generic pattern to catch other layer debug tags e.g. LAYER3_POOL2_OUTPUT
+    generic_layer_re = re.compile(r'^LAYER(\d+)[A-Z0-9_]*_OUTPUT:\s*\[(\d+),(\d+)\]')
     filter_re1 = re.compile(r'^Filter[_ ]?(\d+):\s*([0-9A-Fa-fx\-]+)')
     filter_re2 = re.compile(r'^Filter\s+(\d+)\s*:\s*([0-9A-Fa-fx\-]+)')
     # New TB format: Filter_<i>_hex: 0x..  dec: N
@@ -100,7 +102,8 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
                         idx = int(m_hex.group(1))
                         hex_str = m_hex.group(2)
                         # Interpret as 8-bit two's complement
-                        current['filters'][idx] = parse_int(hex_str, bits=8)
+                        # Use provided bit-width for two's complement interpretation
+                        current['filters'][idx] = parse_int(hex_str, bits=bits)
                         current['raw_lines'].append(line)
                         continue
 
@@ -110,7 +113,7 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
                         idx = int(m_hexdec.group(1))
                         dec_str = m_hexdec.group(2)
                         # dec in TB is unsigned decimal; convert to signed 8-bit
-                        current['filters'][idx] = parse_int(dec_str, bits=8)
+                        current['filters'][idx] = parse_int(dec_str, bits=bits)
                         current['raw_lines'].append(line)
                         continue
 
@@ -119,7 +122,7 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
                     if m3:
                         idx = int(m3.group(1))
                         raw_str = m3.group(2)
-                        current['filters'][idx] = parse_int(raw_str)
+                        current['filters'][idx] = parse_int(raw_str, bits=bits)
                         current['raw_lines'].append(line)
                         continue
 
@@ -129,11 +132,11 @@ def parse_sim_output_file(filename: str) -> List[Dict[str, Any]]:
 
     return outputs
 
-def parse_vivado_log_file(filename: str) -> Dict[str, Any]:
+def parse_vivado_log_file(filename: str, bits: int = 16) -> Dict[str, Any]:
     """
     Backwards-compatible parser wrapper. Returns dict with 'inputs' and 'outputs'.
     """
-    outputs = parse_sim_output_file(filename)
+    outputs = parse_sim_output_file(filename, bits=bits)
     return {'inputs': [], 'outputs': outputs}
 
 def load_python_data(filename: str = "model/intermediate_values.npz"):
@@ -265,23 +268,15 @@ def find_best_scale_factor(python_data, vhdl_outputs):
 
 def analyze_scaling(output_scale_factor=64):
     """Analyze the scaling relationship between Q1.6 weights and outputs."""
-    print("\n=== Scaling Analysis ===")
-    print("Weight format: Q1.6 (scale = 64)")
+    # Condensed scaling summary
+    print("\n=== Scaling Summary ===")
     if output_scale_factor == 64:
-        print("Output format: Q1.6 (8-bit signed, scale = 64) [Post-ReLU]")
+        print("Outputs expected in Q1.6 (8-bit signed, scale=64) post-ReLU.")
     elif output_scale_factor == 1:
-        print("Output format: Raw integer values (no scaling)")
+        print("Outputs expected as raw integers (no scaling).")
     else:
-        print(f"Output format: 16-bit signed (scale = {output_scale_factor})")
-    print("\nExpected VHDL pipeline:")
-    print("  1. MAC: Σ(weight_Q1.6 × input_8bit) + bias_Q1.6 → 16-bit accumulator")
-    print("  2. Scaler: Right-shift by 6 bits with rounding → 8-bit Q1.6")
-    print("  3. ReLU: max(0, value) → 8-bit Q1.6 output")
-    print("\nQ1.6 format details:")
-    print("  - 8-bit signed: 1 integer bit + 6 fractional bits")
-    print("  - Range: [-2.0, +1.984375]")
-    print("  - Step size: 1/64 = 0.015625")
-    print("  - Example: value=4 → 4/64 = 0.0625")
+        print(f"Outputs expected as {output_scale_factor}-scale signed integers (bits vary).")
+    print("(Use --vhdl_scale and --vhdl_bits to adjust parser expectations.)")
 
 def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits=8, layer_key=None, vhdl_layer=None):
     """Compare Python and VHDL outputs at all positions.
@@ -305,7 +300,8 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
         'layer_0_output': 'layer0',
         'layer_1_output': 'layer1',
         'layer_2_output': 'layer2',
-        'layer_3_output': 'final',
+        # Pool2 (Python layer_3) is emitted as LAYER3_POOL2_OUTPUT in the TB
+        'layer_3_output': 'layer3',
         'cnn_output': 'final'
     }
 
@@ -346,11 +342,17 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
             return float(pyarr[r, c, fidx])
         # If 2D (H,W) and fidx==0
         if pyarr.ndim == 2:
-            return float(pyarr[r, c]) if fidx == 0 else 0.0
+            # Only valid when comparing a single-channel output
+            if fidx == 0:
+                return float(pyarr[r, c])
+            return 0.0
         # If 1D (dense)
         if pyarr.ndim == 1:
-            # interpret 'r' as flat index
-            return float(pyarr[fidx])
+            # Dense output: ensure filter index is within bounds
+            if 0 <= fidx < pyarr.shape[0]:
+                return float(pyarr[fidx])
+            # Out-of-range filter reported by VHDL; return 0.0 to allow comparison to continue
+            return 0.0
         # If 4D (batch,H,W,C) choose first batch element
         if pyarr.ndim == 4:
             return float(pyarr[0, r, c, fidx])
@@ -360,7 +362,8 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
     print("\nPosition | Filter | Python   | VHDL(float) | VHDL(raw) | Error    | Rel.Err")
     print("---------|--------|----------|-------------|-----------|----------|--------")
 
-    # Show first N positions for quick debugging
+    # Show first N positions for quick debugging (non-mutating display)
+    display_count = 0
     for output in vhdl_outputs[:10]:
         row, col = output['row'], output['col']
         for filter_idx, vhdl_raw in output['filters'].items():
@@ -373,23 +376,9 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
             error = abs(python_val - vhdl_relu)
             rel_error = (error / max(abs(python_val), 0.001)) * 100
 
-            total_error += error
-            total_abs_error += abs(error)
-            valid_comparisons += 1
-
-            if error > max_error:
-                max_error = error
-                max_error_pos = (row, col, filter_idx)
-
-            if filter_idx not in filter_errors:
-                filter_errors[filter_idx] = {'count': 0, 'total_error': 0.0, 'zero_count': 0}
-            filter_errors[filter_idx]['count'] += 1
-            filter_errors[filter_idx]['total_error'] += error
-            if vhdl_raw == 0:
-                filter_errors[filter_idx]['zero_count'] += 1
-
-            if valid_comparisons <= 80:
+            if display_count < 80:
                 print(f"[{row:2d},{col:2d}] |   {filter_idx}    | {python_val:8.5f} | {vhdl_relu:11.5f} | {vhdl_raw:9d} | {error:8.5f} | {rel_error:6.1f}%")
+                display_count += 1
 
     # Now compute aggregate statistics across all reported VHDL outputs
     for output in vhdl_outputs:
@@ -429,15 +418,14 @@ def compare_outputs(python_data, vhdl_outputs, output_scale_factor=64, vhdl_bits
         print(f"Average Abs Error: {avg_abs_error:.6f}")
         print(f"Max Error:         {max_error:.6f} at position {max_error_pos}")
 
-        print(f"\nPer-Filter Analysis:")
+        print(f"Per-Filter Analysis:")
         print(f"Filter | Avg Error | Zero Count | Total Samples")
         print(f"-------|-----------|------------|---------------")
         for filt_idx in sorted(filter_errors.keys()):
             stats = filter_errors[filt_idx]
             avg_f_error = stats['total_error'] / stats['count'] if stats['count'] > 0 else 0
             zero_pct = (stats['zero_count'] / stats['count'] * 100) if stats['count'] > 0 else 0
-            status = "⚠️ ALWAYS ZERO!" if zero_pct == 100 else f"{zero_pct:5.1f}% zeros"
-            print(f"  {filt_idx}    | {avg_f_error:9.6f} | {stats['zero_count']:4d}/{stats['count']:4d} | {status}")
+            print(f"  {filt_idx:3d}  | {avg_f_error:9.6f} | {stats['zero_count']:4d}/{stats['count']:4d} | {zero_pct:5.1f}% zeros")
 
         print(f"\nQuantization Summary:")
         print(f"  - Weights: Q1.6 format (8-bit signed, scale = 64)")
@@ -465,7 +453,7 @@ def main():
     args = parser.parse_args()
 
     npz_archive = load_python_data(args.npz)
-    parsed = parse_vivado_log_file(args.vivado)
+    parsed = parse_vivado_log_file(args.vivado, bits=args.vhdl_bits)
     vhdl_outputs = parsed.get('outputs', [])
 
     if npz_archive is None:
@@ -515,11 +503,7 @@ def main():
         print(f"⚠ Configuration: VHDL scale={args.vhdl_scale}, bits={args.vhdl_bits}")
         print("  Expected: --vhdl_scale 64 --vhdl_bits 8 for Q1.6 format")
     
-    print("\nTroubleshooting:")
-    print("- If error > 0.05: Check that Python model uses same test image")
-    print("- If specific filters always zero: Check weight memory packing/addressing")
-    print("- If systematic offset: Verify bias values and input scaling match")
-    print("- Critical: Ensure Python uses [0-255] OR VHDL uses normalized [0-1] inputs!")
+    # End: no troubleshooting noise by default. The user can inspect per-filter stats and raw_lines in output files.
 
 if __name__ == "__main__":
     main()

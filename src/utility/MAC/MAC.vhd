@@ -48,7 +48,7 @@ end MAC;
 architecture RTL of MAC is
    signal reg_pixel_in   : signed(WIDTH_A-1 downto 0) := (others => '0');
    signal reg_weights    : signed(WIDTH_B-1 downto 0) := (others => '0');
-   signal reg_mult       : signed((WIDTH_A+WIDTH_B)-1 downto 0) := (others => '0');
+   signal reg_mult       : signed(WIDTH_P-1 downto 0) := (others => '0');
    signal adder_out      : signed(WIDTH_P-1 downto 0) := (others => '0');
    signal old_result     : signed(WIDTH_P-1 downto 0) := (others => '0');
    signal running        : STD_LOGIC := '0';
@@ -96,7 +96,8 @@ begin
                
                when 1 =>
                   -- Cycle 1: multiply (using registered operands from cycle 0)
-                  reg_mult <= reg_pixel_in * reg_weights;
+                  -- Resize the product to WIDTH_P to truncate/fit the accumulator width
+                  reg_mult <= resize(reg_pixel_in * reg_weights, WIDTH_P);
                
                when 2 =>
                   -- Cycle 2: accumulate (using multiply result from cycle 1)

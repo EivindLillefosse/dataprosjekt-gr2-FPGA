@@ -39,14 +39,20 @@ entity cnn_top is
         CONV_2_BLOCK_SIZE     : integer := 2;
 
         -- Parameters for 2nd pooling layer
-        POOL_2_BLOCK_SIZE     : integer := 2
+        POOL_2_BLOCK_SIZE     : integer := 2;
+        
+        -- Parameters for fully connected layers
+        FC1_NODES_IN      : integer := (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
+                                        (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
+                                        CONV_2_NUM_FILTERS;  -- 5*5*16 = 400
+        FC1_NODES_OUT     : integer := 64;
+        FC2_NODES_OUT     : integer := 10  -- Final classification output
     
     );
     port (
         -- Control signals
         clk          : in  std_logic;
         rst          : in  std_logic;
-        enable       : in  std_logic;
 
         -- Request TO input provider (what input positions we need)
         input_req_row    : out integer;
@@ -55,12 +61,12 @@ entity cnn_top is
         input_req_ready  : in  std_logic;
 
         -- Data FROM input provider
-        input_pixel      : in  WORD;
+        input_pixel      : in  WORD_ARRAY_16(0 to CONV_1_INPUT_CHANNELS-1);
         input_valid      : in  std_logic;
         input_ready      : out std_logic;
 
         -- Data TO external consumer (final output)
-        output_guess     : out WORD;
+        output_guess     : out WORD;  -- Final classification (after argmax)
         output_valid     : out std_logic;
         output_ready     : in  std_logic
     );
@@ -79,11 +85,11 @@ architecture Structural of cnn_top is
     signal conv1_in_req_valid   : std_logic;
     signal conv1_in_req_ready   : std_logic;
     
-    signal conv1_pixel_out      : WORD_ARRAY(0 to CONV_1_NUM_FILTERS-1);
+    signal conv1_pixel_out      : WORD_ARRAY_16(0 to CONV_1_NUM_FILTERS-1);
     signal conv1_pixel_out_valid: std_logic;
     signal conv1_pixel_out_ready: std_logic;
     
-    signal conv1_pixel_in       : WORD_ARRAY(0 to CONV_1_INPUT_CHANNELS-1);
+    signal conv1_pixel_in       : WORD_ARRAY_16(0 to CONV_1_INPUT_CHANNELS-1);
     signal conv1_pixel_in_valid : std_logic;
     signal conv1_pixel_in_ready : std_logic;
 
@@ -98,7 +104,7 @@ architecture Structural of cnn_top is
     signal pool1_in_req_valid   : std_logic;
     signal pool1_in_req_ready   : std_logic;
     
-    signal pool1_pixel_out      : WORD_ARRAY(0 to CONV_1_NUM_FILTERS-1);
+    signal pool1_pixel_out      : WORD_ARRAY_16(0 to CONV_1_NUM_FILTERS-1);
     signal pool1_pixel_out_valid: std_logic;
     signal pool1_pixel_out_ready: std_logic;
 
@@ -113,22 +119,49 @@ architecture Structural of cnn_top is
     signal conv2_in_req_valid   : std_logic;
     signal conv2_in_req_ready   : std_logic;
     
-    signal conv2_pixel_out      : WORD_ARRAY(0 to CONV_2_NUM_FILTERS-1);
+    signal conv2_pixel_out      : WORD_ARRAY_16(0 to CONV_2_NUM_FILTERS-1);
     signal conv2_pixel_out_valid: std_logic;
     signal conv2_pixel_out_ready: std_logic;
 
-    -- Signals between pool2 and output (request/response protocol)
-    signal pool2_in_req_row     : integer;
-    signal pool2_in_req_col     : integer;
-    signal pool2_in_req_valid   : std_logic;
-    signal pool2_in_req_ready   : std_logic;
+    -- Signals between pool2 and calc_index
+    signal pool2_pixel_out       : WORD_ARRAY_16(0 to CONV_2_NUM_FILTERS-1);
+    signal pool2_pixel_out_valid : std_logic;
+    signal pool2_pixel_out_ready : std_logic;
     
-    -- Output signals (not connected, just declared)
-    signal output_req_row       : integer;
-    signal output_req_col       : integer;
-    signal output_req_valid     : std_logic;
-    signal output_req_ready     : std_logic;
-    signal output_pixel         : WORD_ARRAY(0 to CONV_2_NUM_FILTERS-1);
+    signal pool2_in_req_row      : integer;
+    signal pool2_in_req_col      : integer;
+    signal pool2_in_req_valid    : std_logic;
+    signal pool2_in_req_ready    : std_logic;
+
+    -- Signals between calc_index and fc1
+    signal calc_index_enable     : std_logic;
+    signal calc_req_row          : integer;
+    signal calc_req_col          : integer;
+    signal calc_req_valid        : std_logic;
+    signal calc_fc_pixel         : WORD_16;
+    signal calc_fc_valid         : std_logic;
+    signal calc_curr_index       : integer range 0 to FC1_NODES_IN-1;
+    signal calc_done             : std_logic;
+
+    -- Signals for FC1 output
+    signal fc1_out_valid         : std_logic;
+    signal fc1_out_ready         : std_logic;
+    signal fc1_out_data          : WORD_ARRAY_16(0 to FC1_NODES_OUT-1);
+    signal fc1_in_ready          : std_logic;
+    -- Signals for sequencer between FC1 and FC2 (mirror cnn_debug)
+    signal seq_input_valid       : std_logic;
+    signal seq_input_ready       : std_logic;
+    signal seq_input_data        : WORD_ARRAY_16(0 to FC1_NODES_OUT-1);
+    
+    signal seq_output_valid      : std_logic;
+    signal seq_output_ready      : std_logic;
+    signal seq_output_data       : WORD_16;
+    signal seq_output_index      : integer range 0 to FC1_NODES_OUT-1;
+
+    -- Signals for FC2 output
+    signal fc2_out_valid         : std_logic;
+    signal fc2_out_data          : WORD_ARRAY_16(0 to FC2_NODES_OUT-1);
+    signal fc2_in_ready          : std_logic;
 
 begin
     -- Instantiate 1st convolution layer
@@ -145,7 +178,6 @@ begin
         port map (
             clk                 => clk,
             rst                 => rst,
-            enable              => enable,
 
             -- Request FROM pool1 (what output position pool1 needs)
             pixel_out_req_row   => conv1_out_req_row,
@@ -224,7 +256,6 @@ begin
         port map (
             clk                 => clk,
             rst                 => rst,
-            enable              => enable,
             
             -- Request FROM pool2 (what output position pool2 needs)
             pixel_out_req_row   => conv2_out_req_row,
@@ -255,7 +286,13 @@ begin
     pool1_out_req_valid <= conv2_in_req_valid;
     conv2_in_req_ready  <= pool1_out_req_ready;
 
-    -- Instantiate 2nd Pooling layer (final output)
+    -- Connect pool2 output requests to conv2 input requests
+    conv2_out_req_row   <= pool2_in_req_row;
+    conv2_out_req_col   <= pool2_in_req_col;
+    conv2_out_req_valid <= pool2_in_req_valid;
+    pool2_in_req_ready  <= conv2_out_req_ready;
+
+    -- Instantiate 2nd Pooling layer
     pooling_layer2: entity work.max_pooling
         generic map (
             INPUT_SIZE     => ((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE),
@@ -266,11 +303,11 @@ begin
             clk                 => clk,
             rst                 => rst,
             
-            -- Request FROM external controller
-            pixel_out_req_row   => output_req_row,
-            pixel_out_req_col   => output_req_col,
-            pixel_out_req_valid => output_req_valid,
-            pixel_out_req_ready => output_req_ready,
+            -- Request FROM calc_index (what output position calc_index needs)
+            pixel_out_req_row   => calc_req_row,
+            pixel_out_req_col   => calc_req_col,
+            pixel_out_req_valid => calc_req_valid,
+            pixel_out_req_ready => open,  -- calc_index doesn't need ready
 
             -- Request TO conv2
             pixel_in_req_row    => pool2_in_req_row,
@@ -283,17 +320,120 @@ begin
             pixel_in_valid      => conv2_pixel_out_valid,
             pixel_in_ready      => conv2_pixel_out_ready,
 
-            -- Data TO external consumer
-            pixel_out           => output_pixel,
-            pixel_out_valid     => output_valid,
-            pixel_out_ready     => output_ready
+            -- Data TO calc_index (all 16 channels)
+            pixel_out           => pool2_pixel_out,
+            pixel_out_valid     => pool2_pixel_out_valid,
+            pixel_out_ready     => pool2_pixel_out_ready
         );
 
-    -- Connect pool2 output requests to conv2 input requests
-    conv2_out_req_row   <= pool2_in_req_row;
-    conv2_out_req_col   <= pool2_in_req_col;
-    conv2_out_req_valid <= pool2_in_req_valid;
-    pool2_in_req_ready  <= conv2_out_req_ready;
+    -- Instantiate calc_index (flattens 3D tensor to 1D for FC layer)
+    calc_index_inst: entity work.calc_index
+        generic map (
+            NODES_IN       => FC1_NODES_IN,      -- 400
+            INPUT_CHANNELS => CONV_2_NUM_FILTERS, -- 16
+            INPUT_SIZE     => (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE)  -- 5
+        )
+        port map (
+            clk             => clk,
+            rst             => rst,
+            enable          => calc_index_enable,
+            
+            -- Request TO pool2
+            req_row         => calc_req_row,
+            req_col         => calc_req_col,
+            req_valid       => calc_req_valid,
+            
+            -- Input FROM pool2 (all 16 channels at once)
+            pool_pixel_data => pool2_pixel_out,
+            pool_pixel_valid => pool2_pixel_out_valid,
+            pool_pixel_ready => pool2_pixel_out_ready,
+            
+            -- Output TO fc1 (selected single channel pixel)
+            fc_pixel_out    => calc_fc_pixel,
+            fc_pixel_valid  => calc_fc_valid,
+            fc_pixel_ready  => fc1_in_ready,
+            
+            curr_index      => calc_curr_index,
+            done            => calc_done
+        );
+
+    -- Enable calc_index (always enabled in this top-level)
+    calc_index_enable <= '1';
+
+    -- Instantiate FC1 layer (400 inputs -> 64 outputs)
+    fc1_inst: entity work.fullyconnected
+        generic map (
+            NODES_IN  => FC1_NODES_IN,   -- 400
+            NODES_OUT => FC1_NODES_OUT,  -- 64
+            LAYER_ID  => 0               -- First FC layer (uses layer_5_dense weights/biases)
+        )
+        port map (
+            clk             => clk,
+            rst             => rst,
+            
+            -- Input FROM calc_index
+            pixel_in_valid  => calc_fc_valid,
+            pixel_in_ready  => fc1_in_ready,
+            pixel_in_data   => calc_fc_pixel,
+            pixel_in_index  => calc_curr_index,
+            
+            -- Output TO sequencer
+            pixel_out_valid => fc1_out_valid,
+            pixel_out_ready => seq_input_ready,
+            pixel_out_data  => fc1_out_data
+        );
+
+    -- Sequencer between FC1 and FC2 (use fc_sequencer as in debug top)
+    fc_sequencer: entity work.fc_sequencer
+        generic map (
+            NUM_NEURONS => FC1_NODES_OUT  -- 64
+        )
+        port map (
+            clk          => clk,
+            rst          => rst,
+            
+            -- Input FROM FC1
+            input_valid  => seq_input_valid,
+            input_ready  => seq_input_ready,
+            input_data   => seq_input_data,
+            
+            -- Output TO FC2
+            output_valid => seq_output_valid,
+            output_ready => seq_output_ready,
+            output_data  => seq_output_data,
+            output_index => seq_output_index
+        );
+
+    -- Instantiate FC2 layer (64 inputs -> 10 outputs)
+    fc2_inst: entity work.fullyconnected
+        generic map (
+            NODES_IN  => FC1_NODES_OUT,  -- 64
+            NODES_OUT => FC2_NODES_OUT,  -- 10
+            LAYER_ID  => 1               -- Second FC layer (uses layer_6_dense_1 weights/biases)
+        )
+        port map (
+            clk             => clk,
+            rst             => rst,
+            
+            -- Input FROM buffer sequencer
+            pixel_in_valid  => seq_output_valid,
+            pixel_in_ready  => seq_output_ready,
+            pixel_in_data   => seq_output_data,
+            pixel_in_index  => seq_output_index,
+            
+            -- Output (FC2 doesn't use input ready signal)
+            pixel_out_valid => fc2_out_valid,
+            pixel_out_ready => output_ready,  -- Tie to top-level consumer ready
+            pixel_out_data  => fc2_out_data
+        );
+
+    -- Interconnect: FC1 -> Sequencer
+    seq_input_valid <= fc1_out_valid;
+    seq_input_data  <= fc1_out_data;
+    
+    -- Placeholder for output_guess (will be driven by argmax)
+    output_guess  <= fc2_out_data(0)(7 downto 0);
+    output_valid  <= fc2_out_valid;  -- Use FC2 valid for final output
 
     -- Connect top-level input requests to conv1's input requests
     input_req_row    <= conv1_in_req_row;

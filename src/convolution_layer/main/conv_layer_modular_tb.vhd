@@ -47,7 +47,6 @@ architecture Behavioral of conv_layer_modular_tb is
     -- UUT signals
     signal clk : STD_LOGIC := '0';
     signal rst : STD_LOGIC := '0';
-    signal enable : STD_LOGIC := '0';
     
     -- Output request TO DUT (testbench acts as downstream)
     signal pixel_out_req_row   : integer := 0;
@@ -61,13 +60,13 @@ architecture Behavioral of conv_layer_modular_tb is
     signal pixel_in_req_valid  : std_logic;
     signal pixel_in_req_ready  : std_logic := '0';
     
-    -- Input data TO DUT
-    signal pixel_in            : WORD_ARRAY(0 to INPUT_CHANNELS-1);
+    -- Input data TO DUT (16-bit for flexibility, lower 8 bits used for Layer 0)
+    signal pixel_in            : WORD_ARRAY_16(0 to INPUT_CHANNELS-1);
     signal pixel_in_valid      : std_logic := '0';
     signal pixel_in_ready      : std_logic;
     
-    -- Output data FROM DUT
-    signal pixel_out           : WORD_ARRAY(0 to NUM_FILTERS-1);
+    -- Output data FROM DUT (16-bit outputs)
+    signal pixel_out           : WORD_ARRAY_16(0 to NUM_FILTERS-1);
     signal pixel_out_valid     : std_logic;
     signal pixel_out_ready     : std_logic := '0';
     
@@ -345,7 +344,6 @@ begin
         port map (
             clk                 => clk,
             rst                 => rst,
-            enable              => enable,
             pixel_out_req_row   => pixel_out_req_row,
             pixel_out_req_col   => pixel_out_req_col,
             pixel_out_req_valid => pixel_out_req_valid,
@@ -396,8 +394,8 @@ begin
                     -- Provide data from test image
                     if pending_row >= 0 and pending_row < IMAGE_SIZE and 
                        pending_col >= 0 and pending_col < IMAGE_SIZE then
-                        -- Valid pixel
-                        pixel_in(0) <= std_logic_vector(to_unsigned(test_image(pending_row, pending_col), 8));
+                        -- Valid pixel (extend 8-bit to 16-bit for Layer 0 compatibility)
+                        pixel_in(0) <= std_logic_vector(resize(to_unsigned(test_image(pending_row, pending_col), 8), 16));
                         report "Upstream: Providing pixel [" & integer'image(pending_row) & "," & 
                                integer'image(pending_col) & "] = " & 
                                integer'image(test_image(pending_row, pending_col)) severity note;
@@ -465,8 +463,8 @@ begin
                 write(debug_line, ']');
                 writeline(debug_file, debug_line);
 
-                -- Output meta: include scale & bitwidth so external parsers know how to interpret values
-                write(debug_line, string'("OUTPUT_META: scale=64 bits=8"));
+                -- Output meta: 16-bit outputs (Q2.12 format before final scaling)
+                write(debug_line, string'("OUTPUT_META: scale=4096 bits=16"));
                 writeline(debug_file, debug_line);
 
                 for i in 0 to NUM_FILTERS-1 loop
@@ -491,9 +489,8 @@ begin
         constant OUT_SIZE : integer := IMAGE_SIZE - KERNEL_SIZE + 1;  -- 28-3+1=26
         variable received_val : integer;
     begin
-        -- Initialize
-        rst <= '1';
-        enable <= '0';
+    -- Initialize
+    rst <= '1';
         pixel_out_req_valid <= '0';
         pixel_out_ready <= '0';
         
@@ -506,8 +503,7 @@ begin
         report "Test image ready - first pixel value: " & integer'image(test_image(0,0));
         report "Output size: " & integer'image(OUT_SIZE) & "x" & integer'image(OUT_SIZE);
         
-        -- Start the convolution
-        enable <= '1';
+    -- Start the convolution
         
         -- Request all output positions
         for out_row in 0 to OUT_SIZE-1 loop
@@ -553,8 +549,7 @@ begin
         wait for CLK_PERIOD * 5;
         
         -- Test multiple runs (request a few more positions to verify)
-        report "Testing second MODULAR convolution run...";
-        enable <= '1';
+    report "Testing second MODULAR convolution run...";
         
         -- Request a few more output positions
         for i in 0 to 4 loop

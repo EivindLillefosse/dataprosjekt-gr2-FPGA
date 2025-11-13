@@ -104,13 +104,13 @@ begin
 
     -- Convert BRAM output into WORD_ARRAY elements (WORD_SIZE bits per filter)
     -- Each WORD in the output corresponds to one filter's weight.
-    -- Python packs LSB-first: filter 0 at bits [7:0], filter 1 at [15:8], etc.
-    -- So weight_data(0) receives the BOTTOM WORD (bits WORD_SIZE-1 downto 0)
-    -- and weight_data(NUM_FILTERS-1) receives the TOP WORD (bits WORD_SIZE*NUM_FILTERS-1 downto WORD_SIZE*(NUM_FILTERS-1)).
+    -- COE/BRAM uses MSB-first packing for our export: filter 0 is at the TOP WORD
+    -- (bits WORD_SIZE*NUM_FILTERS-1 downto WORD_SIZE*(NUM_FILTERS-1)), and
+    -- filter NUM_FILTERS-1 is at the BOTTOM (bits WORD_SIZE-1 downto 0).
+    -- Map accordingly so weight_data(0) receives the TOP WORD.
     gen_unpack_weights : for i in 0 to NUM_FILTERS-1 generate
-        -- LSB-first ordering: map weight_data(0) to the bottom WORD, weight_data(1)
-        -- to the next WORD up, etc.
-        weight_data(i) <= weight_dout(i*WORD_SIZE + WORD_SIZE - 1 downto i*WORD_SIZE);
+        -- MSB-first ordering: top-most WORD corresponds to filter 0
+        weight_data(i) <= weight_dout(WORD_SIZE*NUM_FILTERS-1 - i*WORD_SIZE downto WORD_SIZE*NUM_FILTERS - (i+1)*WORD_SIZE);
     end generate;
 
     -- Calculate weight address for the kernel position and channel

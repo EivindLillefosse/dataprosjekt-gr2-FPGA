@@ -19,14 +19,14 @@ use work.types_pkg.all;
 entity relu_layer is
     generic (
         NUM_FILTERS : integer := 8;
-        DATA_WIDTH  : integer := 8
+        DATA_WIDTH  : integer := 16
     );
     port (
         clk         : in  std_logic;
         rst         : in  std_logic;
-        data_in     : in  WORD_ARRAY(0 to NUM_FILTERS-1);
+        data_in     : in  WORD_ARRAY_16(0 to NUM_FILTERS-1);
         data_valid  : in  std_logic;
-        data_out    : out WORD_ARRAY(0 to NUM_FILTERS-1);
+        data_out    : out WORD_ARRAY_16(0 to NUM_FILTERS-1);
         valid_out   : out std_logic
     );
 end relu_layer;

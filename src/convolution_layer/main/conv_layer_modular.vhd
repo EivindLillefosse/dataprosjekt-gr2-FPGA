@@ -30,7 +30,6 @@ entity conv_layer_modular is
     Port ( 
         clk            : in STD_LOGIC;
         rst            : in STD_LOGIC;
-        enable         : in STD_LOGIC;
 
         -- Request FROM downstream (what output position is needed)
         pixel_out_req_row   : in  integer;                             -- Requested output row
@@ -45,18 +44,24 @@ entity conv_layer_modular is
         pixel_in_req_ready  : in  std_logic;                           -- Upstream ready for request
 
         -- Data FROM upstream (input pixels)
-        pixel_in            : in  WORD_ARRAY(0 to INPUT_CHANNELS-1);   -- Input pixel data
+        -- For LAYER_ID=0: Use lower 8 bits of each 16-bit word
+        -- For LAYER_ID=1: Use full 16 bits
+        pixel_in            : in  WORD_ARRAY_16(0 to INPUT_CHANNELS-1);   -- Input pixel data (16-bit for flexibility)
         pixel_in_valid      : in  std_logic;                           -- Input data valid
         pixel_in_ready      : out std_logic;                           -- Ready to accept input data
 
         -- Data TO downstream (output result)
-        pixel_out           : out WORD_ARRAY(0 to NUM_FILTERS-1);     -- Output pixel data
+        pixel_out           : out WORD_ARRAY_16(0 to NUM_FILTERS-1);     -- Output pixel data
         pixel_out_valid     : out std_logic;                           -- Output data valid
         pixel_out_ready     : in  std_logic                            -- Downstream ready for data
     );
 end conv_layer_modular;
 
 architecture Behavioral of conv_layer_modular is
+    constant INPUT_WIDTH : integer := 8 when LAYER_ID = 0 else 16;
+    
+    -- Flattened pixel data for convolution engine
+    signal pixel_in_flat : std_logic_vector(INPUT_CHANNELS * INPUT_WIDTH - 1 downto 0);
 
     -- Internal connection signals
     
@@ -91,18 +96,16 @@ architecture Behavioral of conv_layer_modular is
     signal conv_results : WORD_ARRAY_16(0 to NUM_FILTERS-1);
     
     -- ReLU activation signals
-    signal relu_data_out : WORD_ARRAY(0 to NUM_FILTERS-1); 
+    signal relu_data_out : WORD_ARRAY_16(0 to NUM_FILTERS-1); 
     signal relu_valid_out : std_logic;
 
     -- Bias registers and biased result signals (local flexible type sized by NUM_FILTERS)
     type bias_local_t is array (natural range <>) of signed(7 downto 0);
     signal bias_regs : bias_local_t(0 to NUM_FILTERS-1);
     signal biased_results : WORD_ARRAY_16(0 to NUM_FILTERS-1);
-    
-    -- Q-format scaling signals (Q2.12 -> Q1.6)
-    signal scaler_valid_in  : std_logic;
-    signal scaler_data_out  : WORD_ARRAY(0 to NUM_FILTERS-1);
-    signal scaler_valid_out : std_logic;
+    signal biased_valid : std_logic;
+    -- Input to the ReLU block: biased_results shifted right by 6 (convert to Q1.6)
+    signal relu_input : WORD_ARRAY_16(0 to NUM_FILTERS-1);
 
     -- Internal signal to capture controller's notion of output_valid (not used to drive module output)
     signal ctrl_output_valid : std_logic := '0';
@@ -110,6 +113,18 @@ architecture Behavioral of conv_layer_modular is
     -- Biases are provided by bias_pkg (generated from Python export)
 
 begin
+
+    -- Flatten input pixels for convolution engine based on layer width
+    flatten_inputs: for i in 0 to INPUT_CHANNELS-1 generate
+        gen_layer0: if LAYER_ID = 0 generate
+            -- Layer 0: Use lower 8 bits only
+            pixel_in_flat((i+1)*INPUT_WIDTH-1 downto i*INPUT_WIDTH) <= pixel_in(i)(7 downto 0);
+        end generate;
+        gen_layer1: if LAYER_ID = 1 generate
+            -- Layer 1: Use full 16 bits
+            pixel_in_flat((i+1)*INPUT_WIDTH-1 downto i*INPUT_WIDTH) <= pixel_in(i);
+        end generate;
+    end generate;
 
     -- Handle output position requests from downstream
     -- When downstream requests an output position, store it and let the position calculator
@@ -197,14 +212,14 @@ begin
         generic map (
             NUM_FILTERS => NUM_FILTERS,
             INPUT_CHANNELS => INPUT_CHANNELS,
-            MAC_DATA_WIDTH => 8,
+            MAC_DATA_WIDTH => INPUT_WIDTH,
             MAC_RESULT_WIDTH => 16
         )
         port map (
             clk => clk,
             rst => rst,
             clear => compute_clear,
-            pixel_data => pixel_in,
+            pixel_data => pixel_in_flat,
             channel_index => weight_channel,
             weight_data => weight_data,
             compute_en => compute_en,
@@ -238,45 +253,46 @@ begin
             report "conv_layer_modular: NUM_FILTERS must equal layer_2_conv2d_1_BIAS length when LAYER_ID=1" severity failure;
     end generate;
 
+    -- Drive relu_input from biased_results using a generate (portable VHDL)
+    -- Only instantiate the shifting logic for the layers that use 16-bit biased_results (LAYER_ID = 1)
+    gen_relu_input_layer1 : if LAYER_ID = 1 generate
+        gen_relu_input : for i in 0 to NUM_FILTERS-1 generate
+        begin
+            -- Optionally add rounding: shift_right(signed(biased_results(i)) + to_signed(32, 16), 6)
+            relu_input(i) <= std_logic_vector( shift_right( signed(conv_results(i)), 6 ) );
+        end generate;
+    end generate;
+
+    -- Fallback: for other layer IDs (e.g. LAYER_ID = 0) drive relu_input from biased_results
+    -- scaled/converted appropriately or default to zero to avoid undriven signals. Here we
+    -- simply map the lower 8 bits into the 16-bit word for LAYER_ID = 0 so the signal remains
+    -- well-defined. Adjust if a different behavior is required.
+    gen_relu_input_other : if LAYER_ID = 0 generate
+            relu_input <= conv_results;
+    end generate;
+
     -- Add bias to convolution results before ReLU
     -- CRITICAL: Convert bias from Q1.6 to Q2.12 before adding to conv results
-    biased_results_proc: process(conv_results, bias_regs)
+    biased_results_proc: process(relu_input, bias_regs)
     begin
         for i in 0 to NUM_FILTERS-1 loop
-            -- Add bias in Q2.12 format to conv_results (which are Q2.12)
-            biased_results(i) <= std_logic_vector(signed(conv_results(i)) + resize(bias_regs(i), 16));
+            -- Then add bias in Q1.6 format to get final Q2.12 biased result
+            biased_results(i) <= std_logic_vector(signed(relu_input(i)) + resize(bias_regs(i), 16));
         end loop;
     end process;
 
-    -- Q-Format Scaler: Q2.12 -> Q1.6
-    -- Scales down the biased results before ReLU activation
-    q_scale : entity work.q_scaler
-        generic map (
-            NUM_CHANNELS => NUM_FILTERS,
-            INPUT_WIDTH  => 16,  -- Q2.12
-            OUTPUT_WIDTH => 8,   -- Q1.6
-            SHIFT_AMOUNT => 6    -- 12 - 6 = 6 bits to shift
-        )
-        port map (
-            clk       => clk,
-            rst       => rst,
-            data_in   => biased_results,
-            valid_in  => scaler_valid_in,
-            data_out  => scaler_data_out,
-            valid_out => scaler_valid_out
-        );
 
-    -- ReLU Activation Layer (takes scaled Q1.6 results)
+    -- ReLU Activation Layer (takes 16-bit inputs in Q1.6)
     relu : entity work.relu_layer
         generic map (
             NUM_FILTERS => NUM_FILTERS,
-            DATA_WIDTH => 8  
+            DATA_WIDTH => 16  -- Changed from 8 to 16
         )
         port map (
             clk => clk,
             rst => rst,
-            data_in => scaler_data_out,
-            data_valid => scaler_valid_out,
+            data_in => relu_input,
+            data_valid => biased_valid,
             data_out => relu_data_out,
             valid_out => relu_valid_out
         );
@@ -315,9 +331,9 @@ begin
             compute_clear => compute_clear,
             compute_done => compute_done,
 
-            -- Scaler 
-            scaled_ready => scaler_valid_in,
-            scaled_done  => scaler_valid_out,
+            -- Biased results ready signal
+            scaled_ready => biased_valid,
+            scaled_done  => relu_valid_out,
 
             -- Output interface (mapped to new request/response signals)
             output_valid => ctrl_output_valid,

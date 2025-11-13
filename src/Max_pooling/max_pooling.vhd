@@ -47,12 +47,12 @@ entity max_pooling is
         pixel_in_req_ready  : in  std_logic;                           -- Upstream ready for request
 
         -- Data FROM upstream (input pixels)
-        pixel_in            : in  WORD_ARRAY(0 to INPUT_CHANNELS-1);   -- Input pixel data
+        pixel_in            : in  WORD_ARRAY_16(0 to INPUT_CHANNELS-1);   -- Input pixel data
         pixel_in_valid      : in  std_logic;                           -- Input data valid
         pixel_in_ready      : out std_logic;                           -- Ready to accept input data
 
         -- Data TO downstream (output result)
-        pixel_out           : out WORD_ARRAY(0 to INPUT_CHANNELS-1);  -- Output pixel data
+        pixel_out           : out WORD_ARRAY_16(0 to INPUT_CHANNELS-1);  -- Output pixel data
         pixel_out_valid     : out std_logic;                           -- Output data valid
         pixel_out_ready     : in  std_logic                            -- Downstream ready for data
     );
@@ -67,8 +67,8 @@ architecture Behavioral of max_pooling is
     type state_type is (IDLE, REQUEST_INPUT, WAIT_INPUT, RECEIVING, OUTPUT_READY);
     signal state : state_type := IDLE;
 
-    -- Store largest pixel in 2x2 window
-    signal curr_largest : WORD_ARRAY(0 to INPUT_CHANNELS-1) := (others => x"80");  -- Initialize to most negative Q1.6 value
+    -- Store largest pixel in 2x2 window (16-bit Q9.6 format)
+    signal curr_largest : WORD_ARRAY_16(0 to INPUT_CHANNELS-1) := (others => x"8000");  -- Initialize to most negative 16-bit value
 
     -- Count input pixels in current 2x2 block
     signal pixel_count : integer range 0 to BLOCK_SIZE*BLOCK_SIZE-1 := 0;
@@ -101,7 +101,7 @@ begin
                 pixel_out_req_ready  <= '0';
                 pixel_in_req_valid   <= '0';
                 pixel_in_ready       <= '0';
-                curr_largest         <= (others => x"80");  -- Reset to most negative Q1.6 value
+                curr_largest         <= (others => x"8000");  -- Reset to most negative Q1.6 value
                 req_out_row          <= 0;
                 req_out_col          <= 0;
                 req_in_row_reg       <= 0;
@@ -122,7 +122,7 @@ begin
                             req_out_row <= pixel_out_req_row;
                             req_out_col <= pixel_out_req_col;
                             pixel_count <= 0;
-                            curr_largest <= (others => x"80");  -- Reset to most negative Q1.6 value
+                            curr_largest <= (others => x"8000");  -- Reset to most negative Q1.6 value
                             state <= REQUEST_INPUT;
                         end if;
                     
