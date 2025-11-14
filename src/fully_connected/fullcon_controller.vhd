@@ -49,6 +49,7 @@ architecture RTL of fullcon_controller is
     
     signal all_macs_done : std_logic;
 
+
 begin
 
     -- Check if all MACs are done (all bits in calc_done are '1')
@@ -77,6 +78,7 @@ begin
                         calc_compute_en <= '1';
                         state           <= WAITING_MAC;
                     end if;
+
                 when WAIT_WEIGHTS =>
                     state <= PROCESSING;
                 

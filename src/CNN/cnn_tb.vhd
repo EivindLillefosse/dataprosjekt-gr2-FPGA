@@ -399,9 +399,9 @@ begin
                 end loop;
             end if;
             
-            -- Monitor FC1 outputs (Layer 5) - just monitor, don't control ready
-            if fc1_output_valid = '1' and fc1_output_ready = '1' then
-                report "CNN FC1 Output received (64 neurons)";
+            -- Monitor FC1 outputs (Layer 5) - log when valid (don't require DUT-driven ready)
+            if fc1_output_valid = '1' then
+                report "CNN FC1 Output (valid) observed (64 neurons)";
                 
                 -- FC1_OUTPUT header
                 write(debug_line, string'("FC1_OUTPUT:"));

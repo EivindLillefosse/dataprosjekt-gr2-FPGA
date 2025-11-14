@@ -28,8 +28,8 @@ def load_data():
     """Load and preprocess data from training folder."""
     print("Loading data...")
     
-    # Dynamically load categories from the training_data folder
-    categories = [os.path.splitext(file)[0] for file in os.listdir(TRAINING_DATA_FOLDER) if file.endswith(".npy")]
+    # Dynamically load categories from the training_data folder (sorted for deterministic indices)
+    categories = sorted([os.path.splitext(file)[0] for file in os.listdir(TRAINING_DATA_FOLDER) if file.endswith(".npy")])
     print(f"Categories loaded: {categories}")
     
     data = []
@@ -289,13 +289,14 @@ def evaluate_model(model, x, y, categories):
 def export_model(model):
     """Export model to SavedModel format."""
     print("Exporting model...")
-    # TensorFlow Keras models should be saved with tf.saved_model.save or model.save
+    # Use model.save() to preserve Keras metadata (needed for reload and FPGA export)
     try:
-        # Prefer the SavedModel format for further conversion/quantization
-        tf.saved_model.save(model, "model/saved_model")
+        # Save in Keras format with SavedModel structure
+        model.save("model/saved_model", save_format='tf')
         print("✓ Model exported as SavedModel at 'model/saved_model'.")
-    except Exception:
-        # Fallback to the Keras HDF5/`model.save` which also works for many tools
+    except Exception as e:
+        print(f"Warning: Failed to save model: {e}")
+        # Fallback to the Keras HDF5 format
         model.save("model/saved_model_h5.h5")
         print("✓ Model exported with fallback to Keras H5 at 'model/saved_model_h5.h5'.")
 
@@ -588,7 +589,8 @@ def export_to_FPGA(model, q_format="Q1.6"):
                                 weight_idx = input_idx * num_outputs + output_idx
                                 qw = quantized_weights[weight_idx]
                                 byte_value = int(qw) & 0xFF
-                                packed_value |= (byte_value << (output_idx * 8))
+                                # Pack MSB-first to match VHDL unpacking: output 0 → MSB, output N-1 → LSB
+                                packed_value |= (byte_value << ((num_outputs - 1 - output_idx) * 8))
                             
                             # Write packed value (same format as Conv2D for consistency)
                             num_hex_chars = (num_outputs * 8 + 3) // 4

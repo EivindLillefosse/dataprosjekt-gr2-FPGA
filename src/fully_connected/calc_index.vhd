@@ -58,6 +58,7 @@ architecture Structural of calc_index is
     signal internal_done    : std_logic := '0';
     signal pool_data_captured : WORD_ARRAY_16(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
     signal data_valid       : std_logic := '0';
+    signal last_chan        : std_logic := '0';
 begin
     
     -- Main state machine: request Pool2 position, capture 16 channels, send to FC1 sequentially
@@ -70,6 +71,7 @@ begin
                 internal_done <= '0';
                 data_valid <= '0';
                 pool_data_captured <= (others => (others => '0'));
+                last_chan <= '0';
             elsif enable = '1' then
                 if internal_done = '1' then
                     -- Restart
@@ -85,8 +87,13 @@ begin
                         channel_counter <= 0;
                     end if;
                     
+                    if channel_counter = INPUT_CHANNELS - 1 then 
+                        last_chan <= '1';
+                    end if;
+                    
                     -- Send captured channels sequentially to FC1
                     if data_valid = '1' and fc_pixel_ready = '1' then
+
                         if channel_counter < INPUT_CHANNELS - 1 then
                             -- Move to next channel
                             channel_counter <= channel_counter + 1;
@@ -94,6 +101,7 @@ begin
                             -- Sent all 16 channels for this position
                             channel_counter <= 0;
                             data_valid <= '0';
+                            last_chan <= '0';
                             
                             if position_counter = NUM_POSITIONS - 1 then
                                 -- All positions done (we just finished the last position)
@@ -120,7 +128,7 @@ begin
     
     -- Output current channel from captured data
     fc_pixel_out   <= pool_data_captured(channel_counter);
-    fc_pixel_valid <= data_valid and enable and not internal_done;
+    fc_pixel_valid <= data_valid and enable and not internal_done and not last_chan;
     
     -- Assert ready when waiting for Pool2 data
     pool_pixel_ready <= enable and not internal_done and not data_valid;

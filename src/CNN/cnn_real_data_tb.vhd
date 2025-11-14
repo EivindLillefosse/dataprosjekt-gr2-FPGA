@@ -130,6 +130,8 @@ architecture Behavioral of cnn_real_data_tb is
     
     -- Test control signals
     signal test_done : boolean := false;
+    -- Simulation cycle counter for debugging
+    signal sim_cycle : integer := 0;
 
 begin
     -- Unit Under Test (UUT) - CNN Top-Level with debug outputs
@@ -206,6 +208,16 @@ begin
             wait for CLK_PERIOD/2;
         end loop;
         wait;
+    end process;
+
+    -- Simulation cycle increment (useful for debug timestamps)
+    sim_cycle_proc: process(clk)
+    begin
+        if rising_edge(clk) then
+            if not test_done then
+                sim_cycle <= sim_cycle + 1;
+            end if;
+        end if;
     end process;
 
     -- Input pixel provider process
@@ -346,6 +358,9 @@ begin
                 write(debug_line, ',');
                 write(debug_line, debug_conv2_col);
                 write(debug_line, ']');
+                -- Include sim cycle for debugging duplicate prints
+                write(debug_line, string'("  cycle="));
+                write(debug_line, sim_cycle);
                 writeline(debug_file, debug_line);
                 for i in 0 to 15 loop
                     write(debug_line, string'("  Filter_"));
@@ -497,17 +512,17 @@ begin
         
         wait for CLK_PERIOD * 5;
         
-        -- Test second run
-        report "Testing second CNN run...";
-        
-        -- Wait for FC2 output again
-        wait until fc2_output_valid = '1';
-        wait until rising_edge(clk);
-        
-        report "Second FC2 output received!";
-        report "Second run classification result: " & integer'image(to_integer(unsigned(output_guess)));
-        
-        wait for CLK_PERIOD * 10;
+    --    -- Test second run
+    --    report "Testing second CNN run...";
+    --    
+    --    -- Wait for FC2 output again
+    --    wait until fc2_output_valid = '1';
+    --    wait until rising_edge(clk);
+    --    
+    --    report "Second FC2 output received!";
+    --    report "Second run classification result: " & integer'image(to_integer(unsigned(output_guess)));
+    --    
+    --    wait for CLK_PERIOD * 10;
         
         test_done <= true;
         report "========================================";

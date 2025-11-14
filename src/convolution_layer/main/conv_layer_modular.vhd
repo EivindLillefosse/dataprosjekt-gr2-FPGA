@@ -58,7 +58,7 @@ entity conv_layer_modular is
 end conv_layer_modular;
 
 architecture Behavioral of conv_layer_modular is
-    constant INPUT_WIDTH : integer := 8 when LAYER_ID = 0 else 16;
+    constant INPUT_WIDTH : integer := 16;
     
     -- Flattened pixel data for convolution engine
     signal pixel_in_flat : std_logic_vector(INPUT_CHANNELS * INPUT_WIDTH - 1 downto 0);
@@ -93,7 +93,7 @@ architecture Behavioral of conv_layer_modular is
     signal compute_en : std_logic;
     signal compute_clear : std_logic;
     signal compute_done : std_logic_vector(NUM_FILTERS-1 downto 0);
-    signal conv_results : WORD_ARRAY_16(0 to NUM_FILTERS-1);
+    signal conv_results : WORD_ARRAY_32(0 to NUM_FILTERS-1);
     
     -- ReLU activation signals
     signal relu_data_out : WORD_ARRAY_16(0 to NUM_FILTERS-1); 
@@ -116,14 +116,7 @@ begin
 
     -- Flatten input pixels for convolution engine based on layer width
     flatten_inputs: for i in 0 to INPUT_CHANNELS-1 generate
-        gen_layer0: if LAYER_ID = 0 generate
-            -- Layer 0: Use lower 8 bits only
-            pixel_in_flat((i+1)*INPUT_WIDTH-1 downto i*INPUT_WIDTH) <= pixel_in(i)(7 downto 0);
-        end generate;
-        gen_layer1: if LAYER_ID = 1 generate
-            -- Layer 1: Use full 16 bits
-            pixel_in_flat((i+1)*INPUT_WIDTH-1 downto i*INPUT_WIDTH) <= pixel_in(i);
-        end generate;
+        pixel_in_flat((i+1)*INPUT_WIDTH-1 downto i*INPUT_WIDTH) <= pixel_in(i);
     end generate;
 
     -- Handle output position requests from downstream
@@ -213,7 +206,7 @@ begin
             NUM_FILTERS => NUM_FILTERS,
             INPUT_CHANNELS => INPUT_CHANNELS,
             MAC_DATA_WIDTH => INPUT_WIDTH,
-            MAC_RESULT_WIDTH => 16
+            MAC_RESULT_WIDTH => INPUT_WIDTH*2
         )
         port map (
             clk => clk,
@@ -258,8 +251,8 @@ begin
     gen_relu_input_layer1 : if LAYER_ID = 1 generate
         gen_relu_input : for i in 0 to NUM_FILTERS-1 generate
         begin
-            -- Optionally add rounding: shift_right(signed(biased_results(i)) + to_signed(32, 16), 6)
-            relu_input(i) <= std_logic_vector( shift_right( signed(conv_results(i)), 6 ) );
+            -- Optionally add rounding: shift_right(signed(biased_results(i)) + to_signed(32, 32), 6)
+            relu_input(i) <= std_logic_vector( resize( shift_right( signed(conv_results(i)), 6 ), 16 ) );
         end generate;
     end generate;
 
@@ -268,7 +261,9 @@ begin
     -- simply map the lower 8 bits into the 16-bit word for LAYER_ID = 0 so the signal remains
     -- well-defined. Adjust if a different behavior is required.
     gen_relu_input_other : if LAYER_ID = 0 generate
-            relu_input <= conv_results;
+        gen_relu_input_other_loop : for i in 0 to NUM_FILTERS-1 generate
+            relu_input(i) <= std_logic_vector( resize( signed(conv_results(i)(7 downto 0)), 16) );
+        end generate;
     end generate;
 
     -- Add bias to convolution results before ReLU
@@ -291,7 +286,7 @@ begin
         port map (
             clk => clk,
             rst => rst,
-            data_in => relu_input,
+            data_in => biased_results,
             data_valid => biased_valid,
             data_out => relu_data_out,
             valid_out => relu_valid_out

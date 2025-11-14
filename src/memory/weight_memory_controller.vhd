@@ -68,8 +68,8 @@ architecture Behavioral of weight_memory_controller is
 
     COMPONENT layer2_conv2d_1_weights
     PORT (
-        clka : IN STD_LOGIC;
-        ena : IN STD_LOGIC;
+        clka  : IN STD_LOGIC;
+        ena   : IN STD_LOGIC;
         addra : IN STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0);
         douta : OUT STD_LOGIC_VECTOR(WORD_SIZE*NUM_FILTERS-1 DOWNTO 0)
     );

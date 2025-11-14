@@ -21,7 +21,7 @@ entity convolution_engine is
         NUM_FILTERS     : integer := 8;
         INPUT_CHANNELS  : integer := 1;
         MAC_DATA_WIDTH  : integer := 8;
-        MAC_RESULT_WIDTH: integer := 16
+        MAC_RESULT_WIDTH: integer := MAC_DATA_WIDTH*2
     );
     port (
         clk          : in  std_logic;
@@ -35,7 +35,7 @@ entity convolution_engine is
         weight_data  : in  WORD_ARRAY(0 to NUM_FILTERS-1);
         
         -- Results
-        results      : out WORD_ARRAY_16(0 to NUM_FILTERS-1);
+        results      : out WORD_ARRAY_32(0 to NUM_FILTERS-1);
         compute_done : out std_logic_vector(NUM_FILTERS-1 downto 0)
     );
 end convolution_engine;

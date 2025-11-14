@@ -139,8 +139,10 @@ begin
     biased_results_proc: process(calc_results, bias_regs)
     begin
         for i in 0 to NODES_OUT-1 loop
+            -- calc_results are in a higher fractional format (e.g. Q2.12).
+            -- Shift right by 6 to convert to Q1.6 before adding the bias (which is Q1.6).
             biased_results(i) <= std_logic_vector(
-                signed(calc_results(i)) + resize(bias_regs(i), 16)
+                shift_right(signed(calc_results(i)), 6) + resize(bias_regs(i), 16)
             );
         end loop;
     end process;
@@ -193,6 +195,7 @@ begin
         -- Latch the result once argmax completes and hold until new computation starts
         fc2_out_proc: process(clk)
         begin
+            calc_clear <= '0';
             if rising_edge(clk) then
                 if rst = '1' then
                     fc2_pixel_out   <= (others => (others => '0'));
