@@ -122,22 +122,5 @@ begin
         )
     );
 
-    -- Simulation-only debug: print the unpacked weight_data for the first few addresses
-    -- This is non-invasive (only reports) and helps check runtime byte-lane/address mapping.
-    debug_proc: process(clk)
-        variable idx_int  : integer;
-    begin
-        if rising_edge(clk) then
-            -- only print for the first 4 addresses to avoid huge logs
-            idx_int := to_integer(unsigned(weight_addr));
-            if idx_int >= 0 and idx_int < 4 then
-                -- Print simplified debug info to avoid string size issues with large NUM_FILTERS
-                report "WEIGHT_DBG addr=" & integer'image(idx_int) & 
-                       " filter0=" & integer'image(to_integer(unsigned(weight_data(0)))) &
-                       " filterN=" & integer'image(to_integer(unsigned(weight_data(NUM_FILTERS-1))));
-            end if;
-        end if;
-    end process;
-
 
 end Behavioral;

@@ -5,4 +5,4 @@
 ; Range: [-2.0, 1.984375]
 ;
 memory_initialization_radix=16; Hexadecimal format
-memory_initialization_vector=FF,FF,FE,00,00,FE,01,00,09,00,FF,03,FF,FF,00,01;
+memory_initialization_vector=FE,FF,02,FE,00,FE,FE,FE,FF,01,FF,00,FE,00,FE,00;

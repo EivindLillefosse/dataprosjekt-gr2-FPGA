@@ -143,6 +143,17 @@ architecture Structural of cnn_top is
     signal calc_curr_index       : integer range 0 to FC1_NODES_IN-1;
     signal calc_done             : std_logic;
 
+    -- DEBUG-like internal registers (kept internal, no debug ports exposed)
+    signal conv1_active_out_row : integer := 0;
+    signal conv1_active_out_col : integer := 0;
+    signal pool1_active_out_row : integer := 0;
+    signal pool1_active_out_col : integer := 0;
+    signal conv2_active_out_row : integer := 0;
+    signal conv2_active_out_col : integer := 0;
+    signal prev_conv2_valid     : std_logic := '0';
+    -- Alias for pool2<->calc_index ready coupling (match debug top)
+    signal calc_pool_ready      : std_logic;
+
     -- Signals for FC1 output
     signal fc1_out_valid         : std_logic;
     signal fc1_out_ready         : std_logic;
@@ -323,7 +334,7 @@ begin
             -- Data TO calc_index (all 16 channels)
             pixel_out           => pool2_pixel_out,
             pixel_out_valid     => pool2_pixel_out_valid,
-            pixel_out_ready     => pool2_pixel_out_ready
+            pixel_out_ready     => calc_pool_ready
         );
 
     -- Instantiate calc_index (flattens 3D tensor to 1D for FC layer)
@@ -346,7 +357,7 @@ begin
             -- Input FROM pool2 (all 16 channels at once)
             pool_pixel_data => pool2_pixel_out,
             pool_pixel_valid => pool2_pixel_out_valid,
-            pool_pixel_ready => pool2_pixel_out_ready,
+            pool_pixel_ready => calc_pool_ready,
             
             -- Output TO fc1 (selected single channel pixel)
             fc_pixel_out    => calc_fc_pixel,
@@ -446,5 +457,50 @@ begin
     conv1_pixel_in(0) <= std_logic_vector(resize(signed(input_pixel), 16));
     conv1_pixel_in_valid <= input_valid;
     input_ready          <= conv1_pixel_in_ready;
+
+    -- Register the active output position when request handshake completes
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if rst = '1' then
+                conv1_active_out_row <= 0;
+                conv1_active_out_col <= 0;
+                pool1_active_out_row <= 0;
+                pool1_active_out_col <= 0;
+                conv2_active_out_row <= 0;
+                conv2_active_out_col <= 0;
+            else
+                -- Capture Conv1's output position when request is accepted
+                if conv1_out_req_valid = '1' and conv1_out_req_ready = '1' then
+                    conv1_active_out_row <= conv1_out_req_row;
+                    conv1_active_out_col <= conv1_out_req_col;
+                end if;
+
+                -- Capture Pool1's output position when request is accepted
+                if pool1_out_req_valid = '1' and pool1_out_req_ready = '1' then
+                    pool1_active_out_row <= pool1_out_req_row;
+                    pool1_active_out_col <= pool1_out_req_col;
+                end if;
+
+                -- Capture Conv2's output position when request is accepted
+                if conv2_out_req_valid = '1' and conv2_out_req_ready = '1' then
+                    conv2_active_out_row <= conv2_out_req_row;
+                    conv2_active_out_col <= conv2_out_req_col;
+                end if;
+            end if;
+        end if;
+    end process;
+
+    -- Track previous conv2 valid for edge detection parity with debug top
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if rst = '1' then
+                prev_conv2_valid <= '0';
+            else
+                prev_conv2_valid <= conv2_pixel_out_valid;
+            end if;
+        end if;
+    end process;
 
 end Structural;

@@ -262,7 +262,7 @@ begin
     -- well-defined. Adjust if a different behavior is required.
     gen_relu_input_other : if LAYER_ID = 0 generate
         gen_relu_input_other_loop : for i in 0 to NUM_FILTERS-1 generate
-            relu_input(i) <= std_logic_vector( resize( signed(conv_results(i)(7 downto 0)), 16) );
+            relu_input(i) <= std_logic_vector( resize(signed(conv_results(i)), 16) );
         end generate;
     end generate;
 

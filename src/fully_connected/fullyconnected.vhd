@@ -46,7 +46,7 @@ architecture RTL of fullyconnected is
     signal calc_pixel_data : WORD_16;
     signal calc_weights    : WORD_ARRAY(0 to NODES_OUT-1);
     signal calc_compute_en : std_logic;
-    signal calc_results    : WORD_ARRAY_16(0 to NODES_OUT-1);
+    signal calc_results    : WORD_ARRAY_32(0 to NODES_OUT-1);
     signal calc_done       : std_logic_vector(NODES_OUT-1 downto 0);
     
     -- Signals for bias addition
@@ -73,7 +73,7 @@ begin
         generic map (
             NODES            => NODES_OUT,
             MAC_DATA_WIDTH   => WORD_SIZE*2, -- 16 bits input
-            MAC_RESULT_WIDTH => WORD_SIZE*2  -- 16 bits output
+            MAC_RESULT_WIDTH => WORD_SIZE*4  -- 16 bits output
         )
         port map (
             clk              => clk,
@@ -141,8 +141,9 @@ begin
         for i in 0 to NODES_OUT-1 loop
             -- calc_results are in a higher fractional format (e.g. Q2.12).
             -- Shift right by 6 to convert to Q1.6 before adding the bias (which is Q1.6).
+            -- Do arithmetic on signed types, then convert to std_logic_vector.
             biased_results(i) <= std_logic_vector(
-                shift_right(signed(calc_results(i)), 6) + resize(bias_regs(i), 16)
+                resize( shift_right( signed(calc_results(i)), 6 ), 16 ) + resize(bias_regs(i), 16)
             );
         end loop;
     end process;
