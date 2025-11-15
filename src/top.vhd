@@ -37,7 +37,13 @@ entity top is
         VGA_VS_O : out std_logic;
         VGA_R    : out std_logic_vector(3 downto 0);
         VGA_G    : out std_logic_vector(3 downto 0);
-        VGA_B    : out std_logic_vector(3 downto 0)
+        VGA_B    : out std_logic_vector(3 downto 0);
+        
+        -- LED outputs for CNN guess visualization
+        ld0      : out std_logic;
+        ld1      : out std_logic;
+        ld2      : out std_logic;
+        ld3      : out std_logic
 
     );
 end top;
@@ -119,5 +125,10 @@ CNN_inst : entity work.CNN_top
         input_req_col        => data_col
     );
 
+    -- Map CNN guess (4 LSBs) to LEDs
+    ld0 <= data_tx(0);
+    ld1 <= data_tx(1);
+    ld2 <= data_tx(2);
+    ld3 <= data_tx(3);
 
 end Behavioral;
