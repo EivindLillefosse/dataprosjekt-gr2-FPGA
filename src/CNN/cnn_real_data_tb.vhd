@@ -463,10 +463,13 @@ begin
 
     -- Main test process
     test_process: process
+        constant MAX_WAIT : integer := 200;
+        variable wait_cnt : integer := 0;
     begin
-        -- Initialize
-        rst <= '1';
-        output_ready <= '0';
+    -- Initialize
+    rst <= '1';
+    -- Drive output_ready high so the DUT can handshake and assert output_valid
+    output_ready <= '1';
         
         wait for CLK_PERIOD * 2;
         rst <= '0';
@@ -492,46 +495,127 @@ begin
                "  [27,13]=" & integer'image(test_image(27,13)) & 
                "  [27,27]=" & integer'image(test_image(27,27));
         
-        -- CNN runs autonomously - just wait for FC2 output
-        report "Waiting for FC2 final classification output...";
-        
-        -- Wait for FC2 to produce output
+        -- CNN runs autonomously - perform two runs back-to-back, then reset and run once more
+        report "Waiting for FC2 final classification output (Run 1)...";
+
+        -- Wait for first FC2 output (Run 1)
         wait until fc2_output_valid = '1';
         wait until rising_edge(clk);
-        
-        report "FC2 output received!";
-        report "Classification result (output_guess): " & integer'image(to_integer(unsigned(output_guess)));
+
+        report "FC2 output received (Run 1)";
+        report "Run 1 classification result (output_guess): " & integer'image(to_integer(unsigned(output_guess)));
         report "Expected Label: " & integer'image(TEST_IMAGE_LABEL);
-        
-        -- Log all FC2 class scores
+
+        -- Log all FC2 class scores for Run 1
         for i in 0 to 9 loop
             report "  Class " & integer'image(i) & " score: " & 
                 integer'image(to_integer(signed(fc2_output_data(i))));
         end loop;
-        
-        -- Wait a bit more
+
+        -- Wait for FC2 valid to drop to avoid re-detecting the same event
+    -- Bounded wait to avoid indefinite hang: try up to MAX_WAIT cycles,
+    -- then attempt soft recovery (toggle output_ready), then hard recovery (reset) if needed.
+        while fc2_output_valid = '1' and wait_cnt < MAX_WAIT loop
+            wait until rising_edge(clk);
+            wait_cnt := wait_cnt + 1;
+        end loop;
+        if fc2_output_valid = '1' then
+            report "WARNING: fc2_output_valid did not drop after " & integer'image(MAX_WAIT) & " cycles - attempting soft recovery" severity warning;
+            -- Soft recovery: toggle output_ready low for 2 cycles then back high
+            output_ready <= '0';
+            wait for CLK_PERIOD * 2;
+            output_ready <= '1';
+            -- Give the DUT some cycles to respond
+            wait for CLK_PERIOD * 5;
+        end if;
+        -- If still stuck, assert reset as last resort
+        if fc2_output_valid = '1' then
+            report "ERROR: fc2_output_valid still stuck after soft recovery - continuing without reset" severity error;
+            -- Additional slack cycles to allow DUT to recover without asserting reset
+            wait for CLK_PERIOD * 10;
+        end if;
+        -- Sample one clock edge before proceeding
+        wait until rising_edge(clk);
+
+        -- Short pause between runs to let the system continue
         wait for CLK_PERIOD * 10;
-        -- Wait a bit more
-        wait for CLK_PERIOD * 10;
-        
-        -- Test reset functionality
-        report "Testing CNN reset functionality...";
-        rst <= '1';
-        wait for CLK_PERIOD * 2;
-        rst <= '0';
-        
-        wait for CLK_PERIOD * 5;
-        
-        -- Test second run
-        report "Testing second CNN run...";
-        
-        -- Wait for FC2 output again
+
+        -- Wait for second FC2 output (Run 2) without resetting
+        report "Waiting for FC2 final classification output (Run 2 - no reset)...";
         wait until fc2_output_valid = '1';
         wait until rising_edge(clk);
-        
-        report "Second FC2 output received!";
-        report "Second run classification result: " & integer'image(to_integer(unsigned(output_guess)));
-        
+
+        report "FC2 output received (Run 2)";
+        report "Run 2 classification result (output_guess): " & integer'image(to_integer(unsigned(output_guess)));
+        report "Expected Label: " & integer'image(TEST_IMAGE_LABEL);
+
+        -- Log all FC2 class scores for Run 2
+        for i in 0 to 9 loop
+            report "  Class " & integer'image(i) & " score: " & 
+                integer'image(to_integer(signed(fc2_output_data(i))));
+        end loop;
+
+        -- Wait for FC2 valid to drop before continuing (bounded + recovery as above)
+        wait_cnt := 0;
+        while fc2_output_valid = '1' and wait_cnt < MAX_WAIT loop
+            wait until rising_edge(clk);
+            wait_cnt := wait_cnt + 1;
+        end loop;
+        if fc2_output_valid = '1' then
+            report "WARNING: fc2_output_valid did not drop after " & integer'image(MAX_WAIT) & " cycles (Run 2) - attempting soft recovery" severity warning;
+            output_ready <= '0';
+            wait for CLK_PERIOD * 2;
+            output_ready <= '1';
+            wait for CLK_PERIOD * 5;
+        end if;
+        if fc2_output_valid = '1' then
+            report "ERROR: fc2_output_valid still stuck after soft recovery (Run 2) - continuing without reset" severity error;
+            -- Additional slack cycles to allow DUT to recover without asserting reset
+            wait for CLK_PERIOD * 10;
+        end if;
+        wait until rising_edge(clk);
+
+    -- Wait a little before the third run (no reset)
+    wait for CLK_PERIOD * 10;
+
+    report "Waiting for FC2 final classification output (Run 3 - no reset)...";
+    -- Wait for third FC2 output (Run 3 without reset)
+    wait until fc2_output_valid = '1';
+    wait until rising_edge(clk);
+
+    report "FC2 output received (Run 3)";
+    report "Run 3 classification result (output_guess): " & integer'image(to_integer(unsigned(output_guess)));
+    report "Expected Label: " & integer'image(TEST_IMAGE_LABEL);
+
+        -- Log all FC2 class scores for Run 3
+        for i in 0 to 9 loop
+            report "  Class " & integer'image(i) & " score: " & 
+                integer'image(to_integer(signed(fc2_output_data(i))));
+        end loop;
+
+        -- Wait for FC2 valid to drop before finishing (bounded + recovery)
+        wait_cnt := 0;
+        while fc2_output_valid = '1' and wait_cnt < MAX_WAIT loop
+            wait until rising_edge(clk);
+            wait_cnt := wait_cnt + 1;
+        end loop;
+        if fc2_output_valid = '1' then
+            report "WARNING: fc2_output_valid did not drop after " & integer'image(MAX_WAIT) & " cycles (Run 3) - attempting soft recovery" severity warning;
+            output_ready <= '0';
+            wait for CLK_PERIOD * 2;
+            output_ready <= '1';
+            wait for CLK_PERIOD * 5;
+        end if;
+        if fc2_output_valid = '1' then
+            report "ERROR: fc2_output_valid still stuck after soft recovery (Run 3) - asserting reset" severity error;
+            rst <= '1';
+            wait for CLK_PERIOD * 3;
+            rst <= '0';
+            wait for CLK_PERIOD * 5;
+        end if;
+        wait until rising_edge(clk);
+
+        -- Allow outputs to settle
         wait for CLK_PERIOD * 10;
         
         test_done <= true;

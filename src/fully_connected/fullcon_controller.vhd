@@ -45,8 +45,8 @@ end fullcon_controller;
 architecture RTL of fullcon_controller is
 
     type state_type is (IDLE, WAIT_WEIGHTS, PROCESSING, WAITING_MAC, DONE);
-    signal state        : state_type := IDLE;
-    
+    signal state         : state_type := IDLE;
+    signal all_done          : std_logic := '0';  
     signal all_macs_done : std_logic;
 
 
@@ -84,6 +84,11 @@ begin
                 
                 when PROCESSING =>
                     if input_valid = '1' then
+                        if input_index >= NODES_IN - 1 then
+                            all_done <= '1';
+                        else
+                            all_done <= '0';
+                        end if;
                         calc_compute_en <= '1';
                         state           <= WAITING_MAC;
                     end if;                        
@@ -93,8 +98,9 @@ begin
                     if all_macs_done = '1' then
                         -- Guard against off-by-one: treat any index at or beyond the
                         -- final node as the last element so we don't advance past it.
-                        if input_index >= NODES_IN - 1 then
+                        if all_done = '1' then
                             output_valid <= '1';
+                            all_done <= '0';
                             state <= DONE;
                         else
                             input_ready <= '1';

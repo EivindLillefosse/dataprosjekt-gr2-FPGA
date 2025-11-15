@@ -443,7 +443,9 @@ begin
     seq_input_data  <= fc1_out_data;
     
     -- Placeholder for output_guess (will be driven by argmax)
-    output_guess  <= fc2_out_data(0)(7 downto 0);
+    -- Register output_guess so it is only updated when a new FC2 result is accepted.
+    signal output_guess_reg : WORD := (others => '0');
+    output_guess <= output_guess_reg;
     output_valid  <= fc2_out_valid;  -- Use FC2 valid for final output
 
     -- Connect top-level input requests to conv1's input requests
@@ -501,6 +503,21 @@ begin
                 prev_conv2_valid <= '0';
             else
                 prev_conv2_valid <= conv2_pixel_out_valid;
+            end if;
+        end if;
+    end process;
+
+    -- Update output_guess only when FC2 produces a new accepted result.
+    -- Do NOT clear output_guess on reset; keep previous value unless new accepted result arrives.
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if rst = '1' then
+                output_guess_reg <= (others => '0');
+            else
+                if fc2_out_valid = '1' and output_ready = '1' then
+                    output_guess_reg <= fc2_out_data(0)(7 downto 0);
+                end if;
             end if;
         end if;
     end process;

@@ -79,6 +79,8 @@ begin
                     channel_counter <= 0;
                     internal_done <= '0';
                     data_valid <= '0';
+                    pool_data_captured <= (others => (others => '0'));
+                    last_chan <= '0';
                 else
                     -- When Pool2 delivers data, capture it and start sending channels
                     if pool_pixel_valid = '1' and data_valid = '0' then
@@ -111,6 +113,8 @@ begin
                                 position_counter <= position_counter + 1;
                             end if;
                         end if;
+                    elsif position_counter = NUM_POSITIONS - 1 and last_chan = '1' then
+                        internal_done <= '1';
                     end if;
                 end if;
             elsif enable = '0' then
@@ -128,7 +132,7 @@ begin
     
     -- Output current channel from captured data
     fc_pixel_out   <= pool_data_captured(channel_counter);
-    fc_pixel_valid <= data_valid and enable and not internal_done and not last_chan;
+    fc_pixel_valid <= data_valid and enable and not internal_done;
     
     -- Assert ready when waiting for Pool2 data
     pool_pixel_ready <= enable and not internal_done and not data_valid;

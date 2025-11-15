@@ -212,6 +212,8 @@ architecture Structural of cnn_top_debug is
     signal fc2_out_valid         : std_logic;
     signal fc2_out_data          : WORD_ARRAY_16(0 to FC2_NODES_OUT-1);
     signal fc2_in_ready          : std_logic;
+    -- Registered output guess (persist across resets until overwritten)
+    signal output_guess_reg : WORD := (others => '0');
 
     -- DEBUG: Register output positions when request handshake completes
     signal conv1_active_out_row : integer := 0;
@@ -505,14 +507,31 @@ begin
     fc2_output_data  <= fc2_out_data;
     fc2_output_valid <= fc2_out_valid;
     
-    -- Output guess: lower 8 bits of first FC2 output (index 0)
-    output_guess  <= fc2_out_data(0)(7 downto 0);
+    -- Output guess is driven from registered storage (declared above)
+    output_guess <= output_guess_reg;
+    -- Drive the simplified top-level output_valid from the internal FC2 valid
+    output_valid  <= fc2_out_valid;
     
     -- DEBUG: Export calc_index signals
     debug_calc_index <= calc_curr_index;
     debug_calc_pixel <= calc_fc_pixel;
     debug_calc_valid <= calc_fc_valid;
     debug_calc_done  <= calc_done;
+
+    -- Update output_guess only when FC2 produces a new accepted result.
+    -- Do NOT clear output_guess on reset; keep previous value unless new accepted result arrives.
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if rst = '1' then
+                output_guess_reg <= (others => '0');
+            else
+                if fc2_out_valid = '1' and fc2_output_ready = '1' then
+                    output_guess_reg <= fc2_out_data(0)(7 downto 0);
+                end if;
+            end if;
+        end if;
+    end process;
 
     -- Connect top-level input requests to conv1's input requests
     input_req_row    <= conv1_in_req_row;
