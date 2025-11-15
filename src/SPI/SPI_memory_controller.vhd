@@ -97,7 +97,7 @@ END COMPONENT;
     signal current_state : state_type := IDLE;
     
     -- Read FSM state type
-    type read_state_type is (READ_IDLE, WAIT_FOR_DATA, READ_ADDR, WAIT_ADDR_SETTLE, WAIT_BRAM, LOAD_DATA_OUT, MEMORY_UNBUSY);
+    type read_state_type is (READ_IDLE, WAIT_FOR_DATA, READ_ADDR, WAIT_ADDR_SETTLE, WAIT_BRAM, LOAD_DATA_OUT,  WAIT_AFTER_LOAD_DATA, MEMORY_UNBUSY);
     signal read_state : read_state_type := READ_IDLE;
 
     -- bram A signals
@@ -723,6 +723,9 @@ begin
                 end case;
                 
                 data_out_valid <= '1';
+                read_state <= WAIT_AFTER_LOAD_DATA;
+            
+            when WAIT_AFTER_LOAD_DATA =>
                 if read_count >= MAX_PIXELS then
                     read_state <= MEMORY_UNBUSY;
                 else
