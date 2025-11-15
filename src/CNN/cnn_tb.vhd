@@ -155,8 +155,8 @@ begin
             -- FC1 outputs (new)
             fc1_output_data  => fc1_output_data,
             fc1_output_valid => fc1_output_valid,
-            -- fc1_output_ready is driven by internal buffer in DUT
-            fc1_output_ready => open,
+            -- Connect fc1_output_ready so testbench monitor can observe DUT readiness
+            fc1_output_ready => fc1_output_ready,
             
             -- FC2 outputs (final classification)
             fc2_output_data  => fc2_output_data,
@@ -399,9 +399,9 @@ begin
                 end loop;
             end if;
             
-            -- Monitor FC1 outputs (Layer 5) - just monitor, don't control ready
-            if fc1_output_valid = '1' and fc1_output_ready = '1' then
-                report "CNN FC1 Output received (64 neurons)";
+            -- Monitor FC1 outputs (Layer 5) - log when valid (don't require DUT-driven ready)
+            if fc1_output_valid = '1' then
+                report "CNN FC1 Output (valid) observed (64 neurons)";
                 
                 -- FC1_OUTPUT header
                 write(debug_line, string'("FC1_OUTPUT:"));
@@ -466,8 +466,10 @@ begin
         -- Initialize
         rst <= '1';
         output_ready <= '0';
-        -- Make testbench ready to accept FC outputs so top-level signals are driven
-        fc2_output_ready <= '1';
+    -- Make testbench ready to accept FC outputs so top-level signals are driven
+    fc2_output_ready <= '1';
+    -- Also accept FC1 outputs so the FC1 monitor can log 64 neurons
+    fc1_output_ready <= '1';
         
         wait for CLK_PERIOD * 2;
         rst <= '0';

@@ -220,6 +220,8 @@ architecture Structural of cnn_top_debug is
     signal pool1_active_out_col : integer := 0;
     signal conv2_active_out_row : integer := 0;
     signal conv2_active_out_col : integer := 0;
+    -- Previous valid register for one-cycle debug pulse
+    signal prev_conv2_valid     : std_logic := '0';
 
 begin
     -- Instantiate 1st convolution layer
@@ -606,6 +608,7 @@ begin
     end process;
 
     -- Conv2 output tap (before pool2 consumption)
+    -- Pulse debug_conv2_valid for one cycle on the rising edge of conv2_pixel_out_valid
     process(clk)
     begin
         if rising_edge(clk) then
@@ -614,17 +617,18 @@ begin
                 debug_conv2_valid <= '0';
                 debug_conv2_row <= 0;
                 debug_conv2_col <= 0;
+                prev_conv2_valid <= '0';
             else
-                -- Capture conv2 output when valid, along with the active output position
-                if conv2_pixel_out_valid = '1' then
+                -- detect rising edge
+                if conv2_pixel_out_valid = '1' and prev_conv2_valid = '0' then
                     debug_conv2_pixel <= conv2_pixel_out;
                     debug_conv2_valid <= '1';
-                    -- Use the registered active position
                     debug_conv2_row <= conv2_active_out_row;
                     debug_conv2_col <= conv2_active_out_col;
-                elsif debug_conv2_ready = '1' then
+                else
                     debug_conv2_valid <= '0';
                 end if;
+                prev_conv2_valid <= conv2_pixel_out_valid;
             end if;
         end if;
     end process;

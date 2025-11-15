@@ -71,7 +71,8 @@ architecture Behavioral of cnn_real_data_tb is
     -- FC1 output signals (for monitoring)
     signal fc1_output_data  : WORD_ARRAY_16(0 to 63);
     signal fc1_output_valid : std_logic;
-    signal fc1_output_ready : std_logic;
+    -- Drive ready so the testbench accepts FC1 outputs and they get printed
+    signal fc1_output_ready : std_logic := '1';
     
     -- FC2 output signals (final classification)
     signal fc2_output_data  : WORD_ARRAY_16(0 to 9);
@@ -111,6 +112,10 @@ architecture Behavioral of cnn_real_data_tb is
     
     -- Test image data (28x28 image)
     type test_image_type is array (0 to IMAGE_SIZE-1, 0 to IMAGE_SIZE-1) of integer;
+    -- Capture the last accepted input request coordinates so debug prints remain
+    -- consistent even if `input_req_row`/`input_req_col` change later.
+    signal last_input_req_row : integer := 0;
+    signal last_input_req_col : integer := 0;
     
     -- Function to load real test image from exported package
     function generate_test_image return test_image_type is
@@ -130,6 +135,8 @@ architecture Behavioral of cnn_real_data_tb is
     
     -- Test control signals
     signal test_done : boolean := false;
+    -- Simulation cycle counter for debugging
+    signal sim_cycle : integer := 0;
 
 begin
     -- Unit Under Test (UUT) - CNN Top-Level with debug outputs
@@ -208,6 +215,16 @@ begin
         wait;
     end process;
 
+    -- Simulation cycle increment (useful for debug timestamps)
+    sim_cycle_proc: process(clk)
+    begin
+        if rising_edge(clk) then
+            if not test_done then
+                sim_cycle <= sim_cycle + 1;
+            end if;
+        end if;
+    end process;
+
     -- Input pixel provider process
     -- Responds to input position requests from the CNN
     input_provider: process(clk)
@@ -230,6 +247,9 @@ begin
                     input_req_ready <= '1';  -- Acknowledge request
                     req_row_buf := input_req_row;
                     req_col_buf := input_req_col;
+                    -- record the accepted request coordinates for consistent debug prints
+                    last_input_req_row <= input_req_row;
+                    last_input_req_col <= input_req_col;
                     req_pending := true;
                 end if;
                 
@@ -291,9 +311,11 @@ begin
             -- Monitor input provision
             if input_valid = '1' and input_ready = '1' then
                 write(debug_line, string'("INPUT_PROVIDED: ["));
-                write(debug_line, input_req_row);  -- Use last requested position
+                -- Use the captured coordinates of the accepted request so the log matches
+                -- what was requested when the testbench responded.
+                write(debug_line, last_input_req_row);
                 write(debug_line, ',');
-                write(debug_line, input_req_col);
+                write(debug_line, last_input_req_col);
                 write(debug_line, string'("] "));
                 write(debug_line, to_integer(unsigned(input_pixel(0))));
                 writeline(debug_file, debug_line);
@@ -346,6 +368,9 @@ begin
                 write(debug_line, ',');
                 write(debug_line, debug_conv2_col);
                 write(debug_line, ']');
+                -- Include sim cycle for debugging duplicate prints
+                write(debug_line, string'("  cycle="));
+                write(debug_line, sim_cycle);
                 writeline(debug_file, debug_line);
                 for i in 0 to 15 loop
                     write(debug_line, string'("  Filter_"));

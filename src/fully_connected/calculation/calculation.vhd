@@ -20,7 +20,7 @@ entity calculation is
     generic (
         NODES             : integer := 64;
         MAC_DATA_WIDTH    : integer := 16;
-        MAC_RESULT_WIDTH  : integer := 16
+        MAC_RESULT_WIDTH  : integer := 32
     );
     port (
         clk          : in  std_logic;
@@ -31,7 +31,7 @@ entity calculation is
         weight_data  : in  WORD_ARRAY(0 to NODES-1);
         compute_en   : in  std_logic;
         -- Results
-        results      : out WORD_ARRAY_16(0 to NODES-1);
+        results      : out WORD_ARRAY_32(0 to NODES-1);
         compute_done : out std_logic_vector(NODES-1 downto 0)
     );
 end calculation;

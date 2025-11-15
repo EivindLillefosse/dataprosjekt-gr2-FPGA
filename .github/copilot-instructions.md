@@ -368,6 +368,31 @@ Note on bit-width parsing and TB format:
 
 If you want maximum robustness, change the TB debug prints to include both hex and decimal and a bits tag so the comparison tool can unambiguously parse the output.
 
+## 10. New: Test-image driven comparison flow (helper notes)
+
+- **Purpose:** The `model/debug_comparison.py` script now supports an optional `--test_image` flag that accepts an exported test-image NPZ (for example produced by `model/export_test_image.py`). This enables quick comparisons using a single exported image without running the full `CNN.py` training pipeline.
+- **How it works:**
+  - If `--test_image <path>` is provided, the script calls `generate_intermediate_from_test_image()` which:
+    - Loads the exported NPZ (expects `image` 28×28 and optional `category`/`category_idx`).
+    - Attempts to load `model/saved_model` using TensorFlow. If present, it runs the SavedModel on the provided image and captures real intermediate layer outputs (per-layer arrays and `layer_i_filter_j` maps) into `model/intermediate_values.npz`.
+    - If TensorFlow or the SavedModel is not available or prediction fails, the function falls back to writing placeholder arrays with the correct shapes for `layer_0_output` through `layer_6_output` and `input_image` so downstream comparison still runs (but will report placeholder values).
+- **CLI examples:**
+
+```pwsh
+# Generate intermediate_values.npz from exported test image and compare Pool2
+.\venv\Scripts\python.exe model\debug_comparison.py \
+    --test_image model/test_image_reference.npz \
+    --vivado vivado_project\CNN.sim\sim_1\behav\xsim\cnn_intermediate_debug.txt \
+    --npz model/intermediate_values.npz --vhdl_scale 64 --vhdl_bits 8 --layer layer_3_output
+```
+
+- **Notes & tips:**
+  - For accurate Python-side values ensure `model/saved_model` exists (create with `python model/CNN.py`). Otherwise placeholders are used.
+  - The parser still requires the Vivado TB to emit recognizable tags (e.g. `LAYER3_POOL2_OUTPUT`, `FC1_OUTPUT`, `FC2_OUTPUT`) — if your TB doesn't print those, use `--vhdl_layer` to point the script at the layer type your TB emits (for example `final`).
+  - When placeholders are used the script will still run but comparisons will show large differences; check the logs for a message "Generated placeholder intermediate values" to detect this case.
+
+Add this to your workflow when you want a fast single-image comparison without retraining or re-exporting all files.
+
 Interpreting results:
 
 - The script prints per-position per-filter comparisons and overall statistics (average error, max error, per-filter zero counts).
