@@ -454,7 +454,9 @@ begin
 
     
     -- Connect top-level input data to conv1's input data
-    conv1_pixel_in(0) <= std_logic_vector(resize(signed(input_pixel), 16));
+    -- Treat the 8-bit `input_pixel` as unsigned, resize to 16 bits, then
+    -- reinterpret as signed stored as a 16-bit std_logic_vector.
+    conv1_pixel_in(0) <= std_logic_vector(signed(resize(unsigned(input_pixel), 16)));
     conv1_pixel_in_valid <= input_valid;
     input_ready          <= conv1_pixel_in_ready;
 
