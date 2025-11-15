@@ -196,7 +196,6 @@ begin
         -- Latch the result once argmax completes and hold until new computation starts
         fc2_out_proc: process(clk)
         begin
-            calc_clear <= '0';
             if rising_edge(clk) then
                 if rst = '1' then
                     fc2_pixel_out   <= (others => (others => '0'));
