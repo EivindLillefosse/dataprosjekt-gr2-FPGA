@@ -23,7 +23,7 @@ entity cnn_top is
         CONV_1_IMAGE_SIZE     : integer := IMAGE_SIZE;
         CONV_1_KERNEL_SIZE    : integer := 3;
         CONV_1_INPUT_CHANNELS : integer := 1;
-        CONV_1_NUM_FILTERS    : integer := 8;
+        CONV_1_NUM_FILTERS    : integer := 32;
         CONV_1_STRIDE         : integer := 1;
         CONV_1_BLOCK_SIZE     : integer := 2;
 
@@ -33,8 +33,8 @@ entity cnn_top is
         -- Parameters for 2nd convolution layer
         CONV_2_IMAGE_SIZE     : integer := ((IMAGE_SIZE - CONV_1_KERNEL_SIZE + 1) / CONV_1_STRIDE)/ POOL_1_BLOCK_SIZE;
         CONV_2_KERNEL_SIZE    : integer := 3;
-        CONV_2_INPUT_CHANNELS : integer := 8;
-        CONV_2_NUM_FILTERS    : integer := 16;
+        CONV_2_INPUT_CHANNELS : integer := 32;
+        CONV_2_NUM_FILTERS    : integer := 64;
         CONV_2_STRIDE         : integer := 1;
         CONV_2_BLOCK_SIZE     : integer := 2;
 
@@ -44,8 +44,8 @@ entity cnn_top is
         -- Parameters for fully connected layers
         FC1_NODES_IN      : integer := (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
                                         (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
-                                        CONV_2_NUM_FILTERS;  -- 5*5*16 = 400
-        FC1_NODES_OUT     : integer := 64;
+                                        CONV_2_NUM_FILTERS;  -- 5*5*64 = 1600
+        FC1_NODES_OUT     : integer := 128;
         FC2_NODES_OUT     : integer := 10  -- Final classification output
     
     );
