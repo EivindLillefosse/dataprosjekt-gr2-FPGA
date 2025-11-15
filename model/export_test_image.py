@@ -129,6 +129,26 @@ def export_npz_reference(image, category, category_idx, output_path="model/test_
     print(f"✓ Reference NPZ saved to: {output_path}")
 
 
+def export_bytes_txt(image, output_path="model/test_image_bytes.txt"):
+    """Export the image as a text file with lines formatted for easy TB writes.
+
+    Each line corresponds to one row and is written as:
+      Write(8, [0x00, 0xFF, ...]);
+    """
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    with open(output_path, 'w') as f:
+        for row in range(image.shape[0]):
+            cols = []
+            for col in range(image.shape[1]):
+                val = int(image[row, col])
+                cols.append(f"0x{val:02X}")
+            line = "Write(8, [" + ", ".join(cols) + "]);\n"
+            f.write(line)
+
+    print(f"✓ Bytes text exported to: {output_path}")
+
+
 def visualize_image(image, category):
     """Display the test image (optional, requires matplotlib)."""
     try:
@@ -229,6 +249,7 @@ def main():
     print("\nExporting test image...")
     export_vhdl_package(image, category=category, category_idx=category_idx)
     export_npz_reference(image, category, category_idx)
+    export_bytes_txt(image, output_path=f"model/test_image_bytes_{category}.txt")
     
     # Visualize
     if not args.no_viz:
