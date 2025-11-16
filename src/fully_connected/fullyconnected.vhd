@@ -48,6 +48,8 @@ architecture RTL of fullyconnected is
     signal calc_compute_en : std_logic;
     signal calc_results    : WORD_ARRAY_32(0 to NODES_OUT-1);
     signal calc_done       : std_logic_vector(NODES_OUT-1 downto 0);
+    -- Registered pipeline stage for calc_results to allow a clocked bias-add step
+    signal calc_results_reg : WORD_ARRAY_32(0 to NODES_OUT-1);
     
     -- Signals for bias addition
     type bias_array_t is array (natural range <>) of signed(7 downto 0);
@@ -55,7 +57,6 @@ architecture RTL of fullyconnected is
     signal biased_results  : WORD_ARRAY_16(0 to NODES_OUT-1);
     
     -- Signals for ReLU
-    signal relu_in_data    : WORD_ARRAY_16(0 to NODES_OUT-1);
     signal data_valid      : std_logic;
     signal data_out        : WORD_ARRAY_16(0 to NODES_OUT-1);
     signal valid_out       : std_logic;
@@ -135,17 +136,35 @@ begin
         end generate;
     end generate;
 
-    -- Add bias to calculation results before ReLU 
-    biased_results_proc: process(calc_results, bias_regs)
+    -- Pipeline step 1: register raw calculation results so the bias-add can be clocked
+    calc_results_reg_proc: process(clk)
     begin
-        for i in 0 to NODES_OUT-1 loop
-            -- calc_results are in a higher fractional format (e.g. Q2.12).
-            -- Shift right by 6 to convert to Q1.6 before adding the bias (which is Q1.6).
-            -- Do arithmetic on signed types, then convert to std_logic_vector.
-            biased_results(i) <= std_logic_vector(
-                resize( shift_right( signed(calc_results(i)), 6 ), 16 ) + resize(bias_regs(i), 16)
-            );
-        end loop;
+        if rising_edge(clk) then
+            if rst = '1' then
+                calc_results_reg <= (others => (others => '0'));
+            else
+                calc_results_reg <= calc_results;
+            end if;
+        end if;
+    end process;
+
+    -- Pipeline step 2: clocked bias addition and downscale to Q1.6 (16-bit)
+    biased_results_proc: process(clk)
+    begin
+        if rising_edge(clk) then
+            if rst = '1' then
+                biased_results <= (others => (others => '0'));
+            else
+                for i in 0 to NODES_OUT-1 loop
+                    -- calc_results are in a higher fractional format (e.g. Q2.12).
+                    -- Shift right by 6 to convert to Q1.6 before adding the bias (which is Q1.6).
+                    -- Do arithmetic on signed types, then convert to std_logic_vector.
+                    biased_results(i) <= std_logic_vector(
+                        resize( shift_right( signed(calc_results_reg(i)), 6 ), 16 ) + resize(bias_regs(i), 16)
+                    );
+                end loop;
+            end if;
+        end if;
     end process;
 
     -- ReLU Activation Layer (takes scaled Q1.6 results)
