@@ -8,7 +8,7 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 
-package test_image_pkg2 is
+package test_image_pkg is
 
     constant TEST_IMAGE_SIZE : integer := 28;
     constant TEST_IMAGE_CATEGORY : string := "aircraft carrier";
@@ -47,7 +47,7 @@ package test_image_pkg2 is
         (  0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0)
     );
 
-end package test_image_pkg2;
+end package test_image_pkg;
 
-package body test_image_pkg2 is
-end package body test_image_pkg2;
+package body test_image_pkg is
+end package body test_image_pkg;
