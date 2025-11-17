@@ -22,7 +22,7 @@ TRAINING_DATA_FOLDER = "model/training_data"
 EPOCHS = 5
 BATCH_SIZE = 128
 SAMPLES_PER_CLASS = 1000
-TEST_ENABLED = False  # Set to False to skip visualizations for faster execution
+TEST_ENABLED = True  # Set to False to skip visualizations for faster execution
 
 def load_data():
     """Load and preprocess data from training folder."""
@@ -80,12 +80,12 @@ def create_model(num_classes):
     print("Creating model...")
     
     model = Sequential([
-        Conv2D(8, (3,3), activation='relu', input_shape=(28,28,1)),
+        Conv2D(32, (3,3), activation='relu', input_shape=(28,28,1)),
         MaxPooling2D(2,2),
-        Conv2D(16, (3,3), activation='relu'),
+        Conv2D(64, (3,3), activation='relu'),
         MaxPooling2D(2,2),
         Flatten(),
-        Dense(64, activation='relu'),
+        Dense(128, activation='relu'),
         Dense(num_classes, activation='softmax')
     ])
     
