@@ -16,7 +16,7 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 use work.types_pkg.all;
 
-entity top is
+entity top_pcb is
     generic (
         IMAGE_WIDTH : integer := 28
     );
@@ -37,11 +37,11 @@ entity top is
         VGA_VS_O : out std_logic;
         VGA_R    : out std_logic_vector(3 downto 0);
         VGA_G    : out std_logic_vector(3 downto 0);
-        VGA_B    : out std_logic_vector(3 downto 0);
+        VGA_B    : out std_logic_vector(3 downto 0)
     );
-end top;
+end top_pcb;
 
-architecture Behavioral of top is
+architecture Behavioral of top_pcb is
     signal valid_out_spi_in_cnn : std_logic;
     signal valid_out_cnn_in_spi : std_logic;
 
