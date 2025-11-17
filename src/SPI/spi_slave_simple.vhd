@@ -53,7 +53,6 @@ architecture RTL of SPI_SLAVE is
     signal spi_clk_falling_edge_en   : std_logic;
     signal bit_cnt            : unsigned(BIT_CNT_WIDTH-1 downto 0);
     signal bit_cnt_max        : std_logic;
-    signal last_bit_en        : std_logic;
     signal load_data_en       : std_logic;
     signal data_shiftreg         : std_logic_vector(WORD_SIZE-1 downto 0);
     signal slave_ready        : std_logic;
@@ -121,29 +120,15 @@ begin
     bit_cnt_max <= '1' when (bit_cnt = WORD_SIZE-1) else '0';
 
     -- -------------------------------------------------------------------------
-    --  LAST BIT FLAG REGISTER
-    -- -------------------------------------------------------------------------
-
-    -- The flag of last bit of received byte is only registered the flag of
-    -- maximal value of the bit counter.
-    last_bit_en_process : process (CLK)
-    begin
-        if (rising_edge(CLK)) then
-            if (RESET = '1') then
-                last_bit_en <= '0';
-            else
-                last_bit_en <= bit_cnt_max;
-            end if;
-        end if;
-    end process;
-
-    -- -------------------------------------------------------------------------
     --  RECEIVED DATA VALID FLAG
     -- -------------------------------------------------------------------------
 
     -- Received data from master are valid when falling edge of SPI clock is
     -- detected and the last bit of received byte is detected.
-    rx_data_valid <= spi_clk_falling_edge_en and last_bit_en;
+    -- NOTE: use bit_cnt_max directly to avoid an extra registered cycle that
+    -- introduces a one-byte latency. This makes the DATA_OUT_VALID pulse
+    -- align immediately after the last bit falling edge.
+    rx_data_valid <= spi_clk_falling_edge_en and bit_cnt_max;
 
     -- -------------------------------------------------------------------------
     --  SHIFT REGISTER BUSY FLAG REGISTER
@@ -187,7 +172,8 @@ begin
             if (load_data_en = '1') then
                 data_shiftreg <= DATA_IN;
             elsif (spi_clk_rising_edge_en = '1' and cs_n_reg = '0') then
-                data_shiftreg <= data_shiftreg(WORD_SIZE-2 downto 0) & mosi_reg;
+                -- Only shift in MOSI when receiving, don't echo it back
+                data_shiftreg <= data_shiftreg(WORD_SIZE-2 downto 0) & '0';
             end if;
         end if;
     end process;
@@ -196,15 +182,31 @@ begin
     --  MISO REGISTER
     -- -------------------------------------------------------------------------
 
-    -- The output MISO register ensures that the bits are transmit to the master
+    -- The output MISO register transmits DATA_IN (CNN output) to the master
     -- when is not assert cs_n_reg and falling edge of SPI clock is detected.
     miso_process : process (CLK)
     begin
         if (rising_edge(CLK)) then
-            if (load_data_en = '1') then
+            if (RESET = '1') then
+                MISO <= '0';
+            elsif (load_data_en = '1') then
                 MISO <= DATA_IN(WORD_SIZE-1);
             elsif (spi_clk_falling_edge_en = '1' and cs_n_reg = '0') then
                 MISO <= data_shiftreg(WORD_SIZE-1);
+            end if;
+        end if;
+    end process;
+
+    -- -------------------------------------------------------------------------
+    --  RECEIVED DATA OUTPUT
+    -- -------------------------------------------------------------------------
+    
+    -- Capture received data from MOSI into a separate register
+    rx_data_process : process (CLK)
+    begin
+        if (rising_edge(CLK)) then
+            if (spi_clk_rising_edge_en = '1' and cs_n_reg = '0') then
+                DATA_OUT <= DATA_OUT(WORD_SIZE-2 downto 0) & mosi_reg;
             end if;
         end if;
     end process;
@@ -214,7 +216,6 @@ begin
     -- -------------------------------------------------------------------------
 
     DATA_IN_READY  <= slave_ready;
-    DATA_OUT     <= data_shiftreg;
     DATA_OUT_VALID <= rx_data_valid;
 
 end architecture;
