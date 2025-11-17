@@ -173,8 +173,7 @@ architecture Structural of cnn_top is
     signal fc2_out_valid         : std_logic;
     signal fc2_out_data          : WORD_ARRAY_16(0 to FC2_NODES_OUT-1);
     signal fc2_in_ready          : std_logic;
-    -- Placeholder register for final output (registered argmax result)
-    signal output_guess_reg : WORD := (others => '0');
+    -- final output (argmax result)
 
 begin
     -- Instantiate 1st convolution layer
@@ -444,9 +443,8 @@ begin
     seq_input_valid <= fc1_out_valid;
     seq_input_data  <= fc1_out_data;
     
-    -- Placeholder for output_guess (will be driven by argmax)
-    -- Register output_guess so it is only updated when a new FC2 result is accepted.
-    output_guess <= output_guess_reg;
+    -- Directly map the final output guess from FC2 output word 0 lower 8 bits
+    output_guess <= fc2_out_data(0)(7 downto 0);
     output_valid  <= fc2_out_valid;  -- Use FC2 valid for final output
 
     -- Connect top-level input requests to conv1's input requests
@@ -508,19 +506,6 @@ begin
         end if;
     end process;
 
-    -- Update output_guess only when FC2 produces a new accepted result.
-    -- Do NOT clear output_guess on reset; keep previous value unless new accepted result arrives.
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if rst = '1' then
-                output_guess_reg <= (others => '0');
-            else
-                if fc2_out_valid = '1' and output_ready = '1' then
-                    output_guess_reg <= fc2_out_data(0)(7 downto 0);
-                end if;
-            end if;
-        end if;
-    end process;
+    -- output_guess is combinationally derived from FC2 output[0] lower byte
 
 end Structural;

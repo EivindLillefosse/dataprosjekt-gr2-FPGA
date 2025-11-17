@@ -28,6 +28,7 @@ entity fullcon_controller is
         
         -- Input interface (from previous layer)
         input_valid     : in  std_logic;
+        argmax_done     : in  std_logic;
         input_index     : in  integer range 0 to NODES_IN-1;
         
         -- Control signals to calculation module
@@ -109,7 +110,8 @@ begin
                     end if;
                 
                 when DONE =>
-                    if input_valid = '0' then
+
+                    if input_valid = '0' or argmax_done = '1' then
                         calc_clear <= '1';
                         state      <= IDLE;
                     end if;

@@ -225,6 +225,10 @@ def main():
                     help="Use MNIST training set instead of test set")
     parser.add_argument("--no-viz", action="store_true",
                     help="Skip visualization")
+    parser.add_argument("--second-category", type=str, default=None,
+                    help="(Optional) Export a second test image package for this QuickDraw category")
+    parser.add_argument("--second-index", type=int, default=0,
+                    help="(Optional) Sample index for the second exported image")
     
     args = parser.parse_args()
     
@@ -254,6 +258,23 @@ def main():
     # Visualize
     if not args.no_viz:
         visualize_image(image, category)
+
+    # Optionally export a second image/package
+    if args.second_category is not None:
+        print(f"\nExporting second test image: {args.second_category} index={args.second_index}...")
+        if args.source == "mnist":
+            sec_image, sec_category, sec_idx = load_mnist_sample(index=args.second_index, use_train=args.mnist_train)
+        else:
+            sec_image, sec_category, sec_idx = load_quickdraw_sample(training_folder=args.training_folder,
+                                                                    category=args.second_category,
+                                                                    index=args.second_index)
+        # Write second VHDL package to a distinct file
+        export_vhdl_package(sec_image, output_path=f"src/test_images/test_image_pkg2.vhd",
+                            category=sec_category, category_idx=sec_idx)
+        export_npz_reference(sec_image, sec_category, sec_idx, output_path="model/test_image_reference_2.npz")
+        export_bytes_txt(sec_image, output_path=f"model/test_image_bytes_{sec_category}_2.txt")
+        if not args.no_viz:
+            visualize_image(sec_image, sec_category)
     
     print("\n" + "=" * 80)
     print("✓ Export complete!")

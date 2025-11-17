@@ -117,6 +117,7 @@ begin
             rst             => rst,
             input_valid     => pixel_in_valid,
             input_index     => pixel_in_index,
+            argmax_done     => arg_done_s,
             calc_clear      => calc_clear,
             calc_compute_en => calc_compute_en,
             calc_done       => calc_done,
@@ -201,36 +202,9 @@ begin
             done    => arg_done_s,
             max_idx => arg_max_idx_s
           );
-
-        -- Present argmax result on the module output port 0 as a 16-bit value
-        -- Latch the result once argmax completes and hold until new computation starts
-        fc2_out_proc: process(clk)
-        begin
-            if rising_edge(clk) then
-                if rst = '1' then
-                    fc2_pixel_out   <= (others => (others => '0'));
-                    fc2_pixel_valid <= '0';
-                    arg_result_latched <= '0';
-                else
-                    -- Clear latch when new computation starts (controller will pulse data_valid)
-                    if data_valid = '1' then
-                        arg_result_latched <= '0';
-                        fc2_pixel_valid <= '0';
-                    -- Latch argmax result on first done assertion
-                    elsif arg_done_s = '1' and arg_result_latched = '0' then
-                        fc2_pixel_out <= (others => (others => '0'));
-                        -- Place the 9-bit index in the lower bits of the 16-bit word
-                        fc2_pixel_out(0) <= std_logic_vector(resize(arg_max_idx_s, 16));
-                        fc2_pixel_valid <= '1';
-                        arg_result_latched <= '1';
-                    end if;
-                end if;
-            end if;
-        end process fc2_out_proc;
-
-        -- Drive module outputs for LAYER_ID = 1
-        pixel_out_data  <= fc2_pixel_out;
-        pixel_out_valid <= fc2_pixel_valid;
+          -- Drive outputs directly when argmax finishes: place index in element 0, zeros elsewhere
+          pixel_out_valid <= arg_done_s;
+          pixel_out_data  <= (0 => std_logic_vector(resize(arg_max_idx_s, 16)), others => (others => '0'));
     end generate;
 
     -- For LAYER_ID = 0 the outputs are driven by the ReLU path
