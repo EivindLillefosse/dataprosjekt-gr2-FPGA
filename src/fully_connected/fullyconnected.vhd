@@ -52,7 +52,12 @@ architecture RTL of fullyconnected is
     -- Signals for bias addition
     type bias_array_t is array (natural range <>) of signed(7 downto 0);
     signal bias_regs       : bias_array_t(0 to NODES_OUT-1);
+    -- Prevent Vivado from optimizing away or merging this register; keep full vector
     signal biased_results  : WORD_ARRAY_16(0 to NODES_OUT-1);
+    attribute keep : string;
+    attribute keep of biased_results : signal is "true";
+    attribute syn_keep : string;
+    attribute syn_keep of biased_results : signal is "true";
     
     -- Signals for ReLU
     signal relu_in_data    : WORD_ARRAY_16(0 to NODES_OUT-1);
@@ -135,16 +140,21 @@ begin
         end generate;
     end generate;
 
-    -- Add bias to calculation results before ReLU 
-    biased_results_proc: process(calc_results, bias_regs)
+    -- First convert high-precision calculation results down to Q1.6 (16-bit)
+    relu_input_proc: process(calc_results)
     begin
         for i in 0 to NODES_OUT-1 loop
-            -- calc_results are in a higher fractional format (e.g. Q2.12).
-            -- Shift right by 6 to convert to Q1.6 before adding the bias (which is Q1.6).
-            -- Do arithmetic on signed types, then convert to std_logic_vector.
-            biased_results(i) <= std_logic_vector(
-                resize( shift_right( signed(calc_results(i)), 6 ), 16 ) + resize(bias_regs(i), 16)
-            );
+            -- Shift right by 6 to convert from Q2.12 (or similar) to Q1.6
+            relu_in_data(i) <= std_logic_vector( resize( shift_right( signed(calc_results(i)), 6 ), 16 ) );
+        end loop;
+    end process;
+
+    -- Add bias to the converted results before ReLU (matches conv_layer_modular pattern)
+    biased_results_proc: process(relu_in_data, bias_regs)
+    begin
+        for i in 0 to NODES_OUT-1 loop
+            -- Perform arithmetic on signed types, then convert back to std_logic_vector
+            biased_results(i) <= std_logic_vector( signed(relu_in_data(i)) + resize(bias_regs(i), 16) );
         end loop;
     end process;
 

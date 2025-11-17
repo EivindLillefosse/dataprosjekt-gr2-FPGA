@@ -28,8 +28,8 @@ entity calc_index is
         enable  : in  std_logic;  -- Start requesting pixels
         
         -- Request to upstream (max pooling layer) - only row/col needed
-        req_row     : out integer range 0 to INPUT_SIZE-1;
-        req_col     : out integer range 0 to INPUT_SIZE-1;
+        req_row     : out integer; -- plain integer to match top-level signals
+        req_col     : out integer; -- plain integer to match top-level signals
         req_valid   : out std_logic;
         
         -- Input from max pooling: all 16 channels at once (16x8 bits)
@@ -54,11 +54,30 @@ architecture Structural of calc_index is
     constant NUM_POSITIONS : integer := INPUT_SIZE * INPUT_SIZE;  -- 25 spatial positions
     
     signal position_counter : integer range 0 to NUM_POSITIONS-1 := 0;
+    attribute keep_pos_cnt : string;
+    attribute keep_pos_cnt of position_counter : signal is "true";
+    attribute syn_keep_pos_cnt : string;
+    attribute syn_keep_pos_cnt of position_counter : signal is "true";
     signal channel_counter  : integer range 0 to INPUT_CHANNELS-1 := 0;
+    attribute keep_chan_cnt : string;
+    attribute keep_chan_cnt of channel_counter : signal is "true";
+    attribute syn_keep_chan_cnt : string;
+    attribute syn_keep_chan_cnt of channel_counter : signal is "true";
     signal internal_done    : std_logic := '0';
     signal pool_data_captured : WORD_ARRAY_16(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
     signal data_valid       : std_logic := '0';
     signal last_chan        : std_logic := '0';
+    -- Registered outputs for request coordinates to preserve in synthesis
+    signal req_row_reg : integer := 0;
+    attribute keep_req_row_reg : string;
+    attribute keep_req_row_reg of req_row_reg : signal is "true";
+    attribute syn_keep_req_row_reg : string;
+    attribute syn_keep_req_row_reg of req_row_reg : signal is "true";
+    signal req_col_reg : integer := 0;
+    attribute keep_req_col_reg : string;
+    attribute keep_req_col_reg of req_col_reg : signal is "true";
+    attribute syn_keep_req_col_reg : string;
+    attribute syn_keep_req_col_reg of req_col_reg : signal is "true";
 begin
     
     -- Main state machine: request Pool2 position, capture 16 channels, send to FC1 sequentially
@@ -72,6 +91,8 @@ begin
                 data_valid <= '0';
                 pool_data_captured <= (others => (others => '0'));
                 last_chan <= '0';
+                req_row_reg <= 0;
+                req_col_reg <= 0;
             elsif enable = '1' then
                 if internal_done = '1' then
                     -- Restart
@@ -79,6 +100,8 @@ begin
                     channel_counter <= 0;
                     internal_done <= '0';
                     data_valid <= '0';
+                    req_row_reg <= 0;
+                    req_col_reg <= 0;
                 else
                     -- When Pool2 delivers data, capture it and start sending channels
                     if pool_pixel_valid = '1' and data_valid = '0' then
@@ -107,8 +130,14 @@ begin
                                 -- All positions done (we just finished the last position)
                                 internal_done <= '1';
                             else
-                                -- Move to next position
+                                -- Move to next position and update row/col incrementally
                                 position_counter <= position_counter + 1;
+                                if req_col_reg = INPUT_SIZE - 1 then
+                                    req_col_reg <= 0;
+                                    req_row_reg <= req_row_reg + 1;
+                                else
+                                    req_col_reg <= req_col_reg + 1;
+                                end if;
                             end if;
                         end if;
                     end if;
@@ -122,9 +151,13 @@ begin
     
     -- Reverse calculation: position to 2D coordinates
     -- position = row * INPUT_SIZE + col
-    req_row     <= position_counter / INPUT_SIZE;
-    req_col     <= position_counter mod INPUT_SIZE;
+    req_row     <= req_row_reg;
+    req_col     <= req_col_reg;
     req_valid   <= enable and not internal_done and not data_valid;  -- Only request when not processing channels
+
+    -- Update registered request coordinates incrementally together with position_counter
+    -- This avoids using division/mod operations which synthesize to library div/mod
+    -- and can generate poor QOR. We update row/col when position_counter increments.
     
     -- Output current channel from captured data
     fc_pixel_out   <= pool_data_captured(channel_counter);
