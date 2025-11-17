@@ -62,7 +62,9 @@ entity SPI_top is
             VGA_VS_O : out std_logic;
             VGA_R    : out std_logic_vector(3 downto 0);
             VGA_G    : out std_logic_vector(3 downto 0);
-            VGA_B    : out std_logic_vector(3 downto 0)
+            VGA_B    : out std_logic_vector(3 downto 0);
+
+            OUTPUT_GUESS : in WORD
     );
 
           
@@ -129,7 +131,7 @@ SPI_slave_inst : entity work.SPI_SLAVE
     DATA_OUT_VALID => valid_out_spi_in_memory
   );
 
-VGA_inst : entity work.VGA_top
+VGA_inst : entity work.vga_top
   GENERIC MAP (
     IMAGE_WIDTH => IMAGE_WIDTH,
     IMAGE_HEIGHT => IMAGE_WIDTH
@@ -146,7 +148,9 @@ VGA_inst : entity work.VGA_top
 
     spi_vga_addr => VGA_ADDR,
     spi_vga_data => VGA_DATA,
-    vga_frame_start => VGA_FRAME_START
+    vga_frame_start => VGA_FRAME_START,
+
+    output_guess => OUTPUT_GUESS
   );  
 
 end Behavioral;

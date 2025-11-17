@@ -100,7 +100,9 @@ SPI_inst : entity work.SPI_top
         VGA_VS_O    => VGA_VS_O,
         VGA_R       => VGA_R,
         VGA_G       => VGA_G,
-        VGA_B       => VGA_B
+        VGA_B       => VGA_B,
+
+        OUTPUT_GUESS => data_tx
     );
 
 CNN_inst : entity work.CNN_top

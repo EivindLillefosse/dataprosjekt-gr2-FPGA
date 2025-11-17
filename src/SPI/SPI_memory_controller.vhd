@@ -205,11 +205,14 @@ begin
     -- col_row_req_ready is high when at least one buffer is complete
     col_row_req_ready <= BRAM_A_last_written or BRAM_B_last_written or BRAM_C_last_written;
     
-    -- Address multiplexers: Select read or write address based on we signal
-    -- When writing (we='1'), use write address; when reading (we='0'), use read address
-    bram_A_addra <= bram_A_addr_writea when bram_A_wea = "1" else bram_A_addr_reada;
-    bram_B_addra <= bram_B_addr_writea when bram_B_wea = "1" else bram_B_addr_reada;
-    bram_C_addra <= bram_C_addr_writea when bram_C_wea = "1" else bram_C_addr_reada;
+    -- Address multiplexers: prefer read address while the read FSM is active.
+    -- This avoids a race where a write enable and write address are asserted
+    -- in the same clock edge as a freshly calculated read address; in
+    -- post-synthesis the mux may select the write address and return the
+    -- wrong data. During read servicing states select the read address.
+    bram_A_addra <= bram_A_addr_writea when (bram_A_wea = "1" and (read_state = READ_IDLE or read_state = WAIT_FOR_DATA)) else bram_A_addr_reada;
+    bram_B_addra <= bram_B_addr_writea when (bram_B_wea = "1" and (read_state = READ_IDLE or read_state = WAIT_FOR_DATA)) else bram_B_addr_reada;
+    bram_C_addra <= bram_C_addr_writea when (bram_C_wea = "1" and (read_state = READ_IDLE or read_state = WAIT_FOR_DATA)) else bram_C_addr_reada;
     
     -- Latch which buffer VGA should read from at the start of each frame
     -- This prevents tearing when buffers switch mid-frame

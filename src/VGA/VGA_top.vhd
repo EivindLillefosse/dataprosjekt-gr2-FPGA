@@ -15,6 +15,7 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.std_logic_unsigned.all;
 use IEEE.NUMERIC_STD.ALL;  -- For to_unsigned function
+use work.types_pkg.all;
 
 -- Uncomment the following library declaration if instantiating
 -- any Xilinx primitives in this code.
@@ -39,7 +40,9 @@ entity vga_top is
            -- Interface to SPI Memory Controller (port B - reads from busy buffer)
            spi_vga_addr : out STD_LOGIC_VECTOR (9 downto 0);  -- Address to SPI controller
            spi_vga_data : in  STD_LOGIC_VECTOR (7 downto 0);  -- Data from SPI controller
-           vga_frame_start : out STD_LOGIC  -- Pulse at start of each frame
+           vga_frame_start : out STD_LOGIC;  -- Pulse at start of each frame
+
+           output_guess : in WORD  -- CNN output guess to display
     );
 end vga_top;
 
@@ -108,6 +111,29 @@ signal vga_blue_reg : std_logic_vector(3 downto 0) := (others =>'0');
 signal vga_red : std_logic_vector(3 downto 0);
 signal vga_green : std_logic_vector(3 downto 0);
 signal vga_blue : std_logic_vector(3 downto 0);
+
+-- RGB mapping function: returns 12-bit RGB (R[11:8], G[7:4], B[3:0])
+function map_rgb(output_guess_in : in WORD; gray_in : in std_logic_vector(7 downto 0)) return std_logic_vector is
+  variable rgb12 : std_logic_vector(11 downto 0) := (others => '0');
+  variable g4 : std_logic_vector(3 downto 0) := gray_in(7 downto 4);
+  variable idx : integer := to_integer(unsigned(output_guess_in));
+begin
+  case idx is
+    when 8 =>
+      -- Yellow scale: R and G follow grayscale, B = 0
+      rgb12(11 downto 8) := g4; -- R
+      rgb12(7 downto 4)  := g4; -- G
+      rgb12(3 downto 0)  := (others => '0'); -- B
+    when others =>
+      -- Default: greyscale on all channels
+      rgb12(11 downto 8) := g4; -- R
+      rgb12(7 downto 4)  := g4; -- G
+      rgb12(3 downto 0)  := g4; -- B
+  end case;
+  return rgb12;
+end function;
+
+signal rgb12_sig : std_logic_vector(11 downto 0) := (others => '0');
 
 -- 28x28 image scaling signals
 signal scaled_x : integer range 0 to IMAGE_WIDTH-1;
@@ -205,11 +231,12 @@ begin
   
   -- Generate memory address from scaled coordinates
   -- Address = row * width + column
-  -- Display grayscale image (same value for R, G, B makes grayscale)
-  -- Use delayed control signals that match the BRAM data pipeline
-  vga_red   <= grayscale_pixel when (active_d2 = '1' and pixel_in_image_d2 = '1') else (others => '0');
-  vga_green <= grayscale_pixel when (active_d2 = '1' and pixel_in_image_d2 = '1') else (others => '0');
-  vga_blue  <= grayscale_pixel when (active_d2 = '1' and pixel_in_image_d2 = '1') else (others => '0');
+  -- Map pixel to RGB using `map_rgb` and delayed control signals that match the BRAM data pipeline
+  rgb12_sig <= map_rgb(output_guess, spi_vga_data) when (active_d2 = '1' and pixel_in_image_d2 = '1') else (others => '0');
+
+  vga_red   <= rgb12_sig(11 downto 8);
+  vga_green <= rgb12_sig(7 downto 4);
+  vga_blue  <= rgb12_sig(3 downto 0);
   
   
  ------------------------------------------------------
