@@ -1,4 +1,5 @@
 import os
+import argparse
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.utils import to_categorical
@@ -21,8 +22,9 @@ import subprocess
 TRAINING_DATA_FOLDER = "model/training_data"
 EPOCHS = 5
 BATCH_SIZE = 128
-SAMPLES_PER_CLASS = 1000
-TEST_ENABLED = False  # Set to False to skip visualizations for faster execution
+SAMPLES_PER_CLASS = 9000
+TEST_ENABLED = True  # Set to False to skip visualizations for faster execution
+TEST_SAMPLES_PER_CLASS = 1000  # number of samples per class reserved for testing (tail of each file)
 
 def load_data():
     """Load and preprocess data from training folder."""
@@ -36,7 +38,8 @@ def load_data():
     labels = []
     
     for i, category in enumerate(categories):
-        drawings = np.load(f'{TRAINING_DATA_FOLDER}/{category}.npy')[:SAMPLES_PER_CLASS]
+        # Load training + reserved test samples so we can use the tail for evaluation without retraining
+        drawings = np.load(f'{TRAINING_DATA_FOLDER}/{category}.npy')[:(SAMPLES_PER_CLASS + TEST_SAMPLES_PER_CLASS)]
         data.append(drawings)
         labels.append(np.full(drawings.shape[0], i))
     
@@ -80,12 +83,12 @@ def create_model(num_classes):
     print("Creating model...")
     
     model = Sequential([
-        Conv2D(8, (3,3), activation='relu', input_shape=(28,28,1)),
+        Conv2D(30, (3,3), activation='relu', input_shape=(28,28,1)),
         MaxPooling2D(2,2),
-        Conv2D(16, (3,3), activation='relu'),
+        Conv2D(60, (3,3), activation='relu'),
         MaxPooling2D(2,2),
         Flatten(),
-        Dense(64, activation='relu'),
+        Dense(120, activation='relu'),
         Dense(num_classes, activation='softmax')
     ])
     
@@ -209,14 +212,17 @@ def evaluate_model(model, x, y, categories):
         print("ℹ️ Skipping visualizations (intermediate values still captured)")
         return
     
-    # Create test set
-    test_samples_per_class = 50
+    # Create test set: use the tail TEST_SAMPLES_PER_CLASS (or available) from each class
+    test_samples_per_class = min(1000, TEST_SAMPLES_PER_CLASS)
     test_indices = []
     for i in range(len(categories)):
-        class_start = i * SAMPLES_PER_CLASS
-        class_indices = np.arange(class_start, class_start + test_samples_per_class)
+        class_start = i * (SAMPLES_PER_CLASS + TEST_SAMPLES_PER_CLASS)
+        class_end = class_start + SAMPLES_PER_CLASS + TEST_SAMPLES_PER_CLASS
+        # Use the last `test_samples_per_class` samples from this class region
+        start_idx = max(class_start + SAMPLES_PER_CLASS, class_end - test_samples_per_class)
+        class_indices = np.arange(start_idx, start_idx + test_samples_per_class)
         test_indices.extend(class_indices)
-    
+
     test_indices = np.array(test_indices)
     x_test = x[test_indices]
     y_test = y[test_indices]
@@ -243,8 +249,21 @@ def evaluate_model(model, x, y, categories):
     # Confusion matrix
     plt.figure(figsize=(10, 8))
     cm = confusion_matrix(true_classes, predicted_classes)
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                xticklabels=categories, yticklabels=categories)
+    # Draw heatmap (annotate cells), then overlay bold diagonal counts to ensure visibility
+    ax = sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                     xticklabels=categories, yticklabels=categories)
+    # Overlay diagonal values in bold so (class,class) shows clearly even if background is dark
+    try:
+        n = cm.shape[0]
+        thresh = cm.max() / 2.0 if cm.max() != 0 else 0
+        for i in range(n):
+            val = int(cm[i, i])
+            color = 'white' if cm[i, i] > thresh else 'black'
+            # text coordinates: x=i (column), y=i (row)
+            ax.text(i + 0.5, i + 0.5, f"{val}", ha='center', va='center', color=color, fontsize=10, fontweight='bold')
+    except Exception:
+        # If overlay fails for any reason, continue silently (heatmap still has annotations)
+        pass
     plt.title('Confusion Matrix')
     plt.xlabel('Predicted')
     plt.ylabel('True')
@@ -302,16 +321,21 @@ def export_model(model):
 
 def create_test_dataset_for_quantization(x, categories):
     """Create a small test dataset for quantization validation."""
-    test_samples = 50
-    test_samples_per_class = min(5, test_samples // len(categories))
+    # Use up to 1000 samples per class from the reserved tail for quantization tests
+    test_samples_per_class = min(TEST_SAMPLES_PER_CLASS, 1000)
+    test_samples = test_samples_per_class * len(categories)
     x_test_quant = []
     y_test_quant = []
     
     for i in range(len(categories)):
-        class_start = i * SAMPLES_PER_CLASS
-        class_end = min(class_start + test_samples_per_class, (i + 1) * SAMPLES_PER_CLASS)
-        x_test_quant.extend(x[class_start:class_end])
-        y_test_quant.extend([i] * (class_end - class_start))
+        # Region for this class in the loaded x: (i * (SAMPLES_PER_CLASS+TEST_SAMPLES_PER_CLASS)) ..
+        class_region_start = i * (SAMPLES_PER_CLASS + TEST_SAMPLES_PER_CLASS)
+        class_region_end = class_region_start + SAMPLES_PER_CLASS + TEST_SAMPLES_PER_CLASS
+        # Take last `test_samples_per_class` for this class
+        start_idx = max(class_region_start + SAMPLES_PER_CLASS, class_region_end - test_samples_per_class)
+        end_idx = start_idx + test_samples_per_class
+        x_test_quant.extend(x[start_idx:end_idx])
+        y_test_quant.extend([i] * (end_idx - start_idx))
     
     return np.array(x_test_quant[:test_samples]), np.array(y_test_quant[:test_samples])
 
@@ -736,27 +760,62 @@ def export_to_FPGA(model, q_format="Q1.6"):
 
 # Main execution
 if __name__ == "__main__":
-    # Load and preprocess data
+    parser = argparse.ArgumentParser(description='Train/evaluate/export CNN for FPGA or run tests using an existing model')
+    parser.add_argument('--only-tests', action='store_true', help='Skip training; load an existing SavedModel and run captures/evaluations')
+    parser.add_argument('--model-path', type=str, default='model/saved_model', help='Path to SavedModel to load when --only-tests is used')
+    args = parser.parse_args()
+
+    # Load and preprocess data (always load data so categories are available for reports)
     x, y, categories = load_data()
-    
-    # Create and train model
-    model = create_model(len(categories))
-    model = train_model(model, x, y)
-    
-    # Evaluate model (if enabled)
-    evaluate_model(model, x, y, categories)
-    
-    # Export model
-    export_model(model)
-    
-    # Quantization pipeline
-    x_test_quant, y_test_quant = create_test_dataset_for_quantization(x, categories)
-    quantized_model = quantize_model_post_training(x)
-    test_quantized_model(quantized_model, x_test_quant, y_test_quant)
-    apply_manual_quantization(model, x_test_quant, y_test_quant)
-    
-    # Convert to ONNX
-    convert_to_onnx()
-    
-    # Export weights and biases for FPGA
-    export_to_FPGA(model)
+
+    if args.only_tests:
+        # Load saved model and run evaluation/capture without retraining
+        print(f"--only-tests specified: attempting to load model from '{args.model_path}'")
+        try:
+            model = tf.keras.models.load_model(args.model_path)
+            print(f"✓ Loaded SavedModel from '{args.model_path}'")
+        except Exception as e:
+            print(f"Error: failed to load SavedModel from '{args.model_path}': {e}")
+            print("Exiting. If you want to train instead, run without --only-tests.")
+            raise SystemExit(1)
+
+        # Run evaluations and intermediate captures using the loaded model
+        evaluate_model(model, x, y, categories)
+        # Run quantization pipeline on the preexisting saved model if available
+        try:
+            quantized_model = quantize_model_post_training(x)
+            # Create small quant test set
+            x_test_quant, y_test_quant = create_test_dataset_for_quantization(x, categories)
+            test_quantized_model(quantized_model, x_test_quant, y_test_quant)
+        except Exception as e:
+            print(f"Warning: quantization pipeline failed or skipped: {e}")
+
+        # Optional manual quantization for analysis
+        try:
+            x_test_quant, y_test_quant = create_test_dataset_for_quantization(x, categories)
+            apply_manual_quantization(model, x_test_quant, y_test_quant)
+        except Exception as e:
+            print(f"Warning: manual quantization simulation failed or skipped: {e}")
+
+    else:
+        # Create and train model
+        model = create_model(len(categories))
+        model = train_model(model, x, y)
+
+        # Evaluate model (if enabled)
+        evaluate_model(model, x, y, categories)
+
+        # Export model
+        export_model(model)
+
+        # Quantization pipeline
+        x_test_quant, y_test_quant = create_test_dataset_for_quantization(x, categories)
+        quantized_model = quantize_model_post_training(x)
+        test_quantized_model(quantized_model, x_test_quant, y_test_quant)
+        apply_manual_quantization(model, x_test_quant, y_test_quant)
+
+        # Convert to ONNX
+        convert_to_onnx()
+
+        # Export weights and biases for FPGA
+        export_to_FPGA(model)

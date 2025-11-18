@@ -60,8 +60,8 @@ architecture Behavioral of fullcon_memory_controller is
     PORT (
         clka : IN STD_LOGIC;
         ena : IN STD_LOGIC;
-        addra : IN STD_LOGIC_VECTOR;
-        douta : OUT STD_LOGIC_VECTOR
+        addra : IN STD_LOGIC_VECTOR(ADDR_WIDTH-1 downto 0);
+        douta : OUT STD_LOGIC_VECTOR(DATA_WIDTH-1 downto 0)
     );
     END COMPONENT;
 
@@ -69,8 +69,8 @@ architecture Behavioral of fullcon_memory_controller is
     PORT (
         clka : IN STD_LOGIC;
         ena : IN STD_LOGIC;
-        addra : IN STD_LOGIC_VECTOR;
-        douta : OUT STD_LOGIC_VECTOR
+        addra : IN STD_LOGIC_VECTOR(ADDR_WIDTH-1 downto 0);
+        douta : OUT STD_LOGIC_VECTOR(DATA_WIDTH-1 downto 0)
     );
     END COMPONENT;
 

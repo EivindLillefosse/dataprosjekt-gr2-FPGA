@@ -1,8 +1,9 @@
 ; Layer 6: dense_1 biases (Q1.6 format)
-; Shape: (10,)
-; Total elements: 10
+; Shape: (20,)
+; Total elements: 20
 ; Quantization: 6 fractional bits
 ; Range: [-2.0, 1.984375]
 ;
 memory_initialization_radix=16; Hexadecimal format
-memory_initialization_vector=03,01,01,FF,FE,FA,03,03,FD,01;
+memory_initialization_vector=0B,FB,06,0A,FB,FD,FE,00,FA,06,FC,F8,02,07,01,FD
+,FB,FA,06,FB;

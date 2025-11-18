@@ -1,11 +1,15 @@
 ; Layer 5: dense biases (Q1.6 format)
-; Shape: (64,)
-; Total elements: 64
+; Shape: (120,)
+; Total elements: 120
 ; Quantization: 6 fractional bits
 ; Range: [-2.0, 1.984375]
 ;
 memory_initialization_radix=16; Hexadecimal format
-memory_initialization_vector=00,FF,01,00,00,FF,FF,FF,FF,FF,FF,01,01,FF,00,FF
-,FF,FF,FF,FF,01,FF,00,FF,FF,02,02,00,FD,FE,FE,FF
-,FF,FF,01,FF,00,FF,FF,FD,FE,FF,FF,01,FF,FF,FF,FE
-,01,00,00,FF,00,FF,FF,00,00,00,00,00,00,FF,FF,FF;
+memory_initialization_vector=FE,00,FC,FF,FE,FE,00,FD,FF,FF,FE,FD,FE,00,FE,00
+,FD,FE,FF,FF,FD,05,FD,FF,FF,FE,FF,00,FC,FE,FD,01
+,FD,FF,FF,FF,FE,01,02,FF,FF,FF,FF,FB,00,FD,FD,FE
+,00,FE,FE,FE,FC,FB,FE,02,01,FB,04,FE,02,FF,FC,FE
+,01,FD,FF,FC,FD,FC,FD,FE,03,FC,FE,FC,FF,FD,02,FE
+,06,FE,FF,FE,FE,02,00,FF,FF,FF,04,FD,FD,FD,FE,FC
+,FE,02,FF,FF,05,FC,FF,FE,FF,FE,01,FF,FE,FC,02,FC
+,FD,FD,02,06,03,FD,00,FE;

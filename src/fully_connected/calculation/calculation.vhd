@@ -1,13 +1,13 @@
 ----------------------------------------------------------------------------------
 -- Company: NTNU
--- Engineer: Eivind Lillefosse
+-- Engineer: Nikolai Sandvik Nore
 -- 
 -- Create Date: 05.10.2025
--- Design Name: Convolution Engine
--- Module Name: convolution_engine - Behavioral
+-- Design Name: Fully Connected Calculation Module
+-- Module Name: calculation - Behavioral
 -- Project Name: CNN Accelerator
 -- Target Devices: Xilinx FPGA
--- Description: Modular convolution computation engine with MAC array
+-- Description: Modular fully connected computation engine with MAC array
 -- 
 ----------------------------------------------------------------------------------
 

@@ -19,6 +19,7 @@ use work.bias_pkg.all;
 
 entity conv_layer_modular is
     generic (
+        -- Parameters are set in top-level CNN module
         IMAGE_SIZE     : integer := 28;
         KERNEL_SIZE    : integer := 3;
         INPUT_CHANNELS : integer := 1;
@@ -46,12 +47,12 @@ entity conv_layer_modular is
         -- Data FROM upstream (input pixels)
         -- For LAYER_ID=0: Use lower 8 bits of each 16-bit word
         -- For LAYER_ID=1: Use full 16 bits
-        pixel_in            : in  WORD_ARRAY_16(0 to INPUT_CHANNELS-1);   -- Input pixel data (16-bit for flexibility)
+        pixel_in            : in  WORD_ARRAY_16(0 to INPUT_CHANNELS-1);-- Input pixel data (16-bit for flexibility)
         pixel_in_valid      : in  std_logic;                           -- Input data valid
         pixel_in_ready      : out std_logic;                           -- Ready to accept input data
 
         -- Data TO downstream (output result)
-        pixel_out           : out WORD_ARRAY_16(0 to NUM_FILTERS-1);     -- Output pixel data
+        pixel_out           : out WORD_ARRAY_16(0 to NUM_FILTERS-1);   -- Output pixel data
         pixel_out_valid     : out std_logic;                           -- Output data valid
         pixel_out_ready     : in  std_logic                            -- Downstream ready for data
     );
@@ -66,51 +67,50 @@ architecture Behavioral of conv_layer_modular is
     -- Internal connection signals
     
     -- Weight memory controller signals
-    signal weight_load_req   : std_logic;
-    signal weight_kernel_row : integer range 0 to KERNEL_SIZE-1;
-    signal weight_kernel_col : integer range 0 to KERNEL_SIZE-1;
-    signal weight_channel    : integer range 0 to INPUT_CHANNELS-1 := 0;
-    signal weight_data       : WORD_ARRAY(0 to NUM_FILTERS-1);
+    signal weight_load_req     : std_logic;
+    signal weight_kernel_row   : integer range 0 to KERNEL_SIZE-1;
+    signal weight_kernel_col   : integer range 0 to KERNEL_SIZE-1;
+    signal weight_channel      : integer range 0 to INPUT_CHANNELS-1 := 0;
+    signal weight_data         : WORD_ARRAY(0 to NUM_FILTERS-1);
     
     -- Position calculator signals
-    signal pos_advance    : std_logic;
-    signal current_row    : integer;
-    signal current_col    : integer;
-    signal input_row      : integer;
-    signal input_col      : integer;
-    signal region_row     : integer range 0 to KERNEL_SIZE-1;
-    signal region_col     : integer range 0 to KERNEL_SIZE-1;
-    signal region_done    : std_logic;
-    signal pos_layer_done : std_logic;
+    signal pos_advance         : std_logic;
+    signal current_row         : integer;
+    signal current_col         : integer;
+    signal input_row           : integer;
+    signal input_col           : integer;
+    signal region_row          : integer range 0 to KERNEL_SIZE-1;
+    signal region_col          : integer range 0 to KERNEL_SIZE-1;
+    signal region_done         : std_logic;
+    signal pos_layer_done      : std_logic;
     
     -- Store requested output position
-    signal requested_out_row : integer := 0;
-    signal requested_out_col : integer := 0;
+    signal requested_out_row   : integer := 0;
+    signal requested_out_col   : integer := 0;
     signal output_req_accepted : std_logic := '0';
-    signal pos_req_pulse : std_logic := '0';  -- Single-cycle pulse for position calculator
+    signal pos_req_pulse       : std_logic := '0';  -- Single-cycle pulse for position calculator
     
     -- Convolution engine signals
-    signal compute_en : std_logic;
-    signal compute_clear : std_logic;
-    signal compute_done : std_logic_vector(NUM_FILTERS-1 downto 0);
-    signal conv_results : WORD_ARRAY_32(0 to NUM_FILTERS-1);
+    signal compute_en          : std_logic;
+    signal compute_clear       : std_logic;
+    signal compute_done        : std_logic_vector(NUM_FILTERS-1 downto 0);
+    signal conv_results        : WORD_ARRAY_32(0 to NUM_FILTERS-1);
     
     -- ReLU activation signals
-    signal relu_data_out : WORD_ARRAY_16(0 to NUM_FILTERS-1); 
-    signal relu_valid_out : std_logic;
+    signal relu_data_out       : WORD_ARRAY_16(0 to NUM_FILTERS-1); 
+    signal relu_valid_out      : std_logic;
 
     -- Bias registers and biased result signals (local flexible type sized by NUM_FILTERS)
     type bias_local_t is array (natural range <>) of signed(7 downto 0);
-    signal bias_regs : bias_local_t(0 to NUM_FILTERS-1);
-    signal biased_results : WORD_ARRAY_16(0 to NUM_FILTERS-1);
-    signal biased_valid : std_logic;
-    -- Input to the ReLU block: biased_results shifted right by 6 (convert to Q1.6)
-    signal relu_input : WORD_ARRAY_16(0 to NUM_FILTERS-1);
+    signal bias_regs           : bias_local_t(0 to NUM_FILTERS-1);
+    signal biased_results      : WORD_ARRAY_16(0 to NUM_FILTERS-1);
+    signal biased_valid        : std_logic;
+
+    -- Input to the ReLU block: biased_results 
+    signal relu_input          : WORD_ARRAY_16(0 to NUM_FILTERS-1);
 
     -- Internal signal to capture controller's notion of output_valid (not used to drive module output)
-    signal ctrl_output_valid : std_logic := '0';
-
-    -- Biases are provided by bias_pkg (generated from Python export)
+    signal ctrl_output_valid   : std_logic := '0';
 
 begin
 
@@ -128,21 +128,21 @@ begin
             if rst = '1' then
                 pixel_out_req_ready <= '0';
                 output_req_accepted <= '0';
-                requested_out_row <= 0;
-                requested_out_col <= 0;
-                pos_req_pulse <= '0';
+                requested_out_row   <=  0 ;
+                requested_out_col   <=  0 ;
+                pos_req_pulse       <= '0';
             else
                 -- Default: not ready for new requests, no pulse
                 pixel_out_req_ready <= '0';
-                pos_req_pulse <= '0';
+                pos_req_pulse       <= '0';
                 
                 -- Accept output position requests when not currently processing
                 if pixel_out_req_valid = '1' and output_req_accepted = '0' then
                     pixel_out_req_ready <= '1';  -- Single-cycle acknowledgement pulse
-                    requested_out_row <= pixel_out_req_row;
-                    requested_out_col <= pixel_out_req_col;
+                    requested_out_row   <= pixel_out_req_row;
+                    requested_out_col   <= pixel_out_req_col;
                     output_req_accepted <= '1';
-                    pos_req_pulse <= '1';  -- Single-cycle pulse to position calculator
+                    pos_req_pulse       <= '1';  -- Single-cycle pulse to position calculator
                 end if;
                 
                 -- Clear flag when output is complete and downstream has accepted it
@@ -184,40 +184,40 @@ begin
             BLOCK_SIZE => BLOCK_SIZE
         )
         port map (
-            clk => clk,
-            rst => rst,
-            advance => pos_advance,
+            clk         => clk,
+            rst         => rst,
+            advance     => pos_advance,
             req_out_row => requested_out_row,
             req_out_col => requested_out_col,
-            req_valid => pos_req_pulse,
-            row => current_row,
-            col => current_col,
-            input_row => input_row,
-            input_col => input_col,
-            region_row => region_row,
-            region_col => region_col,
+            req_valid   => pos_req_pulse,
+            row         => current_row,
+            col         => current_col,
+            input_row   => input_row,
+            input_col   => input_col,
+            region_row  => region_row,
+            region_col  => region_col,
             region_done => region_done,
-            layer_done => pos_layer_done
+            layer_done  => pos_layer_done
         );
 
     -- Convolution Engine
     conv_engine : entity work.convolution_engine
         generic map (
-            NUM_FILTERS => NUM_FILTERS,
-            INPUT_CHANNELS => INPUT_CHANNELS,
-            MAC_DATA_WIDTH => INPUT_WIDTH,
+            NUM_FILTERS      => NUM_FILTERS,
+            INPUT_CHANNELS   => INPUT_CHANNELS,
+            MAC_DATA_WIDTH   => INPUT_WIDTH,
             MAC_RESULT_WIDTH => INPUT_WIDTH*2
         )
         port map (
-            clk => clk,
-            rst => rst,
-            clear => compute_clear,
-            pixel_data => pixel_in_flat,
+            clk           => clk,
+            rst           => rst,
+            clear         => compute_clear,
+            pixel_data    => pixel_in_flat,
             channel_index => weight_channel,
-            weight_data => weight_data,
-            compute_en => compute_en,
-            results => conv_results,
-            compute_done => compute_done
+            weight_data   => weight_data,
+            compute_en    => compute_en,
+            results       => conv_results,
+            compute_done  => compute_done
         );
 
 
@@ -256,10 +256,7 @@ begin
         end generate;
     end generate;
 
-    -- Fallback: for other layer IDs (e.g. LAYER_ID = 0) drive relu_input from biased_results
-    -- scaled/converted appropriately or default to zero to avoid undriven signals. Here we
-    -- simply map the lower 8 bits into the 16-bit word for LAYER_ID = 0 so the signal remains
-    -- well-defined. Adjust if a different behavior is required.
+    -- For LAYER_ID = 0, directly connect conv_results to relu_input without shifting
     gen_relu_input_other : if LAYER_ID = 0 generate
         gen_relu_input_other_loop : for i in 0 to NUM_FILTERS-1 generate
             relu_input(i) <= std_logic_vector( resize(signed(conv_results(i)), 16) );
@@ -267,7 +264,7 @@ begin
     end generate;
 
     -- Add bias to convolution results before ReLU
-    -- CRITICAL: Convert bias from Q1.6 to Q2.12 before adding to conv results
+    -- CRITICAL: Convert bias from Q1.6 to Q2.12 before adding to conv results, to get correct final format
     biased_results_proc: process(relu_input, bias_regs)
     begin
         for i in 0 to NUM_FILTERS-1 loop
@@ -284,12 +281,12 @@ begin
             DATA_WIDTH => 16  -- Changed from 8 to 16
         )
         port map (
-            clk => clk,
-            rst => rst,
-            data_in => biased_results,
+            clk        => clk,
+            rst        => rst,
+            data_in    => biased_results,
             data_valid => biased_valid,
-            data_out => relu_data_out,
-            valid_out => relu_valid_out
+            data_out   => relu_data_out,
+            valid_out  => relu_valid_out
         );
 
     controller : entity work.convolution_controller
@@ -300,39 +297,39 @@ begin
             NUM_INPUT_CHANNELS => INPUT_CHANNELS
         )
         port map (
-            clk => clk,
-            rst => rst,
+            clk    => clk,
+            rst    => rst,
             enable => output_req_accepted,  -- Only enable controller when we have an active request
 
             -- Weight memory controller
-            weight_load_req => weight_load_req,
+            weight_load_req   => weight_load_req,
             weight_kernel_row => weight_kernel_row,
             weight_kernel_col => weight_kernel_col,
-            weight_channel => weight_channel,
+            weight_channel    => weight_channel,
 
             -- Input interface (mapped to new request/response signals)
-            input_ready => pixel_in_ready,
-            input_valid => pixel_in_valid,
+            input_ready       => pixel_in_ready,
+            input_valid       => pixel_in_valid,
 
             -- Position calculator interface
-            pos_advance => pos_advance,
-            region_row => region_row,
-            region_col => region_col,
-            region_done => region_done,
-            layer_done => pos_layer_done,
+            pos_advance       => pos_advance,
+            region_row        => region_row,
+            region_col        => region_col,
+            region_done       => region_done,
+            layer_done        => pos_layer_done,
             
             -- Convolution engine interface
-            compute_en => compute_en,
-            compute_clear => compute_clear,
-            compute_done => compute_done,
+            compute_en        => compute_en,
+            compute_clear     => compute_clear,
+            compute_done      => compute_done,
 
             -- Biased results ready signal
-            scaled_ready => biased_valid,
-            scaled_done  => relu_valid_out,
+            scaled_ready      => biased_valid,
+            scaled_done       => relu_valid_out,
 
             -- Output interface (mapped to new request/response signals)
-            output_valid => ctrl_output_valid,
-            output_ready => pixel_out_ready
+            output_valid      => ctrl_output_valid,
+            output_ready      => pixel_out_ready
         );
 
     -- Connect position calculation outputs

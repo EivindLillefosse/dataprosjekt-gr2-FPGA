@@ -23,7 +23,7 @@ entity cnn_top is
         CONV_1_IMAGE_SIZE     : integer := IMAGE_SIZE;
         CONV_1_KERNEL_SIZE    : integer := 3;
         CONV_1_INPUT_CHANNELS : integer := 1;
-        CONV_1_NUM_FILTERS    : integer := 8;
+        CONV_1_NUM_FILTERS    : integer := 30;
         CONV_1_STRIDE         : integer := 1;
         CONV_1_BLOCK_SIZE     : integer := 2;
 
@@ -33,8 +33,8 @@ entity cnn_top is
         -- Parameters for 2nd convolution layer
         CONV_2_IMAGE_SIZE     : integer := ((IMAGE_SIZE - CONV_1_KERNEL_SIZE + 1) / CONV_1_STRIDE)/ POOL_1_BLOCK_SIZE;
         CONV_2_KERNEL_SIZE    : integer := 3;
-        CONV_2_INPUT_CHANNELS : integer := 8;
-        CONV_2_NUM_FILTERS    : integer := 16;
+        CONV_2_INPUT_CHANNELS : integer := CONV_1_NUM_FILTERS;
+        CONV_2_NUM_FILTERS    : integer := 60;
         CONV_2_STRIDE         : integer := 1;
         CONV_2_BLOCK_SIZE     : integer := 2;
 
@@ -44,9 +44,9 @@ entity cnn_top is
         -- Parameters for fully connected layers
         FC1_NODES_IN          : integer := (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
                                            (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
-                                           CONV_2_NUM_FILTERS;  -- 5*5*16 = 400
-        FC1_NODES_OUT         : integer := 64;
-        FC2_NODES_OUT         : integer := 10  -- Final classification output
+                                           CONV_2_NUM_FILTERS;  -- 5*5*60 = 1500
+        FC1_NODES_OUT         : integer := 120;
+        FC2_NODES_OUT         : integer := 20  -- Final classification output
     );
     port (
         -- Control signals
@@ -142,7 +142,7 @@ architecture Structural of cnn_top is
     signal calc_curr_index       : integer range 0 to FC1_NODES_IN-1;
     signal calc_done             : std_logic;
 
-    -- Alias for pool2<->calc_index ready coupling (match debug top)
+    -- Alias for pool2<->calc_index ready coupling
     signal calc_pool_ready      : std_logic;
 
     -- Signals for FC1 output
@@ -329,7 +329,7 @@ begin
             pixel_out_ready     => calc_pool_ready
         );
 
-    -- Instantiate calc_index (flattens 3D tensor to 1D for FC layer)
+    -- Instantiate calc_index (flattens 3D tensor to 1D for FC layer), also requests pixels from pool2
     calc_index_inst: entity work.calc_index
         generic map (
             NODES_IN       => FC1_NODES_IN,      -- 400
@@ -337,27 +337,27 @@ begin
             INPUT_SIZE     => (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE)  -- 5
         )
         port map (
-            clk             => clk,
-            rst             => rst,
-            enable          => calc_index_enable,
+            clk              => clk,
+            rst              => rst,
+            enable           => calc_index_enable,
             
             -- Request TO pool2
-            req_row         => calc_req_row,
-            req_col         => calc_req_col,
-            req_valid       => calc_req_valid,
+            req_row          => calc_req_row,
+            req_col          => calc_req_col,
+            req_valid        => calc_req_valid,
             
             -- Input FROM pool2 (all 16 channels at once)
-            pool_pixel_data => pool2_pixel_out,
+            pool_pixel_data  => pool2_pixel_out,
             pool_pixel_valid => pool2_pixel_out_valid,
             pool_pixel_ready => calc_pool_ready,
             
             -- Output TO fc1 (selected single channel pixel)
-            fc_pixel_out    => calc_fc_pixel,
-            fc_pixel_valid  => calc_fc_valid,
-            fc_pixel_ready  => fc1_in_ready,
+            fc_pixel_out     => calc_fc_pixel,
+            fc_pixel_valid   => calc_fc_valid,
+            fc_pixel_ready   => fc1_in_ready,
             
-            curr_index      => calc_curr_index,
-            done            => calc_done
+            curr_index       => calc_curr_index,
+            done             => calc_done
         );
 
     -- Enable calc_index (always enabled in this top-level)
@@ -366,9 +366,9 @@ begin
     -- Instantiate FC1 layer (400 inputs -> 64 outputs)
     fc1_inst: entity work.fullyconnected
         generic map (
-            NODES_IN  => FC1_NODES_IN,   -- 400
-            NODES_OUT => FC1_NODES_OUT,  -- 64
-            LAYER_ID  => 0               -- First FC layer (uses layer_5_dense weights/biases)
+            NODES_IN        => FC1_NODES_IN,   -- 400
+            NODES_OUT       => FC1_NODES_OUT,  -- 64
+            LAYER_ID        => 0               -- First FC layer (uses layer_5_dense weights/biases)
         )
         port map (
             clk             => clk,
@@ -389,7 +389,7 @@ begin
     -- Sequencer between FC1 and FC2 (use fc_sequencer as in debug top)
     fc_sequencer: entity work.fc_sequencer
         generic map (
-            NUM_NEURONS => FC1_NODES_OUT  -- 64
+            NUM_NEURONS  => FC1_NODES_OUT  -- 64
         )
         port map (
             clk          => clk,
@@ -410,9 +410,9 @@ begin
     -- Instantiate FC2 layer (64 inputs -> 10 outputs)
     fc2_inst: entity work.fullyconnected
         generic map (
-            NODES_IN  => FC1_NODES_OUT,  -- 64
-            NODES_OUT => FC2_NODES_OUT,  -- 10
-            LAYER_ID  => 1               -- Second FC layer (uses layer_6_dense_1 weights/biases)
+            NODES_IN        => FC1_NODES_OUT,  -- 64
+            NODES_OUT       => FC2_NODES_OUT,  -- 10
+            LAYER_ID        => 1               -- Second FC layer (uses layer_6_dense_1 weights/biases)
         )
         port map (
             clk             => clk,
@@ -431,29 +431,25 @@ begin
         );
 
     -- Interconnect: FC1 -> Sequencer
-    seq_input_valid <= fc1_out_valid;
-    seq_input_data  <= fc1_out_data;
+    seq_input_valid    <= fc1_out_valid;
+    seq_input_data     <= fc1_out_data;
     
     -- Directly map the final output guess from FC2 output word 0 lower 8 bits
-    output_guess <= fc2_out_data(0)(7 downto 0);
-    output_valid  <= fc2_out_valid;  -- Use FC2 valid for final output
+    output_guess       <= fc2_out_data(0)(7 downto 0);
+    output_valid       <= fc2_out_valid;  -- Use FC2 valid for final output
 
     -- Connect top-level input requests to conv1's input requests
-    input_req_row    <= conv1_in_req_row;
-    input_req_col    <= conv1_in_req_col;
-    input_req_valid  <= conv1_in_req_valid;
+    input_req_row      <= conv1_in_req_row;
+    input_req_col      <= conv1_in_req_col;
+    input_req_valid    <= conv1_in_req_valid;
     conv1_in_req_ready <= input_req_ready;
 
     
     -- Connect top-level input data to conv1's input data
     -- Treat the 8-bit `input_pixel` as unsigned, resize to 16 bits, then
     -- reinterpret as signed stored as a 16-bit std_logic_vector.
-    conv1_pixel_in(0) <= std_logic_vector(signed(resize(unsigned(input_pixel), 16)));
+    conv1_pixel_in(0)    <= std_logic_vector(signed(resize(unsigned(input_pixel), 16)));
     conv1_pixel_in_valid <= input_valid;
     input_ready          <= conv1_pixel_in_ready;
-
-    -- (Removed debug-only registers and corresponding processes)
-
-    -- output_guess is combinationally derived from FC2 output[0] lower byte
 
 end Structural;

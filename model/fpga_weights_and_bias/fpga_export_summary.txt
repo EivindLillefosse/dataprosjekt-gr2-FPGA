@@ -8,7 +8,7 @@ Value Range: [-2.0, 1.984375]
 Step Size: 0.015625
 
 Total Layers Processed: 4
-Total Parameters: 27562
+Total Parameters: 199100
 
 Files Generated:
   - layer_0_conv2d_weights.coe

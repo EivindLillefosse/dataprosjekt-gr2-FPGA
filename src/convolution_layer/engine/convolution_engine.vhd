@@ -29,7 +29,7 @@ entity convolution_engine is
         clear        : in  std_logic;
         compute_en   : in  std_logic;
         
-        -- Input data (multi-channel input bus) - flattened to support variable widths
+        -- Input data (multi-channel input bus) - flattened to support variable widths, and for easier slicing
         pixel_data   : in  std_logic_vector(INPUT_CHANNELS * MAC_DATA_WIDTH - 1 downto 0);
         channel_index: in  integer range 0 to INPUT_CHANNELS-1;
         weight_data  : in  WORD_ARRAY(0 to NUM_FILTERS-1);
@@ -42,9 +42,9 @@ end convolution_engine;
 
 architecture Behavioral of convolution_engine is
     -- Internal signed types and signals to match MAC port types
-    subtype signed_word is signed(MAC_DATA_WIDTH-1 downto 0);
-    type signed_word_array is array (natural range <>) of signed(MAC_DATA_WIDTH-1 downto 0);
-    subtype signed_result is signed(MAC_RESULT_WIDTH-1 downto 0);
+    subtype signed_word      is signed(MAC_DATA_WIDTH-1 downto 0);
+    type signed_word_array   is array (natural range <>) of signed(MAC_DATA_WIDTH-1 downto 0);
+    subtype signed_result    is signed(MAC_RESULT_WIDTH-1 downto 0);
     type signed_result_array is array (natural range <>) of signed(MAC_RESULT_WIDTH-1 downto 0);
 
     signal results_s    : signed_result_array(0 to NUM_FILTERS-1);

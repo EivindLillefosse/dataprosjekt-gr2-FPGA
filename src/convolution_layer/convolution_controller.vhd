@@ -18,45 +18,45 @@ use work.types_pkg.all;
 
 entity convolution_controller is
     generic (
-        NUM_FILTERS : integer := 8;
-        KERNEL_SIZE : integer := 3;
+        NUM_FILTERS        : integer := 8;
+        KERNEL_SIZE        : integer := 3;
         NUM_INPUT_CHANNELS : integer := 1
     );
     port (
-        clk           : in  std_logic;
-        rst           : in  std_logic;
-        enable        : in  std_logic;
+        clk                : in  std_logic;
+        rst                : in  std_logic;
+        enable             : in  std_logic;
         
         -- Memory controller interface
-        weight_load_req   : out std_logic;
-        weight_kernel_row : out integer range 0 to KERNEL_SIZE-1;
-        weight_kernel_col : out integer range 0 to KERNEL_SIZE-1;
+        weight_load_req    : out std_logic;
+        weight_kernel_row  : out integer range 0 to KERNEL_SIZE-1;
+        weight_kernel_col  : out integer range 0 to KERNEL_SIZE-1;
         -- Channel index (iterates over input channels, not filters)
-        weight_channel    : out integer range 0 to NUM_INPUT_CHANNELS-1;
+        weight_channel     : out integer range 0 to NUM_INPUT_CHANNELS-1;
          
         -- (bias handled locally in conv top module)
                 
         -- Position calculator interface  
-        pos_advance   : out std_logic;
-        region_row    : in  integer range 0 to KERNEL_SIZE-1;
-        region_col    : in  integer range 0 to KERNEL_SIZE-1;
-        region_done   : in  std_logic;
-        layer_done    : in  std_logic;
+        pos_advance        : out std_logic;
+        region_row         : in  integer range 0 to KERNEL_SIZE-1;
+        region_col         : in  integer range 0 to KERNEL_SIZE-1;
+        region_done        : in  std_logic;
+        layer_done         : in  std_logic;
         
         -- Convolution engine interface
-        compute_en    : out std_logic;
-        compute_clear : out std_logic;
-        compute_done  : in  std_logic_vector(NUM_FILTERS-1 downto 0);
+        compute_en         : out std_logic;
+        compute_clear      : out std_logic;
+        compute_done       : in  std_logic_vector(NUM_FILTERS-1 downto 0);
 
         -- Indicates that scaling (and any pre-output processing) has completed
-        scaled_ready  : out std_logic;
-        scaled_done   : in  std_logic;
+        scaled_ready       : out std_logic;
+        scaled_done        : in  std_logic;
 
         -- I/O control
-        input_ready   : out std_logic;
-        input_valid   : in  std_logic;
-        output_valid  : out std_logic;
-        output_ready  : in  std_logic
+        input_ready        : out std_logic;
+        input_valid        : in  std_logic;
+        output_valid       : out std_logic;
+        output_ready       : in  std_logic
     );
 end convolution_controller;
 

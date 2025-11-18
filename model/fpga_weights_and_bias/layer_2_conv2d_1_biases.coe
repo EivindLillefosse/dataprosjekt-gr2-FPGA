@@ -1,8 +1,11 @@
 ; Layer 2: conv2d_1 biases (Q1.6 format)
-; Shape: (16,)
-; Total elements: 16
+; Shape: (60,)
+; Total elements: 60
 ; Quantization: 6 fractional bits
 ; Range: [-2.0, 1.984375]
 ;
 memory_initialization_radix=16; Hexadecimal format
-memory_initialization_vector=FE,FF,02,FE,00,FE,FE,FE,FF,01,FF,00,FE,00,FE,00;
+memory_initialization_vector=FE,FB,FE,F6,01,06,FA,F9,FF,FC,03,FE,FF,F9,FB,01
+,F8,FD,FD,01,FC,00,FE,F5,FF,F8,04,F4,05,FF,F5,F9
+,FE,F6,F6,FE,FA,FB,FE,FB,FC,FA,FE,F6,F3,FF,F4,FC
+,FE,FF,FF,FE,FC,FB,F4,FE,08,FF,FC,FE;
