@@ -154,8 +154,8 @@ begin
         wait for CLK_PERIOD*12;
 
         -- send 2 dummy bytes (optional)
-        --spi_send_byte(x"00"); bcount := bcount + 1;
-        --spi_send_byte(x"00"); bcount := bcount + 1;
+        spi_send_byte(x"00"); bcount := bcount + 1;
+        spi_send_byte(x"00"); bcount := bcount + 1;
 
         -- send image bytes row-major
         for r in 0 to IMAGE_WIDTH-1 loop
