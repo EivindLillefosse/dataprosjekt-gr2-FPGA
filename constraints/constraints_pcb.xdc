@@ -6,10 +6,6 @@
 set_property -dict { PACKAGE_PIN N12   IOSTANDARD LVCMOS33 } [get_ports { clk }];
 create_clock -add -name sys_clk_pin -period 10.00 -waveform {0 5} [get_ports { clk }];
 set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets clk]
-## Declare that the clk_wiz output clock is derived from the top-level clock
-## This prevents warnings about related clocks with no common primary source.
-## The exact instance path may vary; adjust if Vivado reports a different pin path.
-create_generated_clock -name clk_out1_clk_wiz_0 -source [get_ports { clk }] -divide_by 1 [get_pins SPI_inst/VGA_inst/clk_div_inst/inst/clk_out1]
 
 ## Reset button (active high) - using BTN0
 set_property -dict { PACKAGE_PIN A13    IOSTANDARD LVCMOS33 } [get_ports { rst }];

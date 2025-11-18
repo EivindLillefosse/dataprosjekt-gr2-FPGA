@@ -7,8 +7,9 @@
 -- Module Name: relu_layer - Behavioral
 -- Project Name: CNN Accelerator
 -- Target Devices: Xilinx FPGA
--- Description: Modular ReLU activation function
--- 
+-- Description: 
+-- Modular ReLU activation function
+-- Apply ReLU activation (max(0, x)) to an array of signed inputs.
 ----------------------------------------------------------------------------------
 
 library IEEE;

@@ -42,31 +42,30 @@ entity cnn_top is
         POOL_2_BLOCK_SIZE     : integer := 2;
         
         -- Parameters for fully connected layers
-        FC1_NODES_IN      : integer := (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
-                                        (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
-                                        CONV_2_NUM_FILTERS;  -- 5*5*16 = 400
-        FC1_NODES_OUT     : integer := 64;
-        FC2_NODES_OUT     : integer := 10  -- Final classification output
-    
+        FC1_NODES_IN          : integer := (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
+                                           (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE) * 
+                                           CONV_2_NUM_FILTERS;  -- 5*5*16 = 400
+        FC1_NODES_OUT         : integer := 64;
+        FC2_NODES_OUT         : integer := 10  -- Final classification output
     );
     port (
         -- Control signals
-        clk          : in  std_logic;
-        rst          : in  std_logic;
+        clk              : in  std_logic;
+        rst              : in  std_logic;
 
-        -- Request TO input provider (what input positions we need)
+        -- Request ROW and COL from frame buffer
         input_req_row    : out integer;
         input_req_col    : out integer;
         input_req_valid  : out std_logic;
         input_req_ready  : in  std_logic;
 
-        -- Data FROM input provider
+        -- Data from frame buffer
         input_pixel      : in  WORD;
         input_valid      : in  std_logic;
         input_ready      : out std_logic;
 
-        -- Data TO external consumer (final output)
-        output_guess     : out WORD;  -- Final classification (after argmax)
+        -- Guess to SPI out 
+        output_guess     : out WORD;          -- Final classification (after argmax)
         output_valid     : out std_logic;
         output_ready     : in  std_logic
     );
@@ -143,14 +142,6 @@ architecture Structural of cnn_top is
     signal calc_curr_index       : integer range 0 to FC1_NODES_IN-1;
     signal calc_done             : std_logic;
 
-    -- DEBUG-like internal registers (kept internal, no debug ports exposed)
-    signal conv1_active_out_row : integer := 0;
-    signal conv1_active_out_col : integer := 0;
-    signal pool1_active_out_row : integer := 0;
-    signal pool1_active_out_col : integer := 0;
-    signal conv2_active_out_row : integer := 0;
-    signal conv2_active_out_col : integer := 0;
-    signal prev_conv2_valid     : std_logic := '0';
     -- Alias for pool2<->calc_index ready coupling (match debug top)
     signal calc_pool_ready      : std_logic;
 
@@ -461,50 +452,7 @@ begin
     conv1_pixel_in_valid <= input_valid;
     input_ready          <= conv1_pixel_in_ready;
 
-    -- Register the active output position when request handshake completes
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if rst = '1' then
-                conv1_active_out_row <= 0;
-                conv1_active_out_col <= 0;
-                pool1_active_out_row <= 0;
-                pool1_active_out_col <= 0;
-                conv2_active_out_row <= 0;
-                conv2_active_out_col <= 0;
-            else
-                -- Capture Conv1's output position when request is accepted
-                if conv1_out_req_valid = '1' and conv1_out_req_ready = '1' then
-                    conv1_active_out_row <= conv1_out_req_row;
-                    conv1_active_out_col <= conv1_out_req_col;
-                end if;
-
-                -- Capture Pool1's output position when request is accepted
-                if pool1_out_req_valid = '1' and pool1_out_req_ready = '1' then
-                    pool1_active_out_row <= pool1_out_req_row;
-                    pool1_active_out_col <= pool1_out_req_col;
-                end if;
-
-                -- Capture Conv2's output position when request is accepted
-                if conv2_out_req_valid = '1' and conv2_out_req_ready = '1' then
-                    conv2_active_out_row <= conv2_out_req_row;
-                    conv2_active_out_col <= conv2_out_req_col;
-                end if;
-            end if;
-        end if;
-    end process;
-
-    -- Track previous conv2 valid for edge detection parity with debug top
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if rst = '1' then
-                prev_conv2_valid <= '0';
-            else
-                prev_conv2_valid <= conv2_pixel_out_valid;
-            end if;
-        end if;
-    end process;
+    -- (Removed debug-only registers and corresponding processes)
 
     -- output_guess is combinationally derived from FC2 output[0] lower byte
 
