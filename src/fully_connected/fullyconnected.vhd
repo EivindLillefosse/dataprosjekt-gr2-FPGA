@@ -54,10 +54,6 @@ architecture RTL of fullyconnected is
     signal bias_regs       : bias_array_t(0 to NODES_OUT-1);
     -- Prevent Vivado from optimizing away or merging this register; keep full vector
     signal biased_results  : WORD_ARRAY_16(0 to NODES_OUT-1);
-    attribute keep : string;
-    attribute keep of biased_results : signal is "true";
-    attribute syn_keep : string;
-    attribute syn_keep of biased_results : signal is "true";
     
     -- Signals for ReLU
     signal relu_in_data    : WORD_ARRAY_16(0 to NODES_OUT-1);

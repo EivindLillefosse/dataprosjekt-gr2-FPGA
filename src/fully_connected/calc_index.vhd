@@ -54,30 +54,14 @@ architecture Structural of calc_index is
     constant NUM_POSITIONS : integer := INPUT_SIZE * INPUT_SIZE;  -- 25 spatial positions
     
     signal position_counter : integer range 0 to NUM_POSITIONS-1 := 0;
-    attribute keep_pos_cnt : string;
-    attribute keep_pos_cnt of position_counter : signal is "true";
-    attribute syn_keep_pos_cnt : string;
-    attribute syn_keep_pos_cnt of position_counter : signal is "true";
     signal channel_counter  : integer range 0 to INPUT_CHANNELS-1 := 0;
-    attribute keep_chan_cnt : string;
-    attribute keep_chan_cnt of channel_counter : signal is "true";
-    attribute syn_keep_chan_cnt : string;
-    attribute syn_keep_chan_cnt of channel_counter : signal is "true";
     signal internal_done    : std_logic := '0';
     signal pool_data_captured : WORD_ARRAY_16(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
     signal data_valid       : std_logic := '0';
     signal last_chan        : std_logic := '0';
     -- Registered outputs for request coordinates to preserve in synthesis
     signal req_row_reg : integer := 0;
-    attribute keep_req_row_reg : string;
-    attribute keep_req_row_reg of req_row_reg : signal is "true";
-    attribute syn_keep_req_row_reg : string;
-    attribute syn_keep_req_row_reg of req_row_reg : signal is "true";
     signal req_col_reg : integer := 0;
-    attribute keep_req_col_reg : string;
-    attribute keep_req_col_reg of req_col_reg : signal is "true";
-    attribute syn_keep_req_col_reg : string;
-    attribute syn_keep_req_col_reg of req_col_reg : signal is "true";
 begin
     
     -- Main state machine: request Pool2 position, capture 16 channels, send to FC1 sequentially

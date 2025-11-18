@@ -445,7 +445,7 @@ begin
     
     -- Directly map the final output guess from FC2 output word 0 lower 8 bits
     output_guess <= fc2_out_data(0)(7 downto 0);
-    output_valid  <= fc2_out_valid;  -- Use FC2 valid for final output
+    output_valid  <= fc2_out_valid;                  -- Use FC2 valid for final output
 
     -- Connect top-level input requests to conv1's input requests
     input_req_row    <= conv1_in_req_row;

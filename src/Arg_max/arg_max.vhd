@@ -75,7 +75,7 @@ begin
             running <= '0';
             done <= '1';
             -- present outputs
-            max_idx <= to_unsigned(best_idx, IDX_W);
+            max_idx <= to_unsigned(best_idx, IDX_W) + to_unsigned(1, IDX_W); -- +1 to map 0-(N_INPUTS-1) to 1-N_INPUTS
             cur_idx <= 0;
           end if;
         end if;
