@@ -58,8 +58,6 @@ ip_repo/*
 Thumbs.db
 
 # Optional: ignore bitstreams and programming files
-*.bit
-*.bin
 *.mcs
 *.elf
 *.mem
