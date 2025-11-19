@@ -74,7 +74,7 @@ def load_data():
     # Preprocess data - NO NORMALIZATION (train on raw [0-255] to match VHDL)
     x = x.reshape(-1, 28, 28, 1).astype('float32')  # Keep raw pixel values
     y = to_categorical(y, num_classes=len(categories))
-    print('⚠️  Training on RAW [0-255] pixel values (matching VHDL implementation)')
+    print('WARNING: Training on RAW [0-255] pixel values (matching VHDL implementation)')
     
     return x, y, categories
     
@@ -161,7 +161,7 @@ def capture_intermediate_values(model, x_sample, categories):
                 # Save complete filter output for ALL filters
                 intermediate_data[f"layer_{i}_filter_{filter_idx}"] = filter_output
             
-            print(f"  ✓ Saved all {output.shape[-1]} filter outputs")
+            print(f"  OK: Saved all {output.shape[-1]} filter outputs")
         
         elif isinstance(layer, tf.keras.layers.MaxPooling2D):
             print(f"  MaxPooling2D pool_size: {layer.pool_size}")
@@ -187,7 +187,7 @@ def capture_intermediate_values(model, x_sample, categories):
     
     # Save intermediate data to files
     np.savez('model/intermediate_values.npz', **intermediate_data)
-    print(f"\n✓ Intermediate values saved to 'model/intermediate_values.npz'")
+    print(f"\nOK: Intermediate values saved to 'model/intermediate_values.npz'")
     
     return intermediate_data
 
@@ -199,7 +199,7 @@ def evaluate_model(model, x, y, categories):
     capture_intermediate_values(model, x, categories)
     
     if not TEST_ENABLED:
-        print("ℹ️ Visualization tests skipped (TEST_ENABLED=False)")
+        print("INFO: Visualization tests skipped (TEST_ENABLED=False)")
         return
         
     # Import visualization libraries only when needed
@@ -208,8 +208,8 @@ def evaluate_model(model, x, y, categories):
         from sklearn.metrics import confusion_matrix, classification_report
         import seaborn as sns
     except ImportError as e:
-        print(f"ℹ️ Visualization libraries not available: {e}")
-        print("ℹ️ Skipping visualizations (intermediate values still captured)")
+        print(f"INFO: Visualization libraries not available: {e}")
+        print("INFO: Skipping visualizations (intermediate values still captured)")
         return
     
     # Create test set: use the tail TEST_SAMPLES_PER_CLASS (or available) from each class
@@ -300,7 +300,7 @@ def evaluate_model(model, x, y, categories):
     accuracy = np.mean(predicted_classes == true_classes)
     print(f"\nTest Accuracy: {accuracy:.3f} ({accuracy*100:.1f}%)")
     
-    print("\n✓ Visualization files saved:")
+    print("\nOK: Visualization files saved:")
     print("  - model/sample_predictions.png")
     print("  - model/confusion_matrix.png") 
     print("  - model/misclassified_examples.png")
@@ -312,12 +312,12 @@ def export_model(model):
     try:
         # Save in Keras format with SavedModel structure
         model.save("model/saved_model", save_format='tf')
-        print("✓ Model exported as SavedModel at 'model/saved_model'.")
+        print("OK: Model exported as SavedModel at 'model/saved_model'.")
     except Exception as e:
         print(f"Warning: Failed to save model: {e}")
         # Fallback to the Keras HDF5 format
         model.save("model/saved_model_h5.h5")
-        print("✓ Model exported with fallback to Keras H5 at 'model/saved_model_h5.h5'.")
+        print("OK: Model exported with fallback to Keras H5 at 'model/saved_model_h5.h5'.")
 
 def create_test_dataset_for_quantization(x, categories):
     """Create a small test dataset for quantization validation."""
@@ -364,7 +364,7 @@ def quantize_model_post_training(x):
     with open('model/quantized_model.tflite', 'wb') as f:
         f.write(quantized_model)
     
-    print("✓ Post-training quantized model saved as 'model/quantized_model.tflite'")
+    print("OK: Post-training quantized model saved as 'model/quantized_model.tflite'")
     return quantized_model
 
 def test_quantized_model(quantized_model, x_test_quant, y_test_quant):
@@ -439,7 +439,7 @@ def apply_manual_quantization(model, x_test_quant, y_test_quant):
     # Test manual quantized model
     manual_predictions = manual_quant_model.predict(x_test_quant[:50])
     manual_accuracy = np.mean(np.argmax(manual_predictions, axis=1) == y_test_quant[:50])
-    print(f"✓ Manual quantization simulation accuracy: {manual_accuracy:.3f}")
+    print(f"OK: Manual quantization simulation accuracy: {manual_accuracy:.3f}")
     
     # Convert manual quantized model
     converter_manual = tf.lite.TFLiteConverter.from_keras_model(manual_quant_model)
@@ -449,7 +449,7 @@ def apply_manual_quantization(model, x_test_quant, y_test_quant):
     with open('model/quantized_manual_model.tflite', 'wb') as f:
         f.write(quantized_manual_model)
     
-    print("✓ Manual quantized model saved as 'model/quantized_manual_model.tflite'")
+    print("OK: Manual quantized model saved as 'model/quantized_manual_model.tflite'")
 
 def convert_to_onnx():
     """Convert SavedModel to ONNX format (optional for FPGA development)."""
@@ -461,9 +461,9 @@ def convert_to_onnx():
             "--saved-model", "model/saved_model",
             "--output", "model/quickdraw_model.onnx"
         ], capture_output=True, text=True, check=True)
-        print("✓ Model successfully converted to ONNX format: model/quickdraw_model.onnx")
+        print("OK: Model successfully converted to ONNX format: model/quickdraw_model.onnx")
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("ℹ️ ONNX conversion skipped (optional for FPGA development)")
+        print("INFO: ONNX conversion skipped (optional for FPGA development)")
 
 def export_to_FPGA(model, q_format="Q1.6"):
     """ Export model weights and biases for each layer to .txt files for FPGA use 
@@ -472,7 +472,7 @@ def export_to_FPGA(model, q_format="Q1.6"):
     No scaling adjustments needed during export.
     """
     print(f"\n=== Exporting Weights and Biases to FPGA ({q_format} format) ===")
-    print("✓ Model trained on RAW [0-255] inputs (matching VHDL implementation)")
+    print("OK: Model trained on RAW [0-255] inputs (matching VHDL implementation)")
     
     # Q1.6 format: 1 sign bit + 6 fractional bits = 7 bits total (signed 8-bit)
     # Range: -2.0 to +1.984375 (step size: 1/64 = 0.015625)
@@ -647,7 +647,7 @@ def export_to_FPGA(model, q_format="Q1.6"):
                         if len(quantized_weights) % 16 != 0:
                             f.write("\n")
                 
-                print(f"  ✓ Weights saved to: {weights_filename}")
+                print(f"  OK: Weights saved to: {weights_filename}")
                 total_params += len(quantized_weights)
             
             # Process biases (second element, if exists)
@@ -696,7 +696,7 @@ def export_to_FPGA(model, q_format="Q1.6"):
                     if len(quantized_biases) % 16 != 0:
                         f.write("\n")
                 
-                print(f"  ✓ Biases saved to: {biases_filename}")
+                print(f"  OK: Biases saved to: {biases_filename}")
                 total_params += len(quantized_biases)
                 # Store quantized biases for package emission later
                 if len(quantized_biases.shape) == 1 or isinstance(quantized_biases, (list, np.ndarray)):
@@ -726,7 +726,7 @@ def export_to_FPGA(model, q_format="Q1.6"):
                 if len(layer.get_weights()) > 1:
                     f.write(f"  - layer_{i}_{layer.name}_biases.coe\n")
     
-    print(f"\n✓ FPGA export complete!")
+    print(f"\nOK: FPGA export complete!")
     print(f"  - {layer_count} layers processed")
     print(f"  - {total_params} parameters exported")
     print(f"  - Files saved in: {output_dir}/")
@@ -752,7 +752,7 @@ def export_to_FPGA(model, q_format="Q1.6"):
                     vhd.write("    );\n")
                 vhd.write("end package bias_pkg;\n\n")
                 vhd.write("package body bias_pkg is\nend package body bias_pkg;\n")
-            print(f"✓ Wrote single VHDL bias package: {vhd_path}")
+            print(f"OK: Wrote single VHDL bias package: {vhd_path}")
         except Exception as e:
             print(f"! Failed to write combined bias VHDL package: {e}")
 
@@ -773,7 +773,7 @@ if __name__ == "__main__":
         print(f"--only-tests specified: attempting to load model from '{args.model_path}'")
         try:
             model = tf.keras.models.load_model(args.model_path)
-            print(f"✓ Loaded SavedModel from '{args.model_path}'")
+            print(f"OK: Loaded SavedModel from '{args.model_path}'")
         except Exception as e:
             print(f"Error: failed to load SavedModel from '{args.model_path}': {e}")
             print("Exiting. If you want to train instead, run without --only-tests.")
