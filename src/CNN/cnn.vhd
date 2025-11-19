@@ -332,8 +332,8 @@ begin
     -- Instantiate calc_index (flattens 3D tensor to 1D for FC layer), also requests pixels from pool2
     calc_index_inst: entity work.calc_index
         generic map (
-            NODES_IN       => FC1_NODES_IN,      -- 400
-            INPUT_CHANNELS => CONV_2_NUM_FILTERS, -- 16
+            NODES_IN       => FC1_NODES_IN,      -- 1500
+            INPUT_CHANNELS => CONV_2_NUM_FILTERS, -- 60
             INPUT_SIZE     => (((CONV_2_IMAGE_SIZE - CONV_2_KERNEL_SIZE + 1) / CONV_2_STRIDE) / POOL_2_BLOCK_SIZE)  -- 5
         )
         port map (
@@ -363,11 +363,11 @@ begin
     -- Enable calc_index (always enabled in this top-level)
     calc_index_enable <= '1';
 
-    -- Instantiate FC1 layer (400 inputs -> 64 outputs)
+    -- Instantiate FC1 layer (1500 inputs -> 120 outputs)
     fc1_inst: entity work.fullyconnected
         generic map (
-            NODES_IN        => FC1_NODES_IN,   -- 400
-            NODES_OUT       => FC1_NODES_OUT,  -- 64
+            NODES_IN        => FC1_NODES_IN,   -- 1500
+            NODES_OUT       => FC1_NODES_OUT,  -- 120
             LAYER_ID        => 0               -- First FC layer (uses layer_5_dense weights/biases)
         )
         port map (
@@ -389,7 +389,7 @@ begin
     -- Sequencer between FC1 and FC2 (use fc_sequencer as in debug top)
     fc_sequencer: entity work.fc_sequencer
         generic map (
-            NUM_NEURONS  => FC1_NODES_OUT  -- 64
+            NUM_NEURONS  => FC1_NODES_OUT  -- 120
         )
         port map (
             clk          => clk,
@@ -410,8 +410,8 @@ begin
     -- Instantiate FC2 layer (64 inputs -> 10 outputs)
     fc2_inst: entity work.fullyconnected
         generic map (
-            NODES_IN        => FC1_NODES_OUT,  -- 64
-            NODES_OUT       => FC2_NODES_OUT,  -- 10
+            NODES_IN        => FC1_NODES_OUT,  -- 120
+            NODES_OUT       => FC2_NODES_OUT,  -- 20
             LAYER_ID        => 1               -- Second FC layer (uses layer_6_dense_1 weights/biases)
         )
         port map (
