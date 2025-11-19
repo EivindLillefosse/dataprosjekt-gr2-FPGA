@@ -59,8 +59,8 @@ architecture Behavioral of weight_memory_controller is
 
     COMPONENT layer0_conv2d_weights
     PORT (
-        clka : IN STD_LOGIC;
-        ena : IN STD_LOGIC;
+        clka  : IN STD_LOGIC;
+        ena   : IN STD_LOGIC;
         addra : IN STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0);  -- address width derived from generics
         douta : OUT STD_LOGIC_VECTOR(WORD_SIZE*NUM_FILTERS-1 DOWNTO 0)
     );
@@ -85,8 +85,8 @@ begin
     gen_mem_0 : if LAYER_ID = 0 generate
         weight_mem_inst : layer0_conv2d_weights
         PORT MAP (
-            clka => clk,
-            ena => '1',
+            clka  => clk,
+            ena   => '1',
             addra => weight_addr,
             douta => weight_dout
         );
@@ -95,19 +95,14 @@ begin
     gen_mem_1 : if LAYER_ID = 1 generate
         weight_mem_inst_1 : layer2_conv2d_1_weights
         PORT MAP (
-            clka => clk,
-            ena => '1',
+            clka  => clk,
+            ena   => '1',
             addra => weight_addr,
             douta => weight_dout
         );
     end generate;
 
     -- Convert BRAM output into WORD_ARRAY elements (WORD_SIZE bits per filter)
-    -- Each WORD in the output corresponds to one filter's weight.
-    -- COE/BRAM uses MSB-first packing for our export: filter 0 is at the TOP WORD
-    -- (bits WORD_SIZE*NUM_FILTERS-1 downto WORD_SIZE*(NUM_FILTERS-1)), and
-    -- filter NUM_FILTERS-1 is at the BOTTOM (bits WORD_SIZE-1 downto 0).
-    -- Map accordingly so weight_data(0) receives the TOP WORD.
     gen_unpack_weights : for i in 0 to NUM_FILTERS-1 generate
         -- MSB-first ordering: top-most WORD corresponds to filter 0
         weight_data(i) <= weight_dout(WORD_SIZE*NUM_FILTERS-1 - i*WORD_SIZE downto WORD_SIZE*NUM_FILTERS - (i+1)*WORD_SIZE);

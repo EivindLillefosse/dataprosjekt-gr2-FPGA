@@ -51,33 +51,33 @@ entity calc_index is
 end calc_index;
 
 architecture Structural of calc_index is
-    constant NUM_POSITIONS : integer := INPUT_SIZE * INPUT_SIZE;  -- 25 spatial positions
+    constant NUM_POSITIONS                         : integer := INPUT_SIZE * INPUT_SIZE;  -- 25 spatial positions
     
-    signal position_counter : integer range 0 to NUM_POSITIONS-1 := 0;
-    attribute keep_pos_cnt : string;
-    attribute keep_pos_cnt of position_counter : signal is "true";
-    attribute syn_keep_pos_cnt : string;
+    signal position_counter                        : integer range 0 to NUM_POSITIONS-1 := 0;
+    attribute keep_pos_cnt                         : string;
+    attribute keep_pos_cnt of position_counter     : signal is "true";
+    attribute syn_keep_pos_cnt                     : string;
     attribute syn_keep_pos_cnt of position_counter : signal is "true";
-    signal channel_counter  : integer range 0 to INPUT_CHANNELS-1 := 0;
-    attribute keep_chan_cnt : string;
-    attribute keep_chan_cnt of channel_counter : signal is "true";
-    attribute syn_keep_chan_cnt : string;
+    signal channel_counter                         : integer range 0 to INPUT_CHANNELS-1 := 0;
+    attribute keep_chan_cnt                        : string;
+    attribute keep_chan_cnt of channel_counter     : signal is "true";
+    attribute syn_keep_chan_cnt                    : string;
     attribute syn_keep_chan_cnt of channel_counter : signal is "true";
-    signal internal_done    : std_logic := '0';
-    signal pool_data_captured : WORD_ARRAY_16(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
-    signal data_valid       : std_logic := '0';
-    signal last_chan        : std_logic := '0';
+    signal internal_done                           : std_logic := '0';
+    signal pool_data_captured                      : WORD_ARRAY_16(0 to INPUT_CHANNELS-1) := (others => (others => '0'));
+    signal data_valid                              : std_logic := '0';
+    signal last_chan                               : std_logic := '0';
     -- Registered outputs for request coordinates to preserve in synthesis
-    signal req_row_reg : integer := 0;
-    attribute keep_req_row_reg : string;
-    attribute keep_req_row_reg of req_row_reg : signal is "true";
-    attribute syn_keep_req_row_reg : string;
-    attribute syn_keep_req_row_reg of req_row_reg : signal is "true";
-    signal req_col_reg : integer := 0;
-    attribute keep_req_col_reg : string;
-    attribute keep_req_col_reg of req_col_reg : signal is "true";
-    attribute syn_keep_req_col_reg : string;
-    attribute syn_keep_req_col_reg of req_col_reg : signal is "true";
+    signal req_row_reg : integer                   := 0;
+    attribute keep_req_row_reg                     : string;
+    attribute keep_req_row_reg of req_row_reg      : signal is "true";
+    attribute syn_keep_req_row_reg                 : string;
+    attribute syn_keep_req_row_reg of req_row_reg  : signal is "true";
+    signal req_col_reg : integer                   := 0;
+    attribute keep_req_col_reg                     : string;
+    attribute keep_req_col_reg of req_col_reg      : signal is "true";
+    attribute syn_keep_req_col_reg                 : string;
+    attribute syn_keep_req_col_reg of req_col_reg  : signal is "true";
 begin
     
     -- Main state machine: request Pool2 position, capture 16 channels, send to FC1 sequentially
@@ -86,30 +86,30 @@ begin
         if rising_edge(clk) then
             if rst = '1' then
                 position_counter <= 0;
-                channel_counter <= 0;
-                internal_done <= '0';
-                data_valid <= '0';
+                channel_counter   <= 0;
+                internal_done    <= '0';
+                data_valid       <= '0';
                 pool_data_captured <= (others => (others => '0'));
-                last_chan <= '0';
-                req_row_reg <= 0;
-                req_col_reg <= 0;
+                last_chan        <= '0';
+                req_row_reg      <= 0;
+                req_col_reg      <= 0;
             elsif enable = '1' then
                 if internal_done = '1' then
                     -- Restart
-                    position_counter <= 0;
-                    channel_counter <= 0;
-                    internal_done <= '0';
-                    data_valid <= '0';
+                    position_counter   <= 0;
+                    channel_counter    <= 0;
+                    internal_done      <= '0';
+                    data_valid         <= '0';
                     pool_data_captured <= (others => (others => '0'));
-                    last_chan <= '0';
-                    req_row_reg <= 0;
-                    req_col_reg <= 0;
+                    last_chan          <= '0';
+                    req_row_reg        <= 0;
+                    req_col_reg        <= 0;
                 else
                     -- When Pool2 delivers data, capture it and start sending channels
                     if pool_pixel_valid = '1' and data_valid = '0' then
                         pool_data_captured <= pool_pixel_data;
-                        data_valid <= '1';
-                        channel_counter <= 0;
+                        data_valid         <= '1';
+                        channel_counter    <= 0;
                     end if;
                     
                     if channel_counter = INPUT_CHANNELS - 1 then 
@@ -148,7 +148,7 @@ begin
                 end if;
             elsif enable = '0' then
                 internal_done <= '0';
-                data_valid <= '0';
+                data_valid    <= '0';
             end if;
         end if;
     end process;
@@ -159,10 +159,6 @@ begin
     req_col     <= req_col_reg;
     req_valid   <= enable and not internal_done and not data_valid;  -- Only request when not processing channels
 
-    -- Update registered request coordinates incrementally together with position_counter
-    -- This avoids using division/mod operations which synthesize to library div/mod
-    -- and can generate poor QOR. We update row/col when position_counter increments.
-    
     -- Output current channel from captured data
     fc_pixel_out   <= pool_data_captured(channel_counter);
     fc_pixel_valid <= data_valid and enable and not internal_done;

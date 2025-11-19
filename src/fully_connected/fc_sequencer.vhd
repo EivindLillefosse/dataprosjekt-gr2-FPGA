@@ -61,29 +61,29 @@ begin
     begin
         if rising_edge(clk) then
             if rst = '1' then
-                curr_index <= 0;
-                output_valid <= '0';
-                streaming <= '0';
+                curr_index    <= 0;
+                output_valid  <= '0';
+                streaming     <= '0';
                 buffered_data <= (others => (others => '0'));
                 
             elsif input_valid = '1' and streaming = '0' then
                 -- Capture parallel input and start streaming
                 buffered_data <= input_data;
-                streaming <= '1';
-                output_valid <= '1';
-                curr_index <= 0;
+                streaming     <= '1';
+                output_valid  <= '1';
+                curr_index    <= 0;
                 
             elsif streaming = '1' and output_ready = '1' then
                 -- Consumer accepted current neuron, advance to next
                 if curr_index < NUM_NEURONS - 1 then
                     -- More neurons to send
-                    curr_index <= curr_index + 1;
-                    output_valid <= '1';  -- Keep valid high
+                    curr_index    <= curr_index + 1;
+                    output_valid  <= '1';  -- Keep valid high
                 else
                     -- Last neuron was just accepted, done streaming
-                    curr_index <= 0;
-                    output_valid <= '0';
-                    streaming <= '0';
+                    curr_index    <= 0;
+                    output_valid  <= '0';
+                    streaming     <= '0';
                 end if;
             end if;
         end if;

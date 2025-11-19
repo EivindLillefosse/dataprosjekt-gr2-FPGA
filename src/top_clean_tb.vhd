@@ -1,6 +1,5 @@
 ----------------------------------------------------------------------------------
 -- Company: NTNU
--- Engineer: Automated testbench generator
 --
 -- Create Date: 15.11.2025
 -- Module Name: top_clean_tb - Behavioral
