@@ -1,10 +1,3 @@
---------------------------------------------------------------------------------
--- PROJECT: SPI MASTER AND SLAVE FOR FPGA
---------------------------------------------------------------------------------
--- AUTHORS: Jakub Cabal <jakubcabal@gmail.com>
--- LICENSE: The MIT License, please read LICENSE file
--- WEBSITE: https://github.com/jakubcabal/spi-fpga
---------------------------------------------------------------------------------
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
@@ -158,7 +151,7 @@ begin
     
     -- The new input data is loaded into the shift register when the SPI slave
     -- is ready and input data are valid.
-    load_data_en <= slave_ready and DATA_IN_VALID;
+    load_data_en <= slave_ready;
 
     -- -------------------------------------------------------------------------
     --  DATA SHIFT REGISTER

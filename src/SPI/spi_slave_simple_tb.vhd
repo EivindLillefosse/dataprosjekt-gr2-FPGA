@@ -11,7 +11,7 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 use IEEE.MATH_REAL.ALL;
 
-entity SPI_SLAVE_TB is
+entity SPI_SLAVE_GOD_TB is
     Generic (
         CLK_FREQ      : natural := 50e6; -- system clock frequency in Hz
         SPI_FREQ      : natural := 1e6;  -- spi clock frequency in Hz
@@ -20,7 +20,7 @@ entity SPI_SLAVE_TB is
     );
 end entity;
 
-architecture SIM of SPI_SLAVE_TB is
+architecture SIM of SPI_SLAVE_GOD_TB is
 
     constant CLK_PERIOD : time := 1 ns * integer(real(1e9)/real(CLK_FREQ));
     constant SPI_PERIOD : time := 1 ns * integer(real(1e9)/real(SPI_FREQ));
