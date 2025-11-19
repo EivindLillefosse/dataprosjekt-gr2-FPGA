@@ -51,9 +51,10 @@ entity SPI_memory_controller is
              -- VGA port B interface (reads from busy buffer)
              vga_addr    : in  std_logic_vector(9 downto 0);
              vga_data    : out std_logic_vector(7 downto 0);
-             vga_frame_start : in std_logic  -- Pulse at start of each VGA frame
-         );
-end SPI_memory_controller;
+             vga_frame_start : in std_logic  
+
+            );
+        end SPI_memory_controller;
 
 
 architecture Behavioral of SPI_memory_controller is
@@ -64,13 +65,13 @@ architecture Behavioral of SPI_memory_controller is
         variable addr : unsigned(9 downto 0);
         variable temp : integer;
     begin
-        -- Calculate row * image_width + col manually to avoid resize issues
+      
         temp := (row * image_width) + col;
         addr := to_unsigned(temp, 10);
         return addr;
     end function;
 
-
+    -- BRAM component declaration
 
 COMPONENT BRAM_dual_port
   PORT (
@@ -100,7 +101,7 @@ END COMPONENT;
     type read_state_type is (READ_IDLE, WAIT_FOR_DATA, READ_ADDR, WAIT_ADDR_SETTLE, WAIT_BRAM, LOAD_DATA_OUT,  WAIT_AFTER_LOAD_DATA, MEMORY_UNBUSY);
     signal read_state : read_state_type := READ_IDLE;
 
-    -- bram A signals
+    -- Bram A signals
     signal bram_A_ena : std_logic := '0';
     signal bram_A_wea : std_logic_vector(0 downto 0) := (others => '0');
     signal bram_A_addra : std_logic_vector(9 downto 0) := (others => '0');
@@ -114,7 +115,7 @@ END COMPONENT;
     signal bram_A_dinb : std_logic_vector(7 downto 0) := (others => '0');
     signal bram_A_doutb : std_logic_vector(7 downto 0) := (others => '0');
 
-    -- bram B signals
+    -- Bram B signals
     signal bram_B_ena : std_logic := '0';
     signal bram_B_wea: std_logic_vector(0 downto 0) := (others => '0');
     signal bram_B_addra : std_logic_vector(9 downto 0) := (others => '0');
@@ -128,7 +129,7 @@ END COMPONENT;
     signal bram_B_dinb : std_logic_vector(7 downto 0) := (others => '0');
     signal bram_B_doutb : std_logic_vector(7 downto 0) := (others => '0');
 
-    -- bram C signals
+    -- Bram C signals
     signal bram_C_ena : std_logic := '0';
     signal bram_C_wea : std_logic_vector(0 downto 0) := (others => '0');
     signal bram_C_addra : std_logic_vector(9 downto 0) := (others => '0');
@@ -168,7 +169,7 @@ END COMPONENT;
     
     -- VGA interface signals
     signal vga_data_mux : std_logic_vector(7 downto 0);
-    signal vga_buffer_select : std_logic_vector(1 downto 0) := "00";  -- Latched at frame start: 00=A, 01=B, 10=C
+    signal vga_buffer_select : std_logic_vector(1 downto 0) := "00";            -- Latched at frame start: 00=A, 01=B, 10=C
     
     -- Dynamic buffer size calculation
     signal MAX_PIXELS    : unsigned(9 downto 0);
@@ -190,7 +191,7 @@ begin
     bram_A_enb <= '1';
     bram_B_enb <= '1';
     bram_C_enb <= '1';
-    bram_A_web <= "0";  -- Port B is read-only for VGA
+    bram_A_web <= "0";                                                          -- Port B is read-only for VGA
     bram_B_web <= "0";
     bram_C_web <= "0";
     
@@ -206,22 +207,19 @@ begin
     col_row_req_ready <= BRAM_A_last_written or BRAM_B_last_written or BRAM_C_last_written;
     
     -- Address multiplexers: prefer read address while the read FSM is active.
-    -- This avoids a race where a write enable and write address are asserted
-    -- in the same clock edge as a freshly calculated read address; in
-    -- post-synthesis the mux may select the write address and return the
-    -- wrong data. During read servicing states select the read address.
+
     bram_A_addra <= bram_A_addr_writea when (bram_A_wea = "1" and (read_state = READ_IDLE or read_state = WAIT_FOR_DATA)) else bram_A_addr_reada;
     bram_B_addra <= bram_B_addr_writea when (bram_B_wea = "1" and (read_state = READ_IDLE or read_state = WAIT_FOR_DATA)) else bram_B_addr_reada;
     bram_C_addra <= bram_C_addr_writea when (bram_C_wea = "1" and (read_state = READ_IDLE or read_state = WAIT_FOR_DATA)) else bram_C_addr_reada;
     
-    -- Latch which buffer VGA should read from at the start of each frame
-    -- This prevents tearing when buffers switch mid-frame
+  
     process(clk)
     begin
         if rising_edge(clk) then
             if rst = '1' then
                 vga_buffer_select <= "00";  -- Default to buffer A
             elsif vga_frame_start = '1' then
+
                 -- At frame start, select the last written buffer
                 if BRAM_A_last_written = '1' then
                     vga_buffer_select <= "00";
@@ -229,7 +227,7 @@ begin
                     vga_buffer_select <= "01";
                 elsif BRAM_C_last_written = '1' then
                     vga_buffer_select <= "10";
-                -- else keep previous selection if no buffer written yet
+                
                 end if;
             end if;
         end if;
@@ -268,9 +266,9 @@ begin
                         reset_in_progress <= '0';
                         
                     when RESET_CLEAR_A =>
-                        -- Clear BRAM A
+                       
                         if reset_addr < MAX_PIXELS then
-                            -- Don't assert write enable yet, let main process handle it
+                           
                             reset_addr <= reset_addr + 1;
                         else
                             reset_addr <= (others => '0');
@@ -278,7 +276,7 @@ begin
                         end if;
                         
                     when RESET_CLEAR_B =>
-                        -- Clear BRAM B
+                       
                         if reset_addr < MAX_PIXELS then
                             reset_addr <= reset_addr + 1;
                         else
@@ -287,7 +285,7 @@ begin
                         end if;
                         
                     when RESET_CLEAR_C =>
-                        -- Clear BRAM C
+                       
                         if reset_addr < MAX_PIXELS then
                             reset_addr <= reset_addr + 1;
                         else
@@ -305,6 +303,7 @@ begin
         end if;
     end process;
 
+  -- BRAM instantiations
   BRAM_A_inst : BRAM_dual_port
   PORT MAP (
     clka => clk,
@@ -414,11 +413,12 @@ begin
                 end case;
             else
                 -- Normal operation: handle SPI writes
-                data_in_ready <= not (BRAM_A_busy and BRAM_B_busy and BRAM_C_busy);
+                data_in_ready <= not (BRAM_A_busy and BRAM_B_busy and BRAM_C_busy);    --make sure one memory is ready
         
             -- FSM state switching
             case current_state is
                 when IDLE =>
+
                     -- On first data_in_valid, transition to WRITE_A and perform first write
                     if data_in_valid = '1' and data_in_ready = '1' then
                         current_state <= WRITE_A;
@@ -580,6 +580,9 @@ begin
         end if;
     end process control_process_ABC;
 
+    
+    -- Read process FSM
+    
     read_process: process(clk, rst)
     begin
 

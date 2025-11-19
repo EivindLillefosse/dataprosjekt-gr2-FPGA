@@ -73,6 +73,7 @@ end SPI_top;
 
 architecture Behavioral of SPI_top is
 
+  -- internal signals
 signal data_out_spi_in_memory : std_logic_vector(WORD_SIZE-1 downto 0) := (others => '0');
 signal valid_out_spi_in_memory : std_logic := '0';
 signal VGA_ADDR : std_logic_vector(9 downto 0);

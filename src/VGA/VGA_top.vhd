@@ -1,34 +1,17 @@
-----------------------------------------------------------------------------------
--- Company: Digilent
--- Engineer: Arthur Brown
--- 
---
--- Create Date:    13:01:51 02/15/2013 
--- Project Name:   pmodvga
--- Target Devices: arty
--- Tool versions:  2016.4
--- Additional Comments: 
---
--- Copyright Digilent 2017
-----------------------------------------------------------------------------------
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.std_logic_unsigned.all;
-use IEEE.NUMERIC_STD.ALL;  -- For to_unsigned function
+use IEEE.NUMERIC_STD.ALL;                                                  -- For to_unsigned function
 use work.types_pkg.all;
 
--- Uncomment the following library declaration if instantiating
--- any Xilinx primitives in this code.
---library UNISIM;
---use UNISIM.VComponents.all;
 
 entity vga_top is
     Generic (
         IMAGE_WIDTH  : natural := 28;
         IMAGE_HEIGHT : natural := 28
     );
-    Port ( CLK_I : in  STD_LOGIC;  -- 100 MHz system clock
-           RST : in STD_LOGIC;      -- Reset
+    Port ( CLK_I : in  STD_LOGIC;                                          -- 100 MHz system clock
+           RST : in STD_LOGIC;                                             -- Reset
            
            -- VGA outputs
            VGA_HS_O : out  STD_LOGIC;
@@ -38,11 +21,11 @@ entity vga_top is
            VGA_G : out  STD_LOGIC_VECTOR (3 downto 0);
            
            -- Interface to SPI Memory Controller (port B - reads from busy buffer)
-           spi_vga_addr : out STD_LOGIC_VECTOR (9 downto 0);  -- Address to SPI controller
-           spi_vga_data : in  STD_LOGIC_VECTOR (7 downto 0);  -- Data from SPI controller
-           vga_frame_start : out STD_LOGIC;  -- Pulse at start of each frame
+           spi_vga_addr : out STD_LOGIC_VECTOR (9 downto 0);              -- Address to SPI controller
+           spi_vga_data : in  STD_LOGIC_VECTOR (7 downto 0);              -- Data from SPI controller
+           vga_frame_start : out STD_LOGIC;                               -- Pulse at start of each frame
 
-           output_guess : in WORD  -- CNN output guess to display
+           output_guess : in WORD                                         -- CNN output guess to display
     );
 end vga_top;
 
@@ -51,48 +34,38 @@ architecture Behavioral of vga_top is
 component clk_wiz_0
 port
  (
-    clk_in1  : in  std_logic;           -- 100 MHz system clock
-    reset    : in  std_logic;           -- Active high reset
-    clk_out1 : out std_logic;           -- 25 MHz VGA pixel clock
-    locked   : out std_logic            -- Clock stable indicator (optional
+    clk_in1  : in  std_logic;                                             -- 100 MHz system clock
+    reset    : in  std_logic;                                             -- Active high reset
+    clk_out1 : out std_logic;                                             -- 25 MHz VGA pixel clock
+    locked   : out std_logic                                              -- Clock stable indicator (optional
  );
 end component;
 
 
---***640x480@60Hz***--  Requires 25 MHz clock
--- For synthesis with real VGA, use 640x480:
+
 constant FRAME_WIDTH : natural := 640;
 constant FRAME_HEIGHT : natural := 480;
-constant H_FP : natural := 16; --H front porch width (pixels)
-constant H_PW : natural := 96; --H sync pulse width (pixels)
-constant H_MAX : natural := 800; --H total period (pixels)
-constant V_FP : natural := 10; --V front porch width (lines)
-constant V_PW : natural := 2; --V sync pulse width (lines)
-constant V_MAX : natural := 525; --V total period (lines)
+constant H_FP : natural := 16;                                            --H front porch width (pixels)
+constant H_PW : natural := 96;                                            --H sync pulse width (pixels)
+constant H_MAX : natural := 800;                                          --H total period (pixels)
+constant V_FP : natural := 10;                                            --V front porch width (lines)
+constant V_PW : natural := 2;                                             --V sync pulse width (lines)
+constant V_MAX : natural := 525;                                          --V total period (lines)
 
--- For simulation testing with small images, use reduced frame size:
--- constant FRAME_WIDTH : natural := 16;
--- constant FRAME_HEIGHT : natural := 12;
--- constant H_FP : natural := 2;  -- Reduced for simulation
--- constant H_PW : natural := 2;  -- Reduced for simulation
--- constant H_MAX : natural := FRAME_WIDTH + H_FP + H_PW + 2; -- Total period
--- constant V_FP : natural := 1;  -- Reduced for simulation
--- constant V_PW : natural := 1;  -- Reduced for simulation
--- constant V_MAX : natural := FRAME_HEIGHT + V_FP + V_PW + 2; -- Total period
 
-constant H_POL : std_logic := '0';
-constant V_POL : std_logic := '0';
+constant H_POL : std_logic := '0';                                        --H sync polarity                 
+constant V_POL : std_logic := '0';                                        --V sync polarity      
 
 -- Image Display Constants (from generics)
 -- SCALE_X/Y calculated to fit image to screen
-constant SCALE_X : natural := FRAME_WIDTH / IMAGE_WIDTH;   -- Pixels per image pixel horizontally
-constant SCALE_Y : natural := FRAME_HEIGHT / IMAGE_HEIGHT; -- Pixels per image pixel vertically
-constant OFFSET_X : natural := (FRAME_WIDTH - IMAGE_WIDTH * SCALE_X) / 2;   -- Center horizontally
-constant OFFSET_Y : natural := (FRAME_HEIGHT - IMAGE_HEIGHT * SCALE_Y) / 2; -- Center vertically
+constant SCALE_X : natural := FRAME_WIDTH / IMAGE_WIDTH;                   -- Pixels per image pixel horizontally
+constant SCALE_Y : natural := FRAME_HEIGHT / IMAGE_HEIGHT;                 -- Pixels per image pixel vertically
+constant OFFSET_X : natural := (FRAME_WIDTH - IMAGE_WIDTH * SCALE_X) / 2;  -- Center horizontally
+constant OFFSET_Y : natural := (FRAME_HEIGHT - IMAGE_HEIGHT * SCALE_Y) / 2;-- Center vertically
 
 signal pxl_clk : std_logic;
 signal clk_locked : std_logic;
-signal pxl_clk_rst : std_logic;  -- Gated reset for pixel clock domain
+signal pxl_clk_rst : std_logic;                                           -- Gated reset for pixel clock domain
 signal active : std_logic;
 
 signal h_cntr_reg : std_logic_vector(11 downto 0) := (others =>'0');
@@ -112,26 +85,6 @@ signal vga_red : std_logic_vector(3 downto 0);
 signal vga_green : std_logic_vector(3 downto 0);
 signal vga_blue : std_logic_vector(3 downto 0);
 
--- RGB mapping function: returns 12-bit RGB (R[11:8], G[7:4], B[3:0])
-function map_rgb(output_guess_in : in WORD; gray_in : in std_logic_vector(7 downto 0)) return std_logic_vector is
-  variable rgb12 : std_logic_vector(11 downto 0) := (others => '0');
-  variable g4 : std_logic_vector(3 downto 0) := gray_in(7 downto 4);
-  variable idx : integer := to_integer(unsigned(output_guess_in));
-begin
-  case idx is
-    when 8 =>
-      -- Yellow scale: R and G follow grayscale, B = 0
-      rgb12(11 downto 8) := g4; -- R
-      rgb12(7 downto 4)  := g4; -- G
-      rgb12(3 downto 0)  := (others => '0'); -- B
-    when others =>
-      -- Default: greyscale on all channels
-      rgb12(11 downto 8) := g4; -- R
-      rgb12(7 downto 4)  := g4; -- G
-      rgb12(3 downto 0)  := g4; -- B
-  end case;
-  return rgb12;
-end function;
 
 signal rgb12_sig : std_logic_vector(11 downto 0) := (others => '0');
 
@@ -150,12 +103,7 @@ signal active_d2 : std_logic := '0';
 
 begin
   
-  -- For simulation: bypass clock wizard and use system clock directly
-  -- Comment out these direct assignments for synthesis:
-  -- pxl_clk <= CLK_I;
-  -- clk_locked <= not RST;  -- Locked when not in reset
-  
-  -- For synthesis (uncomment for real hardware):
+  -- Clock Wizard Instance
   clk_div_inst : clk_wiz_0
     port map
      (-- Clock in ports
@@ -172,10 +120,6 @@ begin
   -------    28x28 IMAGE DISPLAY LOGIC         -------
   ----------------------------------------------------
   
-  -- Memory address output to SPI controller: simple linear address from scaled coordinates
-  -- Address = row * width + column
-  -- Note: This crosses clock domains (pxl_clk -> system clk) but it's safe because
-  -- addresses change slowly and SPI controller's dual-port BRAM is asynchronous read
   process(pxl_clk)
   begin
     if rising_edge(pxl_clk) then
@@ -192,19 +136,19 @@ begin
   process(pxl_clk)
   begin
     if rising_edge(pxl_clk) then
-      -- Stage 1: Delay control signals
-      pixel_in_image_d1 <= pixel_in_image;
+      
+      pixel_in_image_d1 <= pixel_in_image;                          -- Stage 1: Delay control signals
       active_d1 <= active;
       
-      -- Stage 2: Delay again to match BRAM output
-      pixel_in_image_d2 <= pixel_in_image_d1;
+      
+      pixel_in_image_d2 <= pixel_in_image_d1;                       -- Stage 2: Delay again to match BRAM output
       active_d2 <= active_d1;
     end if;
   end process;
   
-  -- Convert 8-bit grayscale to 4-bit (take upper 4 bits)
-  -- Now spi_vga_data has had 2 cycles to arrive from BRAM
-  grayscale_pixel <= spi_vga_data(7 downto 4);
+
+
+  grayscale_pixel <= spi_vga_data(7 downto 4);                        -- Convert 8-bit grayscale to 4-bit (take upper 4 bits)            
   
   -- Calculate which pixel of the 28x28 image we're displaying
   -- Divide screen position by scale factors to get image pixel coordinates
@@ -229,14 +173,11 @@ begin
     end if;
   end process;
   
-  -- Generate memory address from scaled coordinates
-  -- Address = row * width + column
-  -- Map pixel to RGB using `map_rgb` and delayed control signals that match the BRAM data pipeline
-  rgb12_sig <= map_rgb(output_guess, spi_vga_data) when (active_d2 = '1' and pixel_in_image_d2 = '1') else (others => '0');
 
-  vga_red   <= rgb12_sig(11 downto 8);
-  vga_green <= rgb12_sig(7 downto 4);
-  vga_blue  <= rgb12_sig(3 downto 0);
+
+  vga_red   <= grayscale_pixel when (active_d2 = '1' and pixel_in_image_d2 = '1') else (others => '0');
+  vga_green <= grayscale_pixel when (active_d2 = '1' and pixel_in_image_d2 = '1') else (others => '0');
+  vga_blue  <= grayscale_pixel when (active_d2 = '1' and pixel_in_image_d2 = '1') else (others => '0');
   
   
  ------------------------------------------------------
